@@ -88,22 +88,33 @@ class TelegramBot:
             
             # Команды администратора (добавляются только если пользователь авторизован)
             commands.extend([
+                BotCommand(command="/profile", description="🏠 Профиль Playerok"),
                 BotCommand(command="/restart", description="🔄 Перезагрузить бота"),
                 BotCommand(command="/power_off", description="⚡ Выключить бота"),
                 BotCommand(command="/logs", description="📜 Показать логи"),
                 BotCommand(command="/error", description="🛑 Показать последнюю ошибку"),
                 BotCommand(command="/watermark", description="©️ Водяной знак"),
-                BotCommand(command="/profile", description="🏠 Профиль Playerok"),
+                BotCommand(command="/fingerprint", description="🧑‍💻 Фингерпринт устройства"),
+
             ])
             
             # Добавляем команды из плагинов
             for plugin in get_plugins():
                 if hasattr(plugin, 'bot_commands') and plugin.bot_commands:
                     try:
-                        if isinstance(plugin.bot_commands, list):
-                            commands.extend(plugin.bot_commands)
-                        elif callable(plugin.bot_commands):
-                            commands.extend(plugin.bot_commands())
+                        plugin_cmds = plugin.bot_commands
+                        if callable(plugin_cmds):
+                            plugin_cmds = plugin_cmds()
+                        
+                        for cmd in plugin_cmds:
+                            # Конвертируем tuple/list в BotCommand
+                            if isinstance(cmd, (tuple, list)) and len(cmd) >= 2:
+                                commands.append(BotCommand(
+                                    command=f"/{cmd[0]}" if not cmd[0].startswith('/') else cmd[0],
+                                    description=cmd[1]
+                                ))
+                            elif isinstance(cmd, BotCommand):
+                                commands.append(cmd)
                     except Exception as e:
                         logger.error(f"Ошибка получения команд из плагина {plugin.meta.name}: {e}")
             

@@ -139,26 +139,86 @@ async def handler_power_off(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Произошла ошибка при выключении: {str(e)}")
 
 
-# хуйня этот релоад!
-# @router.callback_query(F.data == "reload_plugin")
-# async def callback_reload_plugin(callback: CallbackQuery, state: FSMContext):
-#     from core.plugins import reload_plugin
-#     try:
-#         await state.set_state(None)
-#         data = await state.get_data()
-#         last_page = data.get("last_page", 0)
-#         plugin_uuid = data.get("plugin_uuid")
-#         if not plugin_uuid:
-#             raise Exception("❌ UUID плагина не был найден, повторите процесс с самого начала")
+@router.message(Command("fingerprint"))
+async def handler_fingerprint(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /fingerprint
+    Генерирует HWID для привязки лицензии к железу
+    
+    ВАЖНО: Алгоритм должен совпадать с protection.py!
+    HWID = SHA256(MAC|CPU_ID|MB_SERIAL|DISK_SERIAL)
+    """
+    config = sett.get("config")
+    
+    # Проверяем авторизацию
+    if message.from_user.id not in config["telegram"]["bot"].get("signed_users", []):
+        return await do_auth(message, state)
+    
+    try:
+        import hashlib
+        import subprocess
+        import uuid
+        import sys
         
-#         await reload_plugin(plugin_uuid)
-#         return await callback_plugin_page(callback, calls.PluginPage(uuid=plugin_uuid), state)
-#     except Exception as e:
-#         data = await state.get_data()
-#         last_page = data.get("last_page", 0)
-#         await throw_float_message(
-#             state=state, 
-#             message=callback.message, 
-#             text=templ.plugin_page_float_text(e), 
-#             reply_markup=templ.back_kb(calls.PluginsPagination(page=last_page).pack())
-#         )
+        # Собираем аппаратные компоненты (КАК В PROTECTION.PY!)
+        components = []
+        
+        # 1. MAC address
+        components.append(hex(uuid.getnode()))
+        
+        # 2. CPU ID (Windows only)
+        try:
+            if sys.platform == "win32":
+                result = subprocess.check_output('wmic cpu get processorid', 
+                                                shell=True, stderr=subprocess.DEVNULL)
+                cpu_id = result.decode().split("\n")[1].strip()
+                if cpu_id:
+                    components.append(cpu_id)
+        except Exception:
+            pass
+        
+        # 3. Motherboard serial (Windows only)
+        try:
+            if sys.platform == "win32":
+                result = subprocess.check_output('wmic baseboard get serialnumber',
+                                                shell=True, stderr=subprocess.DEVNULL)
+                mb_serial = result.decode().split("\n")[1].strip()
+                if mb_serial:
+                    components.append(mb_serial)
+        except Exception:
+            pass
+        
+        # 4. Disk serial (Windows only)
+        try:
+            if sys.platform == "win32":
+                result = subprocess.check_output('wmic diskdrive get serialnumber',
+                                                shell=True, stderr=subprocess.DEVNULL)
+                disk_serial = result.decode().split("\n")[1].strip()
+                if disk_serial:
+                    components.append(disk_serial)
+        except Exception:
+            pass
+        
+        # Генерируем HWID (КАК В PROTECTION.PY!)
+        # ПОЛНЫЙ SHA256 хеш, первые 32 символа для отображения
+        hwid_raw = '|'.join(components)
+        hwid_full = hashlib.sha256(hwid_raw.encode()).hexdigest()
+        
+        # Для покупки используем полный хеш (64 символа)
+        # Но показываем первые 32 в формате XXXX-XXXX-...
+        fingerprint = hwid_full[:32].upper()
+        formatted = "-".join([fingerprint[i:i+4] for i in range(0, 32, 4)])
+        
+        await message.answer(
+            f"🦭 <b>Твой Hardware Fingerprint</b>\n\n"
+            f"<code>{formatted}</code>\n\n"
+            f"📋 <i>Скопируй и отправь при покупке плагина.</i>\n"
+            f"🔒 <i>Плагин будет привязан к этому железу!</i>\n\n"
+            f"<b>Компоненты:</b>\n"
+            f"• MAC: <code>{components[0][:16]}...</code>\n"
+            f"• CPU/MB/Disk: {len(components)-1} компонент(ов)",
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при генерации fingerprint: {str(e)}")

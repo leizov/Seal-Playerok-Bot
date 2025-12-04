@@ -1,3 +1,138 @@
+# ===========================================================================
+# Fix Windows console encoding for Unicode support
+# ===========================================================================
+import sys
+import os
+
+# Force UTF-8 encoding on Windows
+if sys.platform == 'win32':
+    os.system('chcp 65001 >nul 2>&1')
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# ===========================================================================
+# STRICT PYTHON VERSION CHECK
+# ===========================================================================
+# 
+# IMPORTANT: Compiled plugins (.pyd/.so) work ONLY on the Python version
+# they were compiled on!
+#
+# Example: plugin.cpython-312-win_amd64.pyd → only Python 3.12 + Windows
+#
+# We compile on Python 3.12, so users MUST have Python 3.12!
+# ===========================================================================
+
+# ТОЧНАЯ версия Python для совместимости с плагинами
+REQUIRED_PYTHON_MAJOR = 3
+REQUIRED_PYTHON_MINOR = 12  # Плагины скомпилированы на 3.12
+
+current_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+required_version = f"{REQUIRED_PYTHON_MAJOR}.{REQUIRED_PYTHON_MINOR}"
+
+if sys.version_info.major != REQUIRED_PYTHON_MAJOR or sys.version_info.minor != REQUIRED_PYTHON_MINOR:
+    print("\n" + "=" * 60)
+    print("ERROR: INCOMPATIBLE PYTHON VERSION!")
+    print("=" * 60)
+    print(f"\n   Current version:   Python {current_version}")
+    print(f"   Required version:  Python {required_version}.x")
+    print(f"\n   Compiled plugins (.pyd) work ONLY")
+    print(f"   on the Python version they were built with.")
+    print(f"\n   Download Python {required_version}:")
+    print(f"   https://www.python.org/downloads/release/python-3120/")
+    print("\n" + "=" * 60)
+    sys.exit(1)
+
+print(f"[OK] Python {current_version} - version compatible with plugins")
+
+# ═══════════════════════════════════════════════════════════════════════
+# ПРОВЕРКА КОДА АКТИВАЦИИ
+# ═══════════════════════════════════════════════════════════════════════
+# Код: 8 символов, 2-й = R или B, последний = 7 или 4
+# Получить код: @SealPlayerokBot команда /code (нужна подписка на канал)
+
+import json
+import string as str_module
+
+def validate_activation_code(code: str) -> bool:
+    """Проверяет код активации по паттерну"""
+    if not code or len(code) != 8:
+        return False
+    code = code.upper()
+    if code[1] not in ['R', 'B']:
+        return False
+    if code[7] not in ['7', '4']:
+        return False
+    for c in code:
+        if c not in str_module.ascii_uppercase + str_module.digits:
+            return False
+    return True
+
+
+def check_activation_code():
+    """Проверяет код активации при первом запуске"""
+    config_path = "bot_settings/config.json"
+    
+    # Проверяем существует ли конфиг
+    if not os.path.exists(config_path):
+        os.makedirs("bot_settings", exist_ok=True)
+        # Конфиг создастся позже, но код нужен сейчас
+        saved_code = ""
+    else:
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            saved_code = config.get("activation_code", "")
+        except:
+            saved_code = ""
+    
+    # Если код уже есть и валиден — пропускаем
+    if validate_activation_code(saved_code):
+        return True
+    
+    # Запрашиваем код
+    print("\n" + "=" * 60)
+    print("🦭 АКТИВАЦИЯ SEALPLAYEROK BOT")
+    print("=" * 60)
+    print("\nДля использования бота нужен код активации.")
+    print("\n📋 Как получить код:")
+    print("   1. Напиши боту @SealPlayerokBot")
+    print("   2. Подпишись на канал")
+    print("   3. Введи команду /code")
+    print("   4. Скопируй полученный код")
+    print("\n" + "=" * 60)
+    
+    while True:
+        code = input("\n🔑 Введи код активации: ").strip().upper()
+        
+        if validate_activation_code(code):
+            # Сохраняем код в конфиг
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                except:
+                    config = {}
+            else:
+                config = {}
+            
+            config["activation_code"] = code
+            
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+            
+            print("\n✅ Код принят! Бот активирован.")
+            print("🐚 Добро пожаловать в SealPlayerok Bot!\n")
+            return True
+        else:
+            print("❌ Неверный код! Попробуй ещё раз.")
+            print("   Код должен быть 8 символов.")
+
+
+# Проверяем код при запуске
+check_activation_code()
+
+# ═══════════════════════════════════════════════════════════════════════
+
 import asyncio
 import re
 import string

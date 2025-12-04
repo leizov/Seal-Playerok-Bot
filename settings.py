@@ -11,12 +11,12 @@ class SettingsFile:
     need_restore: bool
     default: list | dict
 
-
 CONFIG = SettingsFile(
     name="config",
     path="bot_settings/config.json",
     need_restore=True,
     default={
+        "activation_code": "",  # Код активации из бота @SealPlayerokBot
         "playerok": {
             "api": {
                 "token": "",
