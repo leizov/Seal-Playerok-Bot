@@ -287,16 +287,3 @@ async def start_announcements_loop(tg_bot: TelegramBot):
     asyncio.create_task(announcements_loop(tg_bot))
 
 
-# ============================================
-# Формат файла announcement.json на GitHub Gist:
-# ============================================
-# {
-#     "tag": "unique-tag-123",
-#     "text": "📢 <b>Важное объявление!</b>\n\nТекст сообщения с HTML разметкой.",
-#     "photo": "https://example.com/image.jpg",
-#     "pin": false,
-#     "buttons": [
-#         {"text": "🔗 Перейти", "url": "https://example.com"}
-#     ]
-# }
-# ============================================

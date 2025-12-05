@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import BotCommand, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError, TelegramForbiddenError, TelegramAPIError
 
-from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY
+from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY, TELEGRAM_CHANNEL, TELEGRAM_CHAT, TELEGRAM_BOT
 from settings import Settings as sett
 from core.plugins import get_plugins
 from core.handlers import call_bot_event
@@ -129,27 +129,38 @@ class TelegramBot:
         await self._update_bot_commands()
 
     async def _set_short_description(self):
+        """Устанавливает короткое описание бота (отображается в профиле, лимит 120 символов)"""
         try:
-            short_description = textwrap.dedent(f"""
-                🦭 Seal Playerok Bot — Милый помощник для Playerok 🌊
-            """)
+            short_description = "🦭 Канал: t.me/SealPlayerok | Чат: t.me/SealPlayerokChat | Бот: t.me/SealPlayerokBot"
             await self.bot.set_my_short_description(short_description=short_description)
         except:
             pass
 
     async def _set_description(self):
+        """Устанавливает полное описание бота с ссылками"""
         try:
-            description = textwrap.dedent(f"""
-                🦭 Seal Playerok Bot — Милый бот-помощник для Playerok 🌊
-                                        
-                🌊 Вечный онлайн
-                ♻️ Авто-восстановление товаров
-                📦 Авто-выдача
-                🕹️ Команды
-                💬 Вызов продавца в чат
+            description = textwrap.dedent("""
+🦭 SealPlayerokBot v{VERSION}
 
-                🦭 Присоединяйтесь к миру милых тюленей!
-            """)
+Бот-помощник для автоматизации работы с маркетплейсом Playerok.com
+
+✨ Возможности:
+• Вечный онлайн
+• Авто-восстановление товаров
+• Авто-выдача
+• Авто-ответ
+• Уведомления о сделках
+• Вызов продавца в чат
+• И многое другое
+
+🔗 Ссылки:
+• Канал: t.me/SealPlayerok
+• Чат: t.me/SealPlayerokChat
+• Бот: t.me/SealPlayerokBot
+• GitHub: github.com/leizov/Seal-Playerok-Bot
+
+🦭 Разработчик: {DEVELOPER}
+            """).strip()
             await self.bot.set_my_description(description=description)
         except:
             pass

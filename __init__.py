@@ -1,10 +1,15 @@
 from colorama import Fore
 
 # Seal Playerok Bot - Морской стиль с тюленями 🦭
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 DEVELOPER = "@leizov"
 REPOSITORY = "https://github.com/leizov/Seal-Playerok-Bot"
 SKIP_UPDATES = False
+
+# Ссылки для описания бота
+TELEGRAM_CHANNEL = "https://t.me/SealPlayerok"
+TELEGRAM_CHAT = "https://t.me/SealPlayerokChat"
+TELEGRAM_BOT = "https://t.me/SealPlayerokBot"
 
 # Морская цветовая палитра
 ACCENT_COLOR = Fore.LIGHTCYAN_EX  # Светло-голубой (морская вода)

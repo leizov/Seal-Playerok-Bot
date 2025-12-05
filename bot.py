@@ -1,25 +1,25 @@
 # ===========================================================================
-# Fix Windows console encoding for Unicode support
+# Исправление кодировки консоли Windows для поддержки Unicode
 # ===========================================================================
 import sys
 import os
 
-# Force UTF-8 encoding on Windows
+# Принудительная UTF-8 кодировка на Windows
 if sys.platform == 'win32':
     os.system('chcp 65001 >nul 2>&1')
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ===========================================================================
-# STRICT PYTHON VERSION CHECK
+# СТРОГАЯ ПРОВЕРКА ВЕРСИИ PYTHON
 # ===========================================================================
 # 
-# IMPORTANT: Compiled plugins (.pyd/.so) work ONLY on the Python version
-# they were compiled on!
+# ВАЖНО: Скомпилированные плагины (.pyd/.so) работают ТОЛЬКО на той версии
+# Python, на которой были скомпилированы!
 #
-# Example: plugin.cpython-312-win_amd64.pyd → only Python 3.12 + Windows
+# Пример: plugin.cpython-312-win_amd64.pyd → только Python 3.12 + Windows
 #
-# We compile on Python 3.12, so users MUST have Python 3.12!
+# Мы компилируем на Python 3.12, поэтому пользователям НУЖЕН Python 3.12!
 # ===========================================================================
 
 # ТОЧНАЯ версия Python для совместимости с плагинами
@@ -31,18 +31,18 @@ required_version = f"{REQUIRED_PYTHON_MAJOR}.{REQUIRED_PYTHON_MINOR}"
 
 if sys.version_info.major != REQUIRED_PYTHON_MAJOR or sys.version_info.minor != REQUIRED_PYTHON_MINOR:
     print("\n" + "=" * 60)
-    print("ERROR: INCOMPATIBLE PYTHON VERSION!")
+    print("ОШИБКА: НЕСОВМЕСТИМАЯ ВЕРСИЯ PYTHON!")
     print("=" * 60)
-    print(f"\n   Current version:   Python {current_version}")
-    print(f"   Required version:  Python {required_version}.x")
-    print(f"\n   Compiled plugins (.pyd) work ONLY")
-    print(f"   on the Python version they were built with.")
-    print(f"\n   Download Python {required_version}:")
+    print(f"\n   Текущая версия:   Python {current_version}")
+    print(f"   Требуемая версия: Python {required_version}.x")
+    print(f"\n   Скомпилированные плагины (.pyd) работают ТОЛЬКО")
+    print(f"   на той версии Python, на которой были собраны.")
+    print(f"\n   Скачать Python {required_version}:")
     print(f"   https://www.python.org/downloads/release/python-3120/")
     print("\n" + "=" * 60)
     sys.exit(1)
 
-print(f"[OK] Python {current_version} - version compatible with plugins")
+print(f"[OK] Python {current_version} - версия совместима с плагинами")
 
 # ═══════════════════════════════════════════════════════════════════════
 # ПРОВЕРКА КОДА АКТИВАЦИИ
@@ -91,12 +91,12 @@ def check_activation_code():
     
     # Запрашиваем код
     print("\n" + "=" * 60)
-    print("🦭 АКТИВАЦИЯ SEALPLAYEROK BOT")
+    print("🦭 АКТИВАЦИЯ SEAL PLAYEROK BOT")
     print("=" * 60)
     print("\nДля использования бота нужен код активации.")
     print("\n📋 Как получить код:")
-    print("   1. Напиши боту @SealPlayerokBot")
-    print("   2. Подпишись на канал")
+    print("   1. Подпишись на канал @SealPlayerok")
+    print("   2. Напиши боту @SealPlayerokBot")
     print("   3. Введи команду /code")
     print("   4. Скопируй полученный код")
     print("\n" + "=" * 60)
@@ -613,7 +613,17 @@ if __name__ == "__main__":
 {Fore.LIGHTCYAN_EX}   ╚═════════════════════════════════════════════════════════════════════════════╝
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～{Fore.RESET}
 """)
-        # check_for_updates()
+        # Информация о проекте
+        print(f"""
+{Fore.CYAN}   ┌──────────────────────────────────────────────────────────────────────────────
+   │  {Fore.LIGHTWHITE_EX}📢 Канал:{Fore.WHITE}  https://t.me/SealPlayerok                                       {Fore.CYAN}
+   │  {Fore.LIGHTWHITE_EX}💬 Чат:{Fore.WHITE}    https://t.me/SealPlayerokChat                                   {Fore.CYAN}
+   │  {Fore.LIGHTWHITE_EX}🤖 Бот:{Fore.WHITE}    https://t.me/SealPlayerokBot                                    {Fore.CYAN}
+   │  {Fore.LIGHTWHITE_EX}📦 GitHub:{Fore.WHITE} https://github.com/leizov/Seal-Playerok-Bot                     {Fore.CYAN}
+   │  {Fore.LIGHTWHITE_EX}👨‍💻 Автор:{Fore.WHITE}  @leizov                                                         {Fore.CYAN}
+   └──────────────────────────────────────────────────────────────────────────────{Fore.RESET}
+""")
+        check_for_updates()
         check_and_configure_config()
         
         # Загружаем плагины
@@ -649,8 +659,8 @@ if __name__ == "__main__":
         traceback.print_exc()
         print(
             f"\n{Fore.LIGHTRED_EX}Ваш бот словил непредвиденную ошибку и был выключен."
-            f"\n\n{Fore.WHITE}Пожалуйста, попробуйте найти свою проблему в нашей статье, в которой собраны все самые частые ошибки.",
-            f"\nСтатья: {Fore.LIGHTWHITE_EX}https://telegra.ph/FunPay-Universal--chastye-oshibki-i-ih-resheniya-08-26 {Fore.WHITE}(CTRL + Клик ЛКМ)\n"
+            f"\n\n{Fore.WHITE}Можете обратиться в наш чат за помощью.",
+            f"Чат: {Fore.LIGHTWHITE_EX}https://t.me/SealPlayerokChat {Fore.WHITE}(CTRL + Клик ЛКМ)\n"
         )
         raise SystemExit(1)  # Выход с ошибкой (код 1)
     

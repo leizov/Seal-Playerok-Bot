@@ -6,7 +6,7 @@
 > 
 > | 📢 **Канал** | 💬 **Чат поддержки** |
 > |:------------:|:--------------------:|
-> | [@seal_playerok](https://t.me/seal_playerok) | [@seal_playerok_chat](https://t.me/seal_playerok_chat) |
+> | [@SealPlayerok](https://t.me/SealPlayerok) | [@SealPlayerokChat](https://t.me/SealPlayerokChat) |
 > 
 > *Новости, обновления, помощь и общение!*
 
@@ -109,8 +109,8 @@ wget -qO- https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/instal
 ## 📞 Контакты
 
 - **Разработчик:** [@leizov](https://t.me/leizov)
-- **Канал:** [@seal_playerok](https://t.me/seal_playerok)
-- **Чат:** [@seal_playerok_chat](https://t.me/seal_playerok_chat)
+- **Канал:** [@SealPlayerok](https://t.me/SealPlayerok)
+- **Чат:** [@SealPlayerokChat](https://t.me/SealPlayerokChat)
 - **GitHub:** [Seal-Playerok-Bot](https://github.com/leizov/Seal-Playerok-Bot)
 
 ---

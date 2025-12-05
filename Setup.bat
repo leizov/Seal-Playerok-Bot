@@ -164,4 +164,12 @@ echo   ║   Удачи! Пусть тюленчик принесёт тебе �
 echo   ║                                                                   ║
 echo   🦭✨ ═══════════════════════════════════════════════════════════ ✨🦭
 echo.
+echo   ┌────────────────────────────────────────────────────────────────┐
+echo   │  📢 Канал:  @SealPlayerok       https://t.me/SealPlayerok      │
+echo   │  💬 Чат:    @SealPlayerokChat   https://t.me/SealPlayerokChat  │
+echo   │  🤖 Бот:    @SealPlayerokBot    https://t.me/SealPlayerokBot   │
+echo   │  📦 GitHub: github.com/leizov/Seal-Playerok-Bot                │
+echo   │  👨‍💻 Автор:  @leizov                                            │
+echo   └────────────────────────────────────────────────────────────────┘
+echo.
 pause
