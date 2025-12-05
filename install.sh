@@ -3,9 +3,9 @@
 # 🦭 SealPlayerok Bot - Установщик для Ubuntu/Linux
 # ═══════════════════════════════════════════════════════════════════════════════
 # Использование (запускать от root!):
-#   curl -sSL https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh | sudo bash
+#   wget https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh && sudo bash install.sh
 #   или
-#   wget -qO- https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh | sudo bash
+#   curl -O https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh && sudo bash install.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -e
@@ -55,7 +55,7 @@ show_banner() {
     cat << 'EOF'
     ╔═══════════════════════════════════════════════════════════╗
     ║                                                           ║
-    ║    🦭  SealPlayerok Bot - Installer for Ubuntu/Linux 🦭    ║
+    ║    🦭  SealPlayerok Bot - Installer for Ubuntu/Linux 🦭     ║
     ║                                                           ║
     ║              Милый бот-помощник для Playerok              ║
     ║                                                           ║
@@ -85,17 +85,9 @@ ask_username() {
     log_info "Это безопаснее и правильнее для продакшена."
     echo ""
     
-    # Открываем /dev/tty для интерактивного ввода (работает даже при pipe)
-    exec 3</dev/tty 2>/dev/null || {
-        # Если tty недоступен, используем значение по умолчанию
-        BOT_USERNAME="sealbot"
-        log_warning "Интерактивный ввод недоступен, используем имя по умолчанию: ${BOT_USERNAME}"
-        return 0
-    }
-    
     echo -ne "${CYAN}Введи имя пользователя для бота (например: sealbot, seal, playerok): ${NC}"
     while true; do
-        read -u 3 BOT_USERNAME
+        read BOT_USERNAME
         
         # Если пустое - используем значение по умолчанию
         if [[ -z "$BOT_USERNAME" ]]; then
@@ -116,8 +108,6 @@ ask_username() {
             echo -ne "\n${RED}Недопустимые символы! ${CYAN}Имя должно начинаться с буквы и содержать только буквы, цифры, '_' или '-': ${NC}"
         fi
     done
-    
-    exec 3<&-
     
     INSTALL_DIR="/home/${BOT_USERNAME}/SealPlayerokBot"
     log_success "Имя пользователя: ${BOT_USERNAME}"
@@ -500,23 +490,15 @@ first_run_setup() {
     log_warning "После настройки нажми Ctrl+C для выхода!"
     echo ""
     
-    # Ждём нажатия Enter (работает и при pipe)
-    if exec 3</dev/tty 2>/dev/null; then
-        echo -ne "${CYAN}Нажми Enter чтобы начать настройку...${NC}"
-        read -u 3 -r
-        exec 3<&-
-    else
-        log_info "Запуск настройки через 5 секунд..."
-        sleep 5
-    fi
+    echo -ne "${CYAN}Нажми Enter чтобы начать настройку...${NC}"
+    read -r
     
     echo ""
     log_info "Запуск бота от имени пользователя ${BOT_USERNAME}..."
     echo ""
     
-    # КЛЮЧЕВОЙ МОМЕНТ: используем </dev/tty для интерактивного ввода
-    # Это позволяет боту получать ввод с клавиатуры даже при запуске через pipe
-    sudo -u "$BOT_USERNAME" LANG=en_US.UTF-8 "${VENV_DIR}/bin/python" "${INSTALL_DIR}/bot.py" </dev/tty || true
+    # Запускаем бота для интерактивной настройки
+    sudo -u "$BOT_USERNAME" LANG=en_US.UTF-8 "${VENV_DIR}/bin/python" "${INSTALL_DIR}/bot.py" || true
     
     echo ""
     log_success "Первичная настройка завершена!"
