@@ -19,6 +19,81 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Надёжный apt update с ретраями
+apt_update_retry() {
+    local tries=3
+    local delay=3
+    local i
+    for i in $(seq 1 "$tries"); do
+        log_info "apt update (попытка ${i}/${tries})..."
+        if apt update -y; then
+            return 0
+        fi
+        log_warning "apt update неуспешен, ждём ${delay} сек и пробуем снова..."
+        sleep "$delay"
+    done
+    return 1
+}
+
+# Установка Python через pyenv (фолбэк, если пакеты недоступны), системно в /opt/pyenv
+install_python_pyenv() {
+    local PYENV_VERSION="${1:-3.12.7}"  # точная версия для сборки
+    log_warning "Устанавливаем Python ${PYENV_VERSION} через pyenv (системная установка)..."
+
+    # 1. Зависимости для сборки
+    apt update && apt install -y make build-essential libssl-dev zlib1g-dev \
+        libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
+        libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+        libffi-dev liblzma-dev || {
+        log_error "Не удалось установить зависимости для pyenv"
+        return 1
+    }
+
+    # 2. Системная установка pyenv в /opt/pyenv
+    export PYENV_ROOT="/opt/pyenv"
+    if [ ! -d "$PYENV_ROOT" ]; then
+        curl https://pyenv.run | PYENV_ROOT="$PYENV_ROOT" bash || {
+            log_error "Не удалось установить pyenv"
+            return 1
+        }
+        chmod -R 755 "$PYENV_ROOT"
+    fi
+
+    # 3. Добавляем в системный профиль
+    cat > /etc/profile.d/pyenv.sh << 'EOF'
+export PYENV_ROOT="/opt/pyenv"
+export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init --path)"
+eval "$(pyenv init -)"
+EOF
+    chmod +x /etc/profile.d/pyenv.sh
+
+    # 4. Активируем в текущей сессии
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$($PYENV_ROOT/bin/pyenv init --path)"
+    eval "$($PYENV_ROOT/bin/pyenv init -)"
+
+    # 5. Устанавливаем Python
+    if ! "$PYENV_ROOT/bin/pyenv" versions | grep -q "$PYENV_VERSION"; then
+        "$PYENV_ROOT/bin/pyenv" install "$PYENV_VERSION" || {
+            log_error "pyenv не смог установить Python $PYENV_VERSION"
+            return 1
+        }
+    fi
+
+    "$PYENV_ROOT/bin/pyenv" global "$PYENV_VERSION"
+
+    # 6. Ссылки для удобства
+    ln -sf "$PYENV_ROOT/shims/python" /usr/local/bin/python3.12 2>/dev/null || true
+    ln -sf "$PYENV_ROOT/shims/pip"    /usr/local/bin/pip3.12 2>/dev/null || true
+    ln -sf "$PYENV_ROOT/shims/python" /usr/local/bin/python 2>/dev/null || true
+    ln -sf "$PYENV_ROOT/shims/pip"    /usr/local/bin/pip 2>/dev/null || true
+
+    log_success "Python $PYENV_VERSION установлен через pyenv (системно)"
+    log_warning "Перезайдите в оболочку или выполните: source /etc/profile.d/pyenv.sh"
+    return 0
+}
+
 # Конфигурация
 GH_REPO="leizov/Seal-Playerok-Bot"
 PYTHON_VERSION="3.12"
@@ -300,29 +375,22 @@ install_python() {
             }
             ;;
         "20.04")
-            # Ubuntu 20.04 - нужен PPA deadsnakes
-            log_info "Подготовка системы для Ubuntu 20.04..."
-            apt update -y
-            apt install -y software-properties-common gnupg curl
-            
-            log_info "Добавление репозитория deadsnakes PPA..."
-            # Добавляем PPA (автоматически добавит ключ)
-            add-apt-repository -y ppa:deadsnakes/ppa || {
-                log_warning "add-apt-repository не сработал, пробуем вручную..."
-                # Добавляем ключ вручную
-                apt-key adv --keyserver keyserver.ubuntu.com --recv-keys BA6932366A755776 2>/dev/null || true
-                # Добавляем репозиторий вручную
-                echo "deb http://ppa.launchpad.net/deadsnakes/ppa/ubuntu focal main" > /etc/apt/sources.list.d/deadsnakes-ppa.list
-            }
-            
-            apt update -y
+            # Ubuntu 20.04 - нужен PPA с предварительным update
+            log_info "Добавление репозитория deadsnakes для Ubuntu 20.04..."
+            apt install -y software-properties-common 2>/dev/null || true
+            add-apt-repository -y ppa:deadsnakes/ppa
+            apt update
             log_info "Установка Python ${PYTHON_VERSION}..."
+            log_info "Проверяем доступность пакетов (apt-cache policy python${PYTHON_VERSION})..."
+            apt-cache policy python${PYTHON_VERSION} || true
             apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-distutils || {
+                log_warning "Не удалось установить Python ${PYTHON_VERSION} пакетами. Пробуем pyenv..."
+                if install_python_pyenv; then
+                    return 0
+                fi
                 log_error "Не удалось установить Python ${PYTHON_VERSION}"
-                log_info "Попробуй вручную:"
-                log_info "  sudo add-apt-repository ppa:deadsnakes/ppa"
-                log_info "  sudo apt update"
-                log_info "  sudo apt install python3.12 python3.12-venv python3.12-dev"
+                log_info "Диагностика (apt-cache policy python${PYTHON_VERSION}):"
+                apt-cache policy python${PYTHON_VERSION} || true
                 exit 1
             }
             ;;
