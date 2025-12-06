@@ -8,7 +8,8 @@
 #   curl -O https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh && sudo bash install.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 
-set -e
+# НЕ используем set -e - оно мешает интерактивному вводу
+# set -e
 
 # Цвета для вывода
 RED='\033[0;31m'
@@ -74,7 +75,7 @@ EOF
 check_root() {
     if [ "$EUID" -ne 0 ]; then
         log_error "Установщик должен быть запущен от root!"
-        log_info "Используй: curl -sSL https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh | sudo bash"
+        log_info "Используй: sudo bash install.sh"
         exit 1
     fi
 }
@@ -96,7 +97,8 @@ ask_username() {
     
     echo -ne "${CYAN}👤 Имя пользователя [sealbot]: ${NC}"
     while true; do
-        read BOT_USERNAME
+        # Читаем из /dev/tty чтобы работало даже когда stdin занят (curl | bash)
+        read -r BOT_USERNAME < /dev/tty || BOT_USERNAME=""
         
         # Если пустое - используем значение по умолчанию
         if [[ -z "$BOT_USERNAME" ]]; then
@@ -121,7 +123,7 @@ ask_username() {
                 log_info "Директория бота уже есть: ${INSTALL_DIR}"
                 echo ""
                 echo -ne "${YELLOW}Что делать? [1] Переустановить / [2] Другое имя / [3] Выход: ${NC}"
-                read choice
+                read -r choice < /dev/tty || choice="3"
                 
                 case "$choice" in
                     1)
@@ -603,7 +605,7 @@ first_run_setup() {
     echo ""
     
     echo -ne "${CYAN}Нажми Enter когда будешь готов ввести токены...${NC}"
-    read -r
+    read -r < /dev/tty || true
     
     echo ""
     log_info "Запуск бота от имени пользователя ${BOT_USERNAME}..."
@@ -611,29 +613,9 @@ first_run_setup() {
     
     # Запускаем бота для интерактивной настройки
     # Важно: нужен TTY для работы input() в Python
-    #
-    # Метод 1: Прямой запуск (если терминал уже подключен к stdin)
-    # Это работает когда install.sh запущен интерактивно через SSH
-    #
-    # Переключаемся на пользователя бота и запускаем Python
-    # Используем 'su -' для полноценной login shell
-    # Флаг -P сохраняет PTY (pseudo-terminal)
+    # Перенаправляем /dev/tty на stdin чтобы Python input() работал
     
-    # Сначала проверяем что stdin это терминал
-    if [ -t 0 ]; then
-        # stdin это терминал - можно запускать напрямую
-        su - "$BOT_USERNAME" -c "cd '${INSTALL_DIR}' && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 PYTHONUNBUFFERED=1 '${VENV_DIR}/bin/python' -u bot.py" || true
-    else
-        # stdin не терминал - пробуем через script
-        log_warning "Терминал не обнаружен, пробуем альтернативный метод..."
-        if command -v script &> /dev/null; then
-            script -q -c "su - '$BOT_USERNAME' -c \"cd '${INSTALL_DIR}' && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 PYTHONUNBUFFERED=1 '${VENV_DIR}/bin/python' -u bot.py\"" /dev/null || true
-        else
-            log_error "Не удалось запустить интерактивную настройку!"
-            log_info "Запусти бота вручную: su - ${BOT_USERNAME} -c 'cd ${INSTALL_DIR} && ${VENV_DIR}/bin/python bot.py'"
-            return 1
-        fi
-    fi
+    su - "$BOT_USERNAME" -c "cd '${INSTALL_DIR}' && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 PYTHONUNBUFFERED=1 '${VENV_DIR}/bin/python' -u bot.py" < /dev/tty || true
     
     echo ""
     
