@@ -300,15 +300,29 @@ install_python() {
             }
             ;;
         "20.04")
-            # Ubuntu 20.04 - нужен PPA с предварительным update
-            log_info "Добавление репозитория deadsnakes для Ubuntu 20.04..."
-            apt install -y software-properties-common 2>/dev/null || true
-            add-apt-repository -y ppa:deadsnakes/ppa
-            apt update
+            # Ubuntu 20.04 - нужен PPA deadsnakes
+            log_info "Подготовка системы для Ubuntu 20.04..."
+            apt update -y
+            apt install -y software-properties-common gnupg curl
+            
+            log_info "Добавление репозитория deadsnakes PPA..."
+            # Добавляем PPA (автоматически добавит ключ)
+            add-apt-repository -y ppa:deadsnakes/ppa || {
+                log_warning "add-apt-repository не сработал, пробуем вручную..."
+                # Добавляем ключ вручную
+                apt-key adv --keyserver keyserver.ubuntu.com --recv-keys BA6932366A755776 2>/dev/null || true
+                # Добавляем репозиторий вручную
+                echo "deb http://ppa.launchpad.net/deadsnakes/ppa/ubuntu focal main" > /etc/apt/sources.list.d/deadsnakes-ppa.list
+            }
+            
+            apt update -y
             log_info "Установка Python ${PYTHON_VERSION}..."
             apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-distutils || {
                 log_error "Не удалось установить Python ${PYTHON_VERSION}"
-                log_info "Попробуй вручную: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update && sudo apt install python3.12"
+                log_info "Попробуй вручную:"
+                log_info "  sudo add-apt-repository ppa:deadsnakes/ppa"
+                log_info "  sudo apt update"
+                log_info "  sudo apt install python3.12 python3.12-venv python3.12-dev"
                 exit 1
             }
             ;;
