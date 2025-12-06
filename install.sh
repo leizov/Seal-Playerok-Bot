@@ -484,10 +484,22 @@ first_run_setup() {
     log_step "Первоначальная настройка"
     
     VENV_DIR="/home/${BOT_USERNAME}/venv"
+    CONFIG_FILE="${INSTALL_DIR}/bot_settings/config.json"
+    
+    # Проверяем, настроен ли бот уже
+    if [ -f "$CONFIG_FILE" ]; then
+        # Проверяем есть ли токены в конфиге
+        if grep -q '"token": "[^"]*[a-zA-Z0-9]' "$CONFIG_FILE" 2>/dev/null; then
+            log_info "Обнаружен существующий конфиг. Пропускаем первичную настройку."
+            log_info "Для повторной настройки удали: $CONFIG_FILE"
+            return 0
+        fi
+    fi
     
     log_info "Сейчас бот запустится для первичной настройки."
     log_info "Следуй инструкциям в боте (введи токены и т.д.)"
-    log_warning "После настройки нажми Ctrl+C для выхода!"
+    log_warning "После настройки бот продолжит работу - это нормально!"
+    log_warning "Когда увидишь главное меню или логи работы - нажми Ctrl+C"
     echo ""
     
     echo -ne "${CYAN}Нажми Enter чтобы начать настройку...${NC}"
@@ -498,10 +510,44 @@ first_run_setup() {
     echo ""
     
     # Запускаем бота для интерактивной настройки
-    sudo -u "$BOT_USERNAME" LANG=en_US.UTF-8 "${VENV_DIR}/bin/python" "${INSTALL_DIR}/bot.py" || true
+    # Важно: нужен TTY для работы input() в Python
+    #
+    # Метод 1: Прямой запуск (если терминал уже подключен к stdin)
+    # Это работает когда install.sh запущен интерактивно через SSH
+    #
+    # Переключаемся на пользователя бота и запускаем Python
+    # Используем 'su -' для полноценной login shell
+    # Флаг -P сохраняет PTY (pseudo-terminal)
+    
+    # Сначала проверяем что stdin это терминал
+    if [ -t 0 ]; then
+        # stdin это терминал - можно запускать напрямую
+        su - "$BOT_USERNAME" -c "cd '${INSTALL_DIR}' && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 PYTHONUNBUFFERED=1 '${VENV_DIR}/bin/python' -u bot.py" || true
+    else
+        # stdin не терминал - пробуем через script
+        log_warning "Терминал не обнаружен, пробуем альтернативный метод..."
+        if command -v script &> /dev/null; then
+            script -q -c "su - '$BOT_USERNAME' -c \"cd '${INSTALL_DIR}' && LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 PYTHONUNBUFFERED=1 '${VENV_DIR}/bin/python' -u bot.py\"" /dev/null || true
+        else
+            log_error "Не удалось запустить интерактивную настройку!"
+            log_info "Запусти бота вручную: su - ${BOT_USERNAME} -c 'cd ${INSTALL_DIR} && ${VENV_DIR}/bin/python bot.py'"
+            return 1
+        fi
+    fi
     
     echo ""
-    log_success "Первичная настройка завершена!"
+    
+    # Проверяем что конфиг создался и содержит данные
+    if [ -f "$CONFIG_FILE" ]; then
+        if grep -q '"token": "[^"]*[a-zA-Z0-9]' "$CONFIG_FILE" 2>/dev/null; then
+            log_success "Первичная настройка завершена успешно!"
+        else
+            log_warning "Конфиг создан, но токены не обнаружены."
+            log_info "Возможно настройка была прервана. Бот запросит токены при следующем запуске."
+        fi
+    else
+        log_warning "Конфиг не создан. Бот запросит настройки при следующем запуске."
+    fi
 }
 
 # Запуск бота как сервиса
