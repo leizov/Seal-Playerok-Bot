@@ -50,14 +50,18 @@ def set_title(title: str):
     :param title: Заголовок.
     :type title: `str`
     """
-    if sys.platform == "win32":
-        ctypes.windll.kernel32.SetConsoleTitleW(title)
-    elif sys.platform.startswith("linux"):
-        sys.stdout.write(f"\x1b]2;{title}\x07")
-        sys.stdout.flush()
-    elif sys.platform == "darwin":
-        sys.stdout.write(f"\x1b]0;{title}\x07")
-        sys.stdout.flush()
+    try:
+        if sys.platform == "win32":
+            ctypes.windll.kernel32.SetConsoleTitleW(title)
+        elif sys.platform.startswith("linux") or sys.platform == "darwin":
+            # Проверяем что stdout это терминал (не systemd/pipe)
+            if sys.stdout.isatty():
+                escape = "\x1b]2;" if sys.platform.startswith("linux") else "\x1b]0;"
+                sys.stdout.write(f"{escape}{title}\x07")
+                sys.stdout.flush()
+    except Exception:
+        # Игнорируем ошибки (нет терминала, systemd и т.д.)
+        pass
 
 
 def setup_logger(log_file: str = "logs/latest.log", show_seal_art: bool = True, seal_variant: int = 1):

@@ -21,9 +21,11 @@ NC='\033[0m'
 # Конфигурация
 GH_REPO="leizov/Seal-Playerok-Bot"
 PYTHON_VERSION="3.12"
-SERVICE_NAME="seal-playerok-bot"
+SERVICE_NAME=""
 BOT_USERNAME=""
 INSTALL_DIR=""
+COMMAND_NAME=""
+SKIP_USER_CREATE=false
 
 # Логирование
 log_info() {
@@ -79,13 +81,20 @@ check_root() {
 
 # Запрос имени пользователя для бота
 ask_username() {
-    log_step "Создание пользователя для бота"
+    log_step "Шаг 1/7: Имя пользователя"
     
-    log_info "Бот будет работать от отдельного пользователя (не root)."
-    log_info "Это безопаснее и правильнее для продакшена."
+    echo -e "${YELLOW}┌─────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${YELLOW}│  📝 СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ                                   │${NC}"
+    echo -e "${YELLOW}├─────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${YELLOW}│  Бот будет работать от отдельного пользователя Linux.       │${NC}"
+    echo -e "${YELLOW}│  Это нужно для безопасности и изоляции.                     │${NC}"
+    echo -e "${YELLOW}│                                                             │${NC}"
+    echo -e "${YELLOW}│  💡 Просто нажми ENTER чтобы использовать 'sealbot'         │${NC}"
+    echo -e "${YELLOW}│  💡 Или введи своё имя (латиницей, например: mybot)         │${NC}"
+    echo -e "${YELLOW}└─────────────────────────────────────────────────────────────┘${NC}"
     echo ""
     
-    echo -ne "${CYAN}Введи имя пользователя для бота (например: sealbot, seal, playerok): ${NC}"
+    echo -ne "${CYAN}👤 Имя пользователя [sealbot]: ${NC}"
     while true; do
         read BOT_USERNAME
         
@@ -93,30 +102,67 @@ ask_username() {
         if [[ -z "$BOT_USERNAME" ]]; then
             BOT_USERNAME="sealbot"
             log_info "Используем имя по умолчанию: ${BOT_USERNAME}"
-            break
         fi
         
         # Проверяем валидность имени
-        if [[ "$BOT_USERNAME" =~ ^[a-zA-Z][a-zA-Z0-9_-]+$ ]]; then
-            # Проверяем что пользователь не существует
-            if id "$BOT_USERNAME" &>/dev/null; then
-                echo -ne "\n${RED}Пользователь уже существует! ${CYAN}Введи другое имя: ${NC}"
+        if [[ ! "$BOT_USERNAME" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+            echo -ne "\n${RED}Недопустимые символы! ${CYAN}Имя должно начинаться с буквы: ${NC}"
+            continue
+        fi
+        
+        # Проверяем существует ли пользователь
+        if id "$BOT_USERNAME" &>/dev/null; then
+            INSTALL_DIR="/home/${BOT_USERNAME}/SealPlayerokBot"
+            
+            echo ""
+            log_warning "Пользователь '${BOT_USERNAME}' уже существует!"
+            
+            if [ -d "$INSTALL_DIR" ]; then
+                log_info "Директория бота уже есть: ${INSTALL_DIR}"
+                echo ""
+                echo -ne "${YELLOW}Что делать? [1] Переустановить / [2] Другое имя / [3] Выход: ${NC}"
+                read choice
+                
+                case "$choice" in
+                    1)
+                        log_info "Переустановка в существующую директорию..."
+                        SKIP_USER_CREATE=true
+                        break
+                        ;;
+                    2)
+                        echo -ne "${CYAN}Введи другое имя: ${NC}"
+                        continue
+                        ;;
+                    *)
+                        log_info "Отмена установки"
+                        exit 0
+                        ;;
+                esac
             else
+                log_info "Используем существующего пользователя '${BOT_USERNAME}'"
+                SKIP_USER_CREATE=true
                 break
             fi
         else
-            echo -ne "\n${RED}Недопустимые символы! ${CYAN}Имя должно начинаться с буквы и содержать только буквы, цифры, '_' или '-': ${NC}"
+            SKIP_USER_CREATE=false
+            break
         fi
     done
     
     INSTALL_DIR="/home/${BOT_USERNAME}/SealPlayerokBot"
+    # Уникальные имена для каждого бота (поддержка нескольких ботов)
+    COMMAND_NAME="seal-${BOT_USERNAME}"
+    SERVICE_NAME="seal-${BOT_USERNAME}"
+    
     log_success "Имя пользователя: ${BOT_USERNAME}"
     log_success "Директория установки: ${INSTALL_DIR}"
+    log_success "Команда управления: ${COMMAND_NAME}"
+    log_success "Имя сервиса: ${SERVICE_NAME}"
 }
 
 # Проверка системы
 check_system() {
-    log_step "Проверка системы"
+    log_step "Шаг 2/7: Проверка системы"
     
     # Проверяем что это Linux
     if [[ "$OSTYPE" != "linux-gnu"* ]]; then
@@ -218,7 +264,7 @@ setup_locale() {
 
 # Установка Python 3.12
 install_python() {
-    log_step "Установка Python ${PYTHON_VERSION}"
+    log_step "Шаг 3/7: Установка Python ${PYTHON_VERSION}"
     
     # Получаем версию дистрибутива
     DISTRO_VERSION=$(lsb_release -rs 2>/dev/null || echo "20.04")
@@ -230,37 +276,68 @@ install_python() {
         return 0
     fi
     
-    # Для Ubuntu 24.04+ Python 3.12 уже есть в репозитории
+    # Установка Python в зависимости от версии дистрибутива
     case $DISTRO_VERSION in
         "24.04" | "24.10")
+            # Ubuntu 24.04+ - Python 3.12 уже есть
             log_info "Установка Python ${PYTHON_VERSION} из стандартного репозитория..."
             apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-gdbm || {
                 log_error "Не удалось установить Python ${PYTHON_VERSION}"
                 exit 1
             }
             ;;
-        "11")
-            # Debian 11 - используем deadsnakes через Ubuntu focal
-            log_info "Настройка репозитория для Debian 11..."
-            apt install -y gnupg 2>/dev/null || true
-            apt-key adv --keyserver keyserver.ubuntu.com --recv-keys BA6932366A755776 2>/dev/null || true
-            add-apt-repository -s "deb https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu focal main" 2>/dev/null || true
-            apt update -qq
+        "22.04")
+            # Ubuntu 22.04 - нужен PPA
+            log_info "Добавление репозитория deadsnakes для Ubuntu 22.04..."
+            apt install -y software-properties-common 2>/dev/null || true
+            add-apt-repository -y ppa:deadsnakes/ppa
+            apt update
             apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-gdbm || {
                 log_error "Не удалось установить Python ${PYTHON_VERSION}"
                 exit 1
             }
             ;;
-        *)
-            # Ubuntu и остальные - используем PPA deadsnakes
-            log_info "Добавление репозитория deadsnakes..."
-            add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || {
-                log_warning "Не удалось добавить PPA, пробуем установить стандартный Python..."
+        "20.04")
+            # Ubuntu 20.04 - нужен PPA с предварительным update
+            log_info "Добавление репозитория deadsnakes для Ubuntu 20.04..."
+            apt install -y software-properties-common 2>/dev/null || true
+            add-apt-repository -y ppa:deadsnakes/ppa
+            apt update
+            log_info "Установка Python ${PYTHON_VERSION}..."
+            apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-distutils || {
+                log_error "Не удалось установить Python ${PYTHON_VERSION}"
+                log_info "Попробуй вручную: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update && sudo apt install python3.12"
+                exit 1
             }
-            apt update -qq
+            ;;
+        "11" | "12")
+            # Debian 11/12 - используем deadsnakes через Ubuntu
+            log_info "Настройка репозитория для Debian..."
+            apt install -y gnupg curl 2>/dev/null || true
+            
+            # Добавляем ключ
+            curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBA6932366A755776" | gpg --dearmor -o /etc/apt/trusted.gpg.d/deadsnakes.gpg 2>/dev/null || true
+            
+            # Добавляем репозиторий (focal для совместимости)
+            echo "deb https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu focal main" > /etc/apt/sources.list.d/deadsnakes.list
+            apt update
+            
+            apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev || {
+                log_error "Не удалось установить Python ${PYTHON_VERSION}"
+                exit 1
+            }
+            ;;
+        *)
+            # Другие версии - пробуем PPA
+            log_info "Добавление репозитория deadsnakes..."
+            apt install -y software-properties-common 2>/dev/null || true
+            add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || {
+                log_warning "Не удалось добавить PPA"
+            }
+            apt update
             
             log_info "Установка Python ${PYTHON_VERSION}..."
-            apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-gdbm 2>/dev/null || {
+            apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev 2>/dev/null || {
                 log_error "Не удалось установить Python ${PYTHON_VERSION}"
                 log_info "Попробуй установить вручную: apt install python3.12"
                 exit 1
@@ -281,6 +358,12 @@ install_python() {
 create_bot_user() {
     log_step "Создание системного пользователя"
     
+    if [ "$SKIP_USER_CREATE" = true ]; then
+        log_info "Используем существующего пользователя ${BOT_USERNAME}"
+        log_success "Домашняя директория: /home/${BOT_USERNAME}"
+        return 0
+    fi
+    
     log_info "Создание пользователя ${BOT_USERNAME}..."
     useradd -m -s /bin/bash "$BOT_USERNAME" || {
         log_error "Не удалось создать пользователя ${BOT_USERNAME}"
@@ -293,7 +376,7 @@ create_bot_user() {
 
 # Скачивание бота с GitHub
 download_bot() {
-    log_step "Загрузка SealPlayerok Bot"
+    log_step "Шаг 4/7: Загрузка SealPlayerok Bot"
     
     # Создаём временную директорию для загрузки
     TEMP_DIR="/home/${BOT_USERNAME}/seal-install"
@@ -340,7 +423,7 @@ download_bot() {
 
 # Создание виртуального окружения
 create_venv() {
-    log_step "Создание виртуального окружения"
+    log_step "Шаг 5/7: Создание виртуального окружения"
     
     VENV_DIR="/home/${BOT_USERNAME}/venv"
     
@@ -365,7 +448,7 @@ create_venv() {
 
 # Установка Python зависимостей
 install_python_deps() {
-    log_step "Установка Python зависимостей"
+    log_step "Шаг 6/7: Установка зависимостей"
     
     VENV_DIR="/home/${BOT_USERNAME}/venv"
     
@@ -430,7 +513,7 @@ source "${VENV_DIR}/bin/activate"
 pip install -r requirements.txt -q
 deactivate
 echo "✅ Обновление завершено"
-echo "🦭 Запусти: seal-pln start"
+echo "🦭 Запусти: ${COMMAND_NAME} start"
 SCRIPT
     chmod +x "${INSTALL_DIR}/update.sh"
     
@@ -481,7 +564,7 @@ EOF
 
 # Первоначальная настройка бота (интерактивно)
 first_run_setup() {
-    log_step "Первоначальная настройка"
+    log_step "Шаг 7/7: Первоначальная настройка"
     
     VENV_DIR="/home/${BOT_USERNAME}/venv"
     CONFIG_FILE="${INSTALL_DIR}/bot_settings/config.json"
@@ -491,18 +574,35 @@ first_run_setup() {
         # Проверяем есть ли токены в конфиге
         if grep -q '"token": "[^"]*[a-zA-Z0-9]' "$CONFIG_FILE" 2>/dev/null; then
             log_info "Обнаружен существующий конфиг. Пропускаем первичную настройку."
-            log_info "Для повторной настройки удали: $CONFIG_FILE"
+            log_info "Для повторной настройки: ${COMMAND_NAME} setup"
             return 0
         fi
     fi
     
-    log_info "Сейчас бот запустится для первичной настройки."
-    log_info "Следуй инструкциям в боте (введи токены и т.д.)"
-    log_warning "После настройки бот продолжит работу - это нормально!"
-    log_warning "Когда увидишь главное меню или логи работы - нажми Ctrl+C"
+    echo ""
+    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║           🎉 УСТАНОВКА ПОЧТИ ЗАВЕРШЕНА! 🎉                    ║${NC}"
+    echo -e "${GREEN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${GREEN}║                                                               ║${NC}"
+    echo -e "${GREEN}║  Сейчас бот запросит у тебя ТОКЕНЫ для работы:                ║${NC}"
+    echo -e "${GREEN}║                                                               ║${NC}"
+    echo -e "${GREEN}║  1️⃣  ТОКЕН PLAYEROK                                            ║${NC}"
+    echo -e "${GREEN}║      Где взять: Playerok → Настройки → API токен              ║${NC}"
+    echo -e "${GREEN}║                                                               ║${NC}"
+    echo -e "${GREEN}║  2️⃣  ТОКЕН TELEGRAM БОТА                                       ║${NC}"
+    echo -e "${GREEN}║      Где взять: Напиши @BotFather в Telegram → /newbot        ║${NC}"
+    echo -e "${GREEN}║                                                               ║${NC}"
+    echo -e "${GREEN}║  3️⃣  ТВОЙ TELEGRAM ID                                          ║${NC}"
+    echo -e "${GREEN}║      Где взять: Напиши @userinfobot в Telegram                ║${NC}"
+    echo -e "${GREEN}║                                                               ║${NC}"
+    echo -e "${GREEN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${GREEN}║  ⚠️  ВАЖНО: После ввода токенов бот ЗАПУСТИТСЯ!                ║${NC}"
+    echo -e "${GREEN}║  Когда увидишь логи работы — нажми Ctrl+C для выхода.         ║${NC}"
+    echo -e "${GREEN}║  Бот продолжит работать в фоне автоматически!                 ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
-    echo -ne "${CYAN}Нажми Enter чтобы начать настройку...${NC}"
+    echo -ne "${CYAN}Нажми Enter когда будешь готов ввести токены...${NC}"
     read -r
     
     echo ""
@@ -543,11 +643,25 @@ first_run_setup() {
             log_success "Первичная настройка завершена успешно!"
         else
             log_warning "Конфиг создан, но токены не обнаружены."
-            log_info "Возможно настройка была прервана. Бот запросит токены при следующем запуске."
+            log_info "Запусти настройку заново: ${COMMAND_NAME} setup"
         fi
     else
-        log_warning "Конфиг не создан. Бот запросит настройки при следующем запуске."
+        log_warning "Конфиг не создан."
+        log_info "Запусти настройку: ${COMMAND_NAME} setup"
     fi
+    
+    echo ""
+    echo -e "${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│  📝 ЗАПОМНИ КОМАНДУ ДЛЯ УПРАВЛЕНИЯ БОТОМ:                   │${NC}"
+    echo -e "${CYAN}│                                                             │${NC}"
+    echo -e "${CYAN}│     ${GREEN}${COMMAND_NAME}${CYAN}                                         │${NC}"
+    echo -e "${CYAN}│                                                             │${NC}"
+    echo -e "${CYAN}│  Примеры:                                                   │${NC}"
+    echo -e "${CYAN}│    ${COMMAND_NAME} start   — запустить                      │${NC}"
+    echo -e "${CYAN}│    ${COMMAND_NAME} stop    — остановить                     │${NC}"
+    echo -e "${CYAN}│    ${COMMAND_NAME} logs    — посмотреть логи                │${NC}"
+    echo -e "${CYAN}│    ${COMMAND_NAME} setup   — настроить заново               │${NC}"
+    echo -e "${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
 }
 
 # Запуск бота как сервиса
@@ -565,8 +679,8 @@ start_bot_service() {
         systemctl enable "$SERVICE_NAME" 2>/dev/null
         log_success "Автозапуск включён"
     else
-        log_warning "Бот не запустился. Проверь логи: seal-pln logs"
-        log_info "Возможно нужно повторить настройку: seal-pln setup"
+        log_warning "Бот не запустился. Проверь логи: ${COMMAND_NAME} logs"
+        log_info "Возможно нужно повторить настройку: ${COMMAND_NAME} setup"
     fi
 }
 
@@ -587,6 +701,7 @@ SERVICE="${SERVICE_NAME}"
 INSTALL_DIR="${INSTALL_DIR}"
 VENV_DIR="${VENV_DIR}"
 BOT_USER="${BOT_USERNAME}"
+COMMAND_NAME="${COMMAND_NAME}"
 
 # Проверка статуса
 is_running() {
@@ -597,7 +712,7 @@ case "\$1" in
     start)
         if is_running; then
             echo "⚠️  Бот уже запущен!"
-            echo "   Используй: seal-pln status"
+            echo "   Используй: ${COMMAND_NAME} status"
         else
             echo "🚀 Запуск бота..."
             sudo systemctl start \$SERVICE
@@ -605,7 +720,7 @@ case "\$1" in
             if is_running; then
                 echo "✅ Бот запущен"
             else
-                echo "❌ Ошибка запуска. Проверь логи: seal-pln logs"
+                echo "❌ Ошибка запуска. Проверь логи: ${COMMAND_NAME} logs"
             fi
         fi
         ;;
@@ -625,7 +740,7 @@ case "\$1" in
         if is_running; then
             echo "✅ Бот перезапущен"
         else
-            echo "❌ Ошибка. Проверь логи: seal-pln logs"
+            echo "❌ Ошибка. Проверь логи: ${COMMAND_NAME} logs"
         fi
         ;;
     status)
@@ -659,7 +774,7 @@ case "\$1" in
         # Интерактивная настройка (первый запуск)
         echo "🔧 Интерактивная настройка бота..."
         echo "   Введи токены когда бот попросит."
-        echo "   После настройки нажми Ctrl+C и запусти: seal-pln start"
+        echo "   После настройки нажми Ctrl+C и запусти: ${COMMAND_NAME} start"
         echo ""
         # Останавливаем сервис если запущен
         sudo systemctl stop \$SERVICE 2>/dev/null || true
@@ -673,21 +788,21 @@ case "\$1" in
         sudo -u \$BOT_USER git pull origin main 2>/dev/null || sudo -u \$BOT_USER git pull origin master
         sudo -u \$BOT_USER \${VENV_DIR}/bin/pip install -U -r \${INSTALL_DIR}/requirements.txt -q
         echo "✅ Обновление завершено"
-        echo "   Запусти: seal-pln start"
+        echo "   Запусти: ${COMMAND_NAME} start"
         ;;
     *)
         echo "🦭 SealPlayerok Bot - Команды:"
         echo ""
-        echo "  seal-pln start     - 🚀 Запустить бота"
-        echo "  seal-pln stop      - 🛑 Остановить бота"
-        echo "  seal-pln restart   - 🔄 Перезапустить бота"
-        echo "  seal-pln status    - 📊 Статус бота"
-        echo "  seal-pln logs      - 📋 Логи в реальном времени"
-        echo "  seal-pln logs100   - 📋 Последние 100 строк логов"
-        echo "  seal-pln enable    - ✅ Включить автозапуск"
-        echo "  seal-pln disable   - ❌ Отключить автозапуск"
-        echo "  seal-pln setup     - 🔧 Первоначальная настройка"
-        echo "  seal-pln update    - 🔄 Обновить бота"
+        echo "  ${COMMAND_NAME} start     - 🚀 Запустить бота"
+        echo "  ${COMMAND_NAME} stop      - 🛑 Остановить бота"
+        echo "  ${COMMAND_NAME} restart   - 🔄 Перезапустить бота"
+        echo "  ${COMMAND_NAME} status    - 📊 Статус бота"
+        echo "  ${COMMAND_NAME} logs      - 📋 Логи в реальном времени"
+        echo "  ${COMMAND_NAME} logs100   - 📋 Последние 100 строк логов"
+        echo "  ${COMMAND_NAME} enable    - ✅ Включить автозапуск"
+        echo "  ${COMMAND_NAME} disable   - ❌ Отключить автозапуск"
+        echo "  ${COMMAND_NAME} setup     - 🔧 Первоначальная настройка"
+        echo "  ${COMMAND_NAME} update    - 🔄 Обновить бота"
         echo ""
         echo "Пользователь бота: \$BOT_USER"
         echo "Директория: \$INSTALL_DIR"
@@ -704,10 +819,10 @@ EOF
     chmod +x "$COMMANDS_FILE"
     chown "${BOT_USERNAME}:${BOT_USERNAME}" "$COMMANDS_FILE"
     
-    # Создаём симлинк в /usr/local/bin для глобального доступа
-    ln -sf "$COMMANDS_FILE" /usr/local/bin/seal-pln 2>/dev/null || true
+    # Создаём симлинк в /usr/local/bin для глобального доступа (уникальное имя)
+    ln -sf "$COMMANDS_FILE" "/usr/local/bin/${COMMAND_NAME}" 2>/dev/null || true
     
-    log_success "Команда 'seal-pln' создана для управления ботом"
+    log_success "Команда '${COMMAND_NAME}' создана для управления ботом"
 }
 
 # Финальное сообщение
@@ -733,17 +848,17 @@ show_final_message() {
     echo -e "${YELLOW}🎮 КОМАНДЫ УПРАВЛЕНИЯ (скопируй и сохрани!):${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e ""
-    echo -e "  ${GREEN}seal-pln start${NC}      - 🚀 Запустить бота"
-    echo -e "  ${GREEN}seal-pln stop${NC}       - 🛑 Остановить бота"
-    echo -e "  ${GREEN}seal-pln restart${NC}    - 🔄 Перезапустить бота"
-    echo -e "  ${GREEN}seal-pln status${NC}     - 📊 Статус бота"
-    echo -e "  ${GREEN}seal-pln logs${NC}       - 📋 Логи в реальном времени"
-    echo -e "  ${GREEN}seal-pln logs100${NC}    - 📋 Последние 100 строк логов"
+    echo -e "  ${GREEN}${COMMAND_NAME} start${NC}      - 🚀 Запустить бота"
+    echo -e "  ${GREEN}${COMMAND_NAME} stop${NC}       - 🛑 Остановить бота"
+    echo -e "  ${GREEN}${COMMAND_NAME} restart${NC}    - 🔄 Перезапустить бота"
+    echo -e "  ${GREEN}${COMMAND_NAME} status${NC}     - 📊 Статус бота"
+    echo -e "  ${GREEN}${COMMAND_NAME} logs${NC}       - 📋 Логи в реальном времени"
+    echo -e "  ${GREEN}${COMMAND_NAME} logs100${NC}    - 📋 Последние 100 строк логов"
     echo -e ""
-    echo -e "  ${CYAN}seal-pln setup${NC}      - 🔧 Повторная настройка"
-    echo -e "  ${CYAN}seal-pln update${NC}     - 🔄 Обновить бота"
-    echo -e "  ${CYAN}seal-pln enable${NC}     - ✅ Включить автозапуск"
-    echo -e "  ${CYAN}seal-pln disable${NC}    - ❌ Отключить автозапуск"
+    echo -e "  ${CYAN}${COMMAND_NAME} setup${NC}      - 🔧 Повторная настройка"
+    echo -e "  ${CYAN}${COMMAND_NAME} update${NC}     - 🔄 Обновить бота"
+    echo -e "  ${CYAN}${COMMAND_NAME} enable${NC}     - ✅ Включить автозапуск"
+    echo -e "  ${CYAN}${COMMAND_NAME} disable${NC}    - ❌ Отключить автозапуск"
     echo -e ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}📝 АЛЬТЕРНАТИВНЫЕ КОМАНДЫ (systemctl):${NC}"
@@ -762,15 +877,37 @@ show_final_message() {
     echo -e "  ${CYAN}📦 GitHub:${NC}  https://github.com/${GH_REPO}"
     echo -e "  ${CYAN}👨‍💻 Автор:${NC}   @leizov"
     echo -e ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}❓ ЧТО ДЕЛАТЬ ДАЛЬШЕ:${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e ""
+    echo -e "  ${GREEN}1.${NC} Открой Telegram и найди своего бота"
+    echo -e "  ${GREEN}2.${NC} Напиши ему /start"
+    echo -e "  ${GREEN}3.${NC} Управляй ботом через меню Telegram!"
+    echo -e ""
+    echo -e "  ${CYAN}💡 Если бот не отвечает — проверь логи:${NC}"
+    echo -e "     ${GREEN}${COMMAND_NAME} logs${NC}"
+    echo -e ""
+    echo -e "  ${CYAN}💡 Если нужно перенастроить токены:${NC}"
+    echo -e "     ${GREEN}${COMMAND_NAME} setup${NC}"
+    echo -e ""
     echo -e "${GREEN}🦭 Приятного использования!${NC}"
     echo -e ""
     
     # Показываем статус бота
     if systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo -e "${GREEN}✅ Бот успешно работает в фоне!${NC}"
-        echo -e "   Проверь логи: ${GREEN}seal-pln logs${NC}"
+        echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║  ✅ БОТ УСПЕШНО РАБОТАЕТ В ФОНЕ!                          ║${NC}"
+        echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
+        echo -e ""
+        echo -e "   Команда для логов: ${GREEN}${COMMAND_NAME} logs${NC}"
     else
-        echo -e "${YELLOW}⚠️  Бот не запущен. Запусти: ${GREEN}seal-pln start${NC}"
+        echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${YELLOW}║  ⚠️  БОТ НЕ ЗАПУЩЕН                                        ║${NC}"
+        echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
+        echo -e ""
+        echo -e "   Запусти бота: ${GREEN}${COMMAND_NAME} start${NC}"
+        echo -e "   Или настрой заново: ${GREEN}${COMMAND_NAME} setup${NC}"
     fi
     echo -e ""
 }
@@ -819,7 +956,7 @@ main() {
     # Создание systemd сервиса
     create_systemd_service
     
-    # Создание команды seal-pln
+    # Создание команды управления
     create_aliases
     
     # Первичная настройка
