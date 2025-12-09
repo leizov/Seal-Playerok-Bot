@@ -24,6 +24,9 @@ def check_for_updates():
         if response.status_code != 200:
             raise Exception(f"Ошибка запроса к GitHub API: {response.status_code}")
         releases = response.json()
+        if not releases:
+            logger.info(f"В репозитории пока нет релизов.")
+            return
         latest_release = releases[0]
         versions = [release["tag_name"] for release in releases]
         if VERSION not in versions:

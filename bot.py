@@ -186,7 +186,35 @@ async def start_playerok_bot():
 
 
 def check_and_configure_config():
+    import sys
     config = sett.get("config")
+    
+    # Проверяем, нужна ли интерактивная настройка
+    needs_config = (
+        not config["playerok"]["api"]["token"] or
+        not config["telegram"]["api"]["token"] or
+        not config["telegram"]["bot"]["password"]
+    )
+    
+    # Если нет TTY (запуск через systemd) и конфиг не настроен - выходим с ошибкой
+    if needs_config and not sys.stdin.isatty():
+        print(f"{Fore.LIGHTRED_EX}" + "="*60)
+        print(f"{Fore.LIGHTRED_EX}ОШИБКА: Конфигурация не завершена!")
+        print(f"{Fore.WHITE}Бот запущен в неинтерактивном режиме (systemd/nohup),")
+        print(f"{Fore.WHITE}но не все обязательные параметры настроены.")
+        print(f"{Fore.YELLOW}")
+        print(f"Отсутствуют:")
+        if not config["playerok"]["api"]["token"]:
+            print(f"  • Токен Playerok")
+        if not config["telegram"]["api"]["token"]:
+            print(f"  • Токен Telegram бота")
+        if not config["telegram"]["bot"]["password"]:
+            print(f"  • Пароль для Telegram бота")
+        print(f"{Fore.WHITE}")
+        print(f"Для первичной настройки запустите бот вручную:")
+        print(f"  {Fore.LIGHTWHITE_EX}python3 bot.py")
+        print(f"{Fore.LIGHTRED_EX}" + "="*60)
+        sys.exit(1)
 
     def is_token_valid(token: str) -> bool:
         if not re.match(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$", token):

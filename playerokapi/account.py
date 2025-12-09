@@ -6,8 +6,7 @@ import json
 import random
 import time
 
-import tls_client
-import tls_requests
+from curl_cffi.requests import Session as CurlSession, Response as CurlResponse
 
 from . import types
 from .exceptions import *
@@ -124,12 +123,19 @@ class Account:
         self.__logger = getLogger("playerokapi")
 
     def _refresh_clients(self):
-        self.__tls_requests = tls_requests.Client(
-            proxy=self.__proxy_string
-        )
-        self.__tls_client = tls_client.Session(
-            random_tls_extension_order=True,
-            client_identifier="chrome_120"
+        """Cоздаёт/пересоздаёт curl-cffi сессию с актуальными настройками."""
+        # Закрываем старую сессию если есть
+        if hasattr(self, '_Account__curl_session') and self.__curl_session:
+            try:
+                self.__curl_session.close()
+            except:
+                pass
+        
+        # Создаём новую сессию с имперсонацией Chrome
+        self.__curl_session = CurlSession(
+            impersonate="chrome120",
+            proxy=self.__proxy_string,
+            timeout=self.requests_timeout
         )
 
     def update_proxy(self, proxy: str | None):
@@ -154,7 +160,7 @@ class Account:
         self.__logger.info(f"Прокси обновлён: {self.__proxy_string or 'отключён'}")
 
     def request(self, method: Literal["get", "post"], url: str, headers: dict[str, str], 
-                payload: dict[str, str] | None = None, files: dict | None = None) -> requests.Response:
+                payload: dict[str, str] | None = None, files: dict | None = None) -> CurlResponse:
         """
         Отправляет запрос на сервер playerok.com.
 
@@ -173,8 +179,8 @@ class Account:
         :param files: Файлы запроса.
         :type files: `dict` or `None`
 
-        :return: Ответа запроса requests.
-        :rtype: `requests.Response`
+        :return: Ответ запроса.
+        :rtype: `curl_cffi.requests.Response`
         """
 
         agents = [
@@ -226,30 +232,26 @@ class Account:
 
         def make_req():
             if method == "get":
-                r = self.__tls_client.get(
+                r = self.__curl_session.get(
                     url=url, 
                     params=payload, 
-                    headers=headers, 
-                    timeout_seconds=self.requests_timeout,
-                    proxy=self.__proxy_string
+                    headers=headers
                 )
             elif method == "post":
                 if files:
-                    r = self.__tls_requests.post(
-                        url=url, 
-                        json=payload if not files else None, 
-                        data=payload if files else None, 
-                        headers=headers, 
-                        files=files, 
-                        timeout=self.requests_timeout
+                    # Для запросов с файлами убираем content-type (будет multipart)
+                    headers_no_ct = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
+                    r = self.__curl_session.post(
+                        url=url,
+                        data=payload,
+                        headers=headers_no_ct,
+                        files=files
                     )
                 else:
-                    r = self.__tls_client.post(
+                    r = self.__curl_session.post(
                         url=url, 
                         json=payload,
-                        headers=headers, 
-                        timeout_seconds=self.requests_timeout,
-                        proxy=self.__proxy_string
+                        headers=headers
                     )
             return r
 
