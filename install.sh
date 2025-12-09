@@ -512,9 +512,12 @@ create_venv() {
     log_step "Шаг 5/7: Создание виртуального окружения"
     
     VENV_DIR="/home/${BOT_USERNAME}/venv"
+    # Если Python пришёл из pyenv, нужно передать PYENV_ROOT и PATH внутрь sudo -u
+    PYENV_ROOT=${PYENV_ROOT:-/opt/pyenv}
+    PYENV_PATH="/opt/pyenv/bin:/opt/pyenv/shims:${PATH}"
     
     log_info "Создание venv с Python ${PYTHON_VERSION}..."
-    sudo -u "$BOT_USERNAME" python${PYTHON_VERSION} -m venv "$VENV_DIR" || {
+    sudo -u "$BOT_USERNAME" env "PYENV_ROOT=${PYENV_ROOT}" "PATH=${PYENV_PATH}" python${PYTHON_VERSION} -m venv "$VENV_DIR" || {
         log_error "Не удалось создать виртуальное окружение"
         exit 1
     }

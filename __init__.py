@@ -1,7 +1,7 @@
 from colorama import Fore
 
 # Seal Playerok Bot - Морской стиль с тюленями 🦭
-VERSION = "1.0.11"
+VERSION = "1.0.12"
 DEVELOPER = "@leizov"
 REPOSITORY = "https://github.com/leizov/Seal-Playerok-Bot"
 SKIP_UPDATES = False
