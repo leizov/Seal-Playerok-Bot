@@ -105,6 +105,49 @@ INSTALL_DIR=""
 COMMAND_NAME=""
 SKIP_USER_CREATE=false
 
+# URL для переустановки
+INSTALL_COMMAND="bash <(curl -sL https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh)"
+
+# Обработка прерывания установки (Ctrl+C, разрыв сессии и т.д.)
+cleanup_on_interrupt() {
+    echo ""
+    echo -e "\n${YELLOW}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}⚠️  Установка прервана!${NC}"
+    echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${CYAN}📌 Для повторной установки выполни:${NC}"
+    echo -e "   ${GREEN}${INSTALL_COMMAND}${NC}"
+    echo ""
+    if [ -n "$COMMAND_NAME" ]; then
+        echo -e "${CYAN}📌 Если бот уже установлен, используй:${NC}"
+        echo -e "   ${GREEN}${COMMAND_NAME} setup${NC}  — повторная настройка"
+        echo -e "   ${GREEN}${COMMAND_NAME} start${NC}  — запуск бота"
+        echo ""
+    fi
+    exit 1
+}
+
+# Устанавливаем trap для сигналов прерывания
+trap cleanup_on_interrupt SIGINT SIGTERM SIGHUP
+
+# Проверка на команды выхода
+check_exit_command() {
+    local input="$1"
+    local lower_input=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+    
+    case "$lower_input" in
+        stop|стоп|exit|quit|выход|отмена|cancel|q)
+            echo ""
+            echo -e "${YELLOW}🛑 Установка отменена по запросу пользователя${NC}"
+            echo ""
+            echo -e "${CYAN}📌 Для повторной установки выполни:${NC}"
+            echo -e "   ${GREEN}${INSTALL_COMMAND}${NC}"
+            echo ""
+            exit 0
+            ;;
+    esac
+}
+
 # Логирование
 log_info() {
     echo -e "${CYAN}🦭 [INFO]${NC} $1"
@@ -172,10 +215,15 @@ ask_username() {
     echo -e "${YELLOW}└─────────────────────────────────────────────────────────────┘${NC}"
     echo ""
     
+    echo -e "${BLUE}💡 Введи 'stop' или 'стоп' для отмены установки${NC}"
+    echo ""
     echo -ne "${CYAN}👤 Имя пользователя [sealbot]: ${NC}"
     while true; do
         # Читаем из /dev/tty чтобы работало даже когда stdin занят (curl | bash)
         read -r BOT_USERNAME < /dev/tty || BOT_USERNAME=""
+        
+        # Проверяем на команду выхода
+        check_exit_command "$BOT_USERNAME"
         
         # Если пустое - используем значение по умолчанию
         if [[ -z "$BOT_USERNAME" ]]; then
@@ -185,7 +233,7 @@ ask_username() {
         
         # Проверяем валидность имени
         if [[ ! "$BOT_USERNAME" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
-            echo -ne "\n${RED}Недопустимые символы! ${CYAN}Имя должно начинаться с буквы: ${NC}"
+            echo -ne "\n${RED}Недопустимые символы! ${CYAN}Имя должно начинаться с буквы (или 'stop' для отмены): ${NC}"
             continue
         fi
         
@@ -512,12 +560,37 @@ create_venv() {
     log_step "Шаг 5/7: Создание виртуального окружения"
     
     VENV_DIR="/home/${BOT_USERNAME}/venv"
-    # Если Python пришёл из pyenv, нужно передать PYENV_ROOT и PATH внутрь sudo -u
-    PYENV_ROOT=${PYENV_ROOT:-/opt/pyenv}
-    PYENV_PATH="/opt/pyenv/bin:/opt/pyenv/shims:${PATH}"
+    USER_HOME="/home/${BOT_USERNAME}"
+    
+    # Определяем путь к Python 3.12
+    # pyenv устанавливает полные версии (3.12.7), поэтому ищем по шаблону
+    PYENV_PYTHON=""
+    if [ -d "/opt/pyenv/versions" ]; then
+        # Ищем версию, начинающуюся с 3.12
+        for version_dir in /opt/pyenv/versions/3.12*; do
+            if [ -x "${version_dir}/bin/python3" ]; then
+                PYENV_PYTHON="${version_dir}/bin/python3"
+                break
+            fi
+        done
+    fi
+    
+    if [ -n "$PYENV_PYTHON" ] && [ -x "$PYENV_PYTHON" ]; then
+        # Python установлен через pyenv - используем прямой путь (не shim!)
+        PYTHON_BIN="$PYENV_PYTHON"
+        log_info "Используем pyenv Python: ${PYTHON_BIN}"
+    elif command -v "python${PYTHON_VERSION}" &>/dev/null; then
+        PYTHON_BIN="python${PYTHON_VERSION}"
+    elif command -v python3.12 &>/dev/null; then
+        PYTHON_BIN="python3.12"
+    else
+        log_error "Python ${PYTHON_VERSION} не найден"
+        exit 1
+    fi
     
     log_info "Создание venv с Python ${PYTHON_VERSION}..."
-    sudo -u "$BOT_USERNAME" env "HOME=/home/${BOT_USERNAME}" "PYENV_ROOT=${PYENV_ROOT}" "PATH=${PYENV_PATH}" python${PYTHON_VERSION} -m venv "$VENV_DIR" || {
+    # Используем прямой путь к python бинарнику, чтобы избежать проблем с pyenv shims и HOME
+    sudo -u "$BOT_USERNAME" env "HOME=${USER_HOME}" "${PYTHON_BIN}" -m venv "$VENV_DIR" || {
         log_error "Не удалось создать виртуальное окружение"
         exit 1
     }
@@ -896,6 +969,87 @@ EOF
     log_success "Команда '${COMMAND_NAME}' создана для управления ботом"
 }
 
+# Создание глобальной команды 'seal'
+create_global_seal_command() {
+    SEAL_GLOBAL="/usr/local/bin/seal"
+    
+    cat > "$SEAL_GLOBAL" << 'SEALEOF'
+#!/bin/bash
+# 🦭 SealPlayerok Bot - Глобальная команда управления
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+INSTALL_URL="https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh"
+
+case "$1" in
+    install|setup|new)
+        echo -e "${CYAN}🦭 Запуск установщика SealPlayerok Bot...${NC}"
+        echo ""
+        bash <(curl -sL "$INSTALL_URL")
+        ;;
+    list|ls)
+        echo -e "${CYAN}🦭 Установленные боты SealPlayerok:${NC}"
+        echo ""
+        found=0
+        for cmd in /usr/local/bin/seal-*; do
+            if [ -x "$cmd" ] && [ -f "$cmd" ]; then
+                name=$(basename "$cmd")
+                if systemctl is-active --quiet "${name}" 2>/dev/null; then
+                    status="${GREEN}✅ работает${NC}"
+                else
+                    status="${RED}❌ остановлен${NC}"
+                fi
+                echo -e "  ${GREEN}${name}${NC} - ${status}"
+                found=1
+            fi
+        done
+        if [ $found -eq 0 ]; then
+            echo -e "  ${YELLOW}Боты не найдены${NC}"
+            echo ""
+            echo -e "  Для установки: ${GREEN}seal install${NC}"
+        fi
+        echo ""
+        ;;
+    help|--help|-h|"")
+        echo -e "${CYAN}🦭 SealPlayerok Bot - Глобальные команды${NC}"
+        echo ""
+        echo -e "  ${GREEN}seal install${NC}    - 🚀 Установить нового бота"
+        echo -e "  ${GREEN}seal list${NC}       - 📋 Список установленных ботов"
+        echo ""
+        echo -e "${YELLOW}Для управления конкретным ботом используй:${NC}"
+        echo -e "  ${GREEN}seal-<имя> start${NC}   - запустить"
+        echo -e "  ${GREEN}seal-<имя> stop${NC}    - остановить"
+        echo -e "  ${GREEN}seal-<имя> setup${NC}   - настроить"
+        echo -e "  ${GREEN}seal-<имя> logs${NC}    - логи"
+        echo ""
+        echo -e "${CYAN}Установленные боты:${NC}"
+        for cmd in /usr/local/bin/seal-*; do
+            [ -x "$cmd" ] && [ -f "$cmd" ] && echo -e "  - $(basename $cmd)"
+        done
+        echo ""
+        ;;
+    *)
+        # Попробуем найти бота с таким именем
+        if [ -x "/usr/local/bin/seal-$1" ]; then
+            shift_cmd="$1"
+            shift
+            "/usr/local/bin/seal-${shift_cmd}" "$@"
+        else
+            echo -e "${RED}Неизвестная команда: $1${NC}"
+            echo -e "Используй ${GREEN}seal help${NC} для справки"
+        fi
+        ;;
+esac
+SEALEOF
+    
+    chmod +x "$SEAL_GLOBAL"
+    log_success "Глобальная команда 'seal' создана"
+}
+
 # Финальное сообщение
 show_final_message() {
     clear
@@ -937,6 +1091,14 @@ show_final_message() {
     echo -e ""
     echo -e "  sudo systemctl start|stop|restart|status ${SERVICE_NAME}"
     echo -e "  sudo journalctl -u ${SERVICE_NAME} -f"
+    echo -e ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}🌐 ГЛОБАЛЬНЫЕ КОМАНДЫ:${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e ""
+    echo -e "  ${GREEN}seal${NC}            - 📋 Справка по всем ботам"
+    echo -e "  ${GREEN}seal list${NC}       - 📋 Список установленных ботов"
+    echo -e "  ${GREEN}seal install${NC}    - 🚀 Установить ещё одного бота"
     echo -e ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}🦭 ССЫЛКИ:${NC}"
@@ -990,6 +1152,9 @@ main() {
     
     # Проверяем что запущено от root
     check_root
+    
+    # Создаём глобальную команду seal сразу (чтобы работала даже при прерывании)
+    create_global_seal_command
     
     # Запрашиваем имя пользователя для бота
     ask_username
