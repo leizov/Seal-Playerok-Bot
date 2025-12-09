@@ -62,16 +62,17 @@ install_python_pyenv() {
     # 3. Добавляем в системный профиль
     cat > /etc/profile.d/pyenv.sh << 'EOF'
 export PYENV_ROOT="/opt/pyenv"
-export PATH="$PYENV_ROOT/bin:$PATH"
+export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
 eval "$(pyenv init --path)"
 eval "$(pyenv init -)"
 EOF
     chmod +x /etc/profile.d/pyenv.sh
 
     # 4. Активируем в текущей сессии
-    export PATH="$PYENV_ROOT/bin:$PATH"
+    export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
     eval "$($PYENV_ROOT/bin/pyenv init --path)"
     eval "$($PYENV_ROOT/bin/pyenv init -)"
+    hash -r
 
     # 5. Устанавливаем Python
     if ! "$PYENV_ROOT/bin/pyenv" versions | grep -q "$PYENV_VERSION"; then
@@ -82,6 +83,7 @@ EOF
     fi
 
     "$PYENV_ROOT/bin/pyenv" global "$PYENV_VERSION"
+    "$PYENV_ROOT/bin/pyenv" rehash || true
 
     # 6. Ссылки для удобства
     ln -sf "$PYENV_ROOT/shims/python" /usr/local/bin/python3.12 2>/dev/null || true
@@ -464,7 +466,7 @@ download_bot() {
     
     # Создаём временную директорию для загрузки
     TEMP_DIR="/home/${BOT_USERNAME}/seal-install"
-    mkdir -p "$TEMP_DIR"
+    sudo -u "$BOT_USERNAME" mkdir -p "$TEMP_DIR"
     
     # Получаем URL последнего релиза
     log_info "Получение последней версии с GitHub..."
@@ -492,7 +494,7 @@ download_bot() {
         }
         
         # Создаём директорию и перемещаем файлы
-        mkdir -p "$INSTALL_DIR"
+        sudo -u "$BOT_USERNAME" mkdir -p "$INSTALL_DIR"
         mv ${TEMP_DIR}/*/* "$INSTALL_DIR/" 2>/dev/null || mv ${TEMP_DIR}/*/.* "$INSTALL_DIR/" 2>/dev/null || true
         
         # Удаляем временные файлы
