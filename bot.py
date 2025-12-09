@@ -198,22 +198,23 @@ def check_and_configure_config():
     
     # Если нет TTY (запуск через systemd) и конфиг не настроен - выходим с ошибкой
     if needs_config and not sys.stdin.isatty():
-        print(f"{Fore.LIGHTRED_EX}" + "="*60)
-        print(f"{Fore.LIGHTRED_EX}ОШИБКА: Конфигурация не завершена!")
-        print(f"{Fore.WHITE}Бот запущен в неинтерактивном режиме (systemd/nohup),")
-        print(f"{Fore.WHITE}но не все обязательные параметры настроены.")
-        print(f"{Fore.YELLOW}")
-        print(f"Отсутствуют:")
+        print("")
+        print("=" * 60)
+        print("    ТРЕБУЕТСЯ РУЧНАЯ НАСТРОЙКА")
+        print("=" * 60)
+        print("")
+        print("  Бот запущен в фоновом режиме, но конфигурация")
+        print("  не завершена. Интерактивный ввод невозможен.")
+        print("")
+        print("  Отсутствуют:")
         if not config["playerok"]["api"]["token"]:
-            print(f"  • Токен Playerok")
+            print("    - Токен Playerok")
         if not config["telegram"]["api"]["token"]:
-            print(f"  • Токен Telegram бота")
+            print("    - Токен Telegram бота")
         if not config["telegram"]["bot"]["password"]:
-            print(f"  • Пароль для Telegram бота")
-        print(f"{Fore.WHITE}")
-        print(f"Для первичной настройки запустите бот вручную:")
-        print(f"  {Fore.LIGHTWHITE_EX}python3 bot.py")
-        print(f"{Fore.LIGHTRED_EX}" + "="*60)
+            print("    - Пароль для Telegram бота")
+        print("")
+        print("=" * 60)
         sys.exit(1)
 
     def is_token_valid(token: str) -> bool:
@@ -339,37 +340,37 @@ def check_and_configure_config():
         pattern = r'^\d{7,12}:[A-Za-z0-9_-]{35}$'
         return bool(re.match(pattern, token))
     
-    def is_tg_bot_exists() -> bool:
-        max_retries = 5
-        base_delay = 3        
+    def is_tg_bot_exists() -> tuple[bool, str | None]:
+        """Проверяет Telegram бота. Возвращает (успех, username)."""
+        max_retries = 3
+        base_delay = 1
         for attempt in range(1, max_retries + 1):
             try:
                 response = requests.get(
                     f"https://api.telegram.org/bot{config['telegram']['api']['token']}/getMe",
-                    timeout=5
+                    timeout=10
                 )
                 data = response.json()
                 
                 if data.get("ok", False) is True and data.get("result", {}).get("is_bot", False) is True:
-                    # print(f"{Fore.GREEN}✓ Успешная проверка токена Telegram (попытка {attempt}/{max_retries})")
-                    return True
+                    username = data.get("result", {}).get("username", "")
+                    return True, username
                 
                 error_msg = data.get('description', 'Неизвестная ошибка')
-                print(f"{Fore.YELLOW}⚠ Ошибка проверки токена (попытка {attempt}/{max_retries}): {error_msg}")
+                if attempt < max_retries:
+                    print(f"{Fore.YELLOW}! Ошибка проверки токена: {error_msg}. Повтор...")
                 
             except requests.exceptions.RequestException as e:
-                print(f"{Fore.YELLOW}⚠ Сетевая ошибка при проверке токена (попытка {attempt}/{max_retries}): {str(e)}")
+                if attempt < max_retries:
+                    print(f"{Fore.YELLOW}! Сетевая ошибка: {str(e)[:50]}. Повтор...")
             except Exception as e:
-                print(f"{Fore.YELLOW}⚠ Неизвестная ошибка при проверке токена (попытка {attempt}/{max_retries}): {str(e)}")
+                if attempt < max_retries:
+                    print(f"{Fore.YELLOW}! Ошибка: {str(e)[:50]}. Повтор...")
             
-            # Если это не последняя попытка, ждем перед повторной проверкой
             if attempt < max_retries:
-                print(f"{Fore.WHITE}-_- Повторная попытка через {base_delay} сек...")
-                import time
                 time.sleep(base_delay)
         
-        print(f"{Fore.RED}✗ Не удалось проверить токен после {max_retries} попыток")
-        return False
+        return False, None
         
     def is_password_valid(password: str) -> bool:
         if len(password) < 6 or len(password) > 64:
@@ -388,7 +389,7 @@ def check_and_configure_config():
         while not config["playerok"]["api"]["token"]:
             print(f"\n{Fore.WHITE}Введите {Fore.LIGHTBLUE_EX}токен {Fore.WHITE}вашего Playerok аккаунта. Его можно узнать из Cookie-данных, воспользуйтесь расширением Cookie-Editor."
                 f"\n  {Fore.WHITE}· Пример: eyJhbGciOiJIUzI1NiIsInR5cCI1IkpXVCJ9.eyJzdWIiOiIxZWUxMzg0Ni...")
-            token = input(f"  {Fore.WHITE}↳ {Fore.LIGHTWHITE_EX}").strip()
+            token = input(f"  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
             if is_token_valid(token):
                 config["playerok"]["api"]["token"] = token
                 sett.set("config", config)
@@ -399,7 +400,7 @@ def check_and_configure_config():
         while not config["playerok"]["api"]["user_agent"]:
             print(f"\n{Fore.WHITE}Введите {Fore.LIGHTMAGENTA_EX}User Agent {Fore.WHITE}вашего браузера. Его можно скопировать на сайте {Fore.LIGHTWHITE_EX}https://whatmyuseragent.com. Или вы можете пропустить этот параметр, нажав Enter."
                 f"\n  {Fore.WHITE}· Пример: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
-            user_agent = input(f"  {Fore.WHITE}↳ {Fore.LIGHTWHITE_EX}").strip()
+            user_agent = input(f"  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
             if not user_agent:
                 print(f"\n{Fore.YELLOW}Вы пропустили ввод User Agent. Учтите, что в таком случае бот может работать нестабильно.")
                 break
@@ -422,7 +423,7 @@ def check_and_configure_config():
             print(f"\n  {Fore.WHITE}Пример HTTP: {Fore.LIGHTWHITE_EX}91.221.39.249:63880:KSbmS3e4:PXHYZPbB")
             print(f"  {Fore.WHITE}Пример SOCKS5: {Fore.LIGHTWHITE_EX}socks5://KSbmS3e4:PXHYZPbB@91.221.39.249:63880")
             print(f"\n  {Fore.YELLOW}Если не хотите использовать прокси - нажмите Enter.")
-            proxy = input(f"\n  {Fore.WHITE}↳ {Fore.LIGHTWHITE_EX}").strip()
+            proxy = input(f"\n  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
             if not proxy:
                 print(f"\n{Fore.WHITE}Вы пропустили ввод прокси.")
                 break
@@ -440,7 +441,7 @@ def check_and_configure_config():
                     print(f"  1 - Использовать этот прокси (может быть медленный, но рабочий)")
                     print(f"  2 - Ввести другой прокси")
                     print(f"  3 - Продолжить без прокси")
-                    choice = input(f"\n  {Fore.WHITE}↳ Ваш выбор (1/2/3): {Fore.LIGHTWHITE_EX}").strip()
+                    choice = input(f"\n  {Fore.WHITE}> Ваш выбор (1/2/3): {Fore.LIGHTWHITE_EX}").strip()
                     
                     if choice == "1":
                         print(f"\n{Fore.GREEN}Прокси будет использован в работе бота.")
@@ -463,21 +464,30 @@ def check_and_configure_config():
             else:
                 print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный Прокси. Убедитесь, что он соответствует формату и попробуйте ещё раз.")
 
+    # Проверка Telegram бота только при первичном вводе токена
+    tg_token_is_new = not config["telegram"]["api"]["token"]
+    
     while not config["telegram"]["api"]["token"]:
         print(f"\n{Fore.WHITE}Введите {Fore.CYAN}токен вашего Telegram бота{Fore.WHITE}. Бота нужно создать у @BotFather."
               f"\n  {Fore.WHITE}· Пример: 7257913369:AAG2KjLL3-zvvfSQFSVhaTb4w7tR2iXsJXM")
-        token = input(f"  {Fore.WHITE}↳ {Fore.LIGHTWHITE_EX}").strip()
+        token = input(f"  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
         if is_tg_token_valid(token):
+            # Проверяем бота сразу при вводе токена
             config["telegram"]["api"]["token"] = token
-            sett.set("config", config)
-            print(f"\n{Fore.GREEN}Токен Telegram бота успешно сохранён в конфиг.")
+            tg_ok, tg_username = is_tg_bot_exists()
+            if tg_ok:
+                sett.set("config", config)
+                print(f"\n{Fore.GREEN}Telegram бот подключен: {Fore.LIGHTCYAN_EX}@{tg_username}")
+            else:
+                config["telegram"]["api"]["token"] = ""
+                print(f"\n{Fore.LIGHTRED_EX}Не удалось подключиться к боту. Проверьте токен и попробуйте снова.")
         else:
             print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный токен. Убедитесь, что он соответствует формату и попробуйте ещё раз.")
 
     while not config["telegram"]["bot"]["password"]:
         print(f"\n{Fore.WHITE}Придумайте и введите {Fore.YELLOW}пароль для вашего Telegram бота{Fore.WHITE}. Бот будет запрашивать этот пароль при каждой новой попытке взаимодействия чужого пользователя с вашим Telegram ботом."
               f"\n  {Fore.WHITE}· Пароль должен быть сложным, длиной не менее 6 и не более 64 символов.")
-        password = input(f"  {Fore.WHITE}↳ {Fore.LIGHTWHITE_EX}").strip()
+        password = input(f"  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
         if is_password_valid(password):
             config["telegram"]["bot"]["password"] = password
             sett.set("config", config)
@@ -494,7 +504,7 @@ def check_and_configure_config():
             print(f"  1 - Использовать этот прокси")
             print(f"  2 - Ввести другой прокси")
             print(f"  3 - Продолжить без прокси")
-            choice = input(f"\n  {Fore.WHITE}↳ Ваш выбор (1/2/3): {Fore.LIGHTWHITE_EX}").strip()
+            choice = input(f"\n  {Fore.WHITE}> Ваш выбор (1/2/3): {Fore.LIGHTWHITE_EX}").strip()
             
             proxy_check_passed = False
             
@@ -518,7 +528,7 @@ def check_and_configure_config():
                     print(f"\n  {Fore.WHITE}Пример HTTP: {Fore.LIGHTWHITE_EX}91.221.39.249:63880:KSbmS3e4:PXHYZPbB")
                     print(f"  {Fore.WHITE}Пример SOCKS5: {Fore.LIGHTWHITE_EX}socks5://KSbmS3e4:PXHYZPbB@91.221.39.249:63880")
                     print(f"\n  {Fore.YELLOW}Если не хотите использовать прокси - нажмите Enter.")
-                    proxy = input(f"\n  {Fore.WHITE}↳ {Fore.LIGHTWHITE_EX}").strip()
+                    proxy = input(f"\n  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
                     if not proxy:
                         print(f"\n{Fore.WHITE}Вы пропустили ввод прокси.")
                         config["playerok"]["api"]["proxy"] = ""
@@ -556,7 +566,7 @@ def check_and_configure_config():
             print(f"  2 - Ввести новый прокси")
             print(f"  3 - Ввести новый токен и User-Agent")
             print(f"  4 - Попытаться запустить бота с текущими настройками (может не работать)")
-            choice = input(f"\n  {Fore.WHITE}↳ Ваш выбор (1/2/3/4): {Fore.LIGHTWHITE_EX}").strip()
+            choice = input(f"\n  {Fore.WHITE}> Ваш выбор (1/2/3/4): {Fore.LIGHTWHITE_EX}").strip()
             
             if choice == "1":
                 config["playerok"]["api"]["proxy"] = ""
@@ -600,13 +610,7 @@ def check_and_configure_config():
         sett.set("config", config)
         return check_and_configure_config()
 
-    if not is_tg_bot_exists():
-        print(f"\n{Fore.LIGHTRED_EX}Не удалось подключиться к вашему Telegram боту. Пожалуйста, убедитесь, что у вас указан верный токен и введите его снова.")
-        config["telegram"]["api"]["token"] = ""
-        sett.set("config", config)
-        return check_and_configure_config()
-    else:
-        logger.info(f"{Fore.WHITE}Telegram бот успешно работает.")
+    # Telegram бот уже проверен при вводе токена, дополнительная проверка не нужна
 
 
 if __name__ == "__main__":

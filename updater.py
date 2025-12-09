@@ -20,10 +20,20 @@ def check_for_updates():
     Если вышел новый релиз - скачивает и устанавливает обновление.
     """
     try:
-        response = requests.get(f"https://api.github.com/repos/{REPO}/releases")
-        if response.status_code != 200:
+        headers = {
+            "User-Agent": "SealPlayerokBot-Updater",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        response = requests.get(f"https://api.github.com/repos/{REPO}/releases", headers=headers, timeout=15)
+        # Пытаемся распарсить JSON даже при не-200 статусе
+        try:
+            releases = response.json()
+        except Exception:
             raise Exception(f"Ошибка запроса к GitHub API: {response.status_code}")
-        releases = response.json()
+        
+        # Если пришла ошибка в JSON формате
+        if isinstance(releases, dict) and releases.get("message"):
+            raise Exception(f"GitHub API: {releases.get('message')}")
         if not releases:
             logger.info(f"В репозитории пока нет релизов.")
             return
@@ -63,7 +73,11 @@ def download_update(release_info: dict) -> bytes:
     try:
         logger.info(f"Загружаю обновление {release_info['tag_name']}...")
         zip_url = release_info['zipball_url']
-        zip_response = requests.get(zip_url)
+        headers = {
+            "User-Agent": "SealPlayerokBot-Updater",
+            "Accept": "application/octet-stream"
+        }
+        zip_response = requests.get(zip_url, headers=headers, timeout=60)
         if zip_response.status_code != 200:
             raise Exception(f"При скачивании архива обновления произошла ошибка: {zip_response.status_code}")
         return zip_response.content
