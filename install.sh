@@ -517,7 +517,7 @@ create_venv() {
     PYENV_PATH="/opt/pyenv/bin:/opt/pyenv/shims:${PATH}"
     
     log_info "Создание venv с Python ${PYTHON_VERSION}..."
-    sudo -u "$BOT_USERNAME" env "PYENV_ROOT=${PYENV_ROOT}" "PATH=${PYENV_PATH}" python${PYTHON_VERSION} -m venv "$VENV_DIR" || {
+    sudo -u "$BOT_USERNAME" env "HOME=/home/${BOT_USERNAME}" "PYENV_ROOT=${PYENV_ROOT}" "PATH=${PYENV_PATH}" python${PYTHON_VERSION} -m venv "$VENV_DIR" || {
         log_error "Не удалось создать виртуальное окружение"
         exit 1
     }
@@ -527,7 +527,7 @@ create_venv() {
     "${VENV_DIR}/bin/python" -m ensurepip --upgrade 2>/dev/null || true
     
     # Обновляем pip от имени пользователя
-    sudo -u "$BOT_USERNAME" "${VENV_DIR}/bin/python" -m pip install --upgrade pip -q || true
+    sudo -u "$BOT_USERNAME" env "HOME=/home/${BOT_USERNAME}" "${VENV_DIR}/bin/python" -m pip install --upgrade pip -q || true
     
     # Устанавливаем правильного владельца
     chown -R "${BOT_USERNAME}:${BOT_USERNAME}" "$VENV_DIR"
@@ -543,11 +543,11 @@ install_python_deps() {
     
     if [ -f "${INSTALL_DIR}/requirements.txt" ]; then
         log_info "Установка зависимостей из requirements.txt..."
-        sudo -u "$BOT_USERNAME" "${VENV_DIR}/bin/pip" install -U -r "${INSTALL_DIR}/requirements.txt" || {
+        sudo -u "$BOT_USERNAME" env "HOME=/home/${BOT_USERNAME}" "${VENV_DIR}/bin/pip" install -U -r "${INSTALL_DIR}/requirements.txt" || {
             log_warning "Некоторые пакеты не установились, пробуем по одному..."
             while IFS= read -r package || [[ -n "$package" ]]; do
                 [[ -z "$package" || "$package" =~ ^# ]] && continue
-                sudo -u "$BOT_USERNAME" "${VENV_DIR}/bin/pip" install -U "$package" 2>/dev/null || log_warning "Не удалось: $package"
+                sudo -u "$BOT_USERNAME" env "HOME=/home/${BOT_USERNAME}" "${VENV_DIR}/bin/pip" install -U "$package" 2>/dev/null || log_warning "Не удалось: $package"
             done < "${INSTALL_DIR}/requirements.txt"
         }
     else
@@ -770,7 +770,10 @@ SERVICE="${SERVICE_NAME}"
 INSTALL_DIR="${INSTALL_DIR}"
 VENV_DIR="${VENV_DIR}"
 BOT_USER="${BOT_USERNAME}"
+BOT_HOME="/home/${BOT_USERNAME}"
 COMMAND_NAME="${COMMAND_NAME}"
+PYENV_ROOT="/opt/pyenv"
+PYENV_PATH="/opt/pyenv/bin:/opt/pyenv/shims"
 
 # Проверка статуса
 is_running() {
@@ -848,14 +851,13 @@ case "\$1" in
         # Останавливаем сервис если запущен
         sudo systemctl stop \$SERVICE 2>/dev/null || true
         # Запускаем от имени пользователя бота
-        sudo -u \$BOT_USER LANG=en_US.UTF-8 \${VENV_DIR}/bin/python \${INSTALL_DIR}/bot.py
+        sudo -u \$BOT_USER env "HOME=\$BOT_HOME" "PYENV_ROOT=\$PYENV_ROOT" "PATH=\$PYENV_PATH:\$PATH" LANG=en_US.UTF-8 \${VENV_DIR}/bin/python \${INSTALL_DIR}/bot.py
         ;;
     update)
         echo "🔄 Обновление бота..."
         sudo systemctl stop \$SERVICE 2>/dev/null || true
-        cd \$INSTALL_DIR
-        sudo -u \$BOT_USER git pull origin main 2>/dev/null || sudo -u \$BOT_USER git pull origin master
-        sudo -u \$BOT_USER \${VENV_DIR}/bin/pip install -U -r \${INSTALL_DIR}/requirements.txt -q
+        sudo -u \$BOT_USER env "HOME=\$BOT_HOME" git -C \$INSTALL_DIR pull origin main 2>/dev/null || sudo -u \$BOT_USER env "HOME=\$BOT_HOME" git -C \$INSTALL_DIR pull origin master
+        sudo -u \$BOT_USER env "HOME=\$BOT_HOME" "PYENV_ROOT=\$PYENV_ROOT" "PATH=\$PYENV_PATH:\$PATH" \${VENV_DIR}/bin/pip install -U -r \${INSTALL_DIR}/requirements.txt -q
         echo "✅ Обновление завершено"
         echo "   Запусти: ${COMMAND_NAME} start"
         ;;
