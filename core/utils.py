@@ -14,6 +14,9 @@ from colorama import Fore
 from threading import Thread
 from logging import getLogger
 
+# Импорт путей из центрального модуля
+import paths
+
 
 logger = getLogger("seal.utils")
 _main_loop = None
@@ -64,7 +67,7 @@ def set_title(title: str):
         pass
 
 
-def setup_logger(log_file: str = "logs/latest.log", show_seal_art: bool = True, seal_variant: int = 1):
+def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant: int = 1):
     """
     Настраивает логгер с морским стилем.
 
@@ -78,7 +81,10 @@ def setup_logger(log_file: str = "logs/latest.log", show_seal_art: bool = True, 
             record.shortLevel = record.levelname[0]
             return super().format(record)
 
-    os.makedirs("logs", exist_ok=True)
+    # Используем абсолютные пути из модуля paths
+    if log_file is None:
+        log_file = paths.LATEST_LOG_FILE
+    os.makedirs(paths.LOGS_DIR, exist_ok=True)
     
     # Морская цветовая палитра для логов
     LOG_FORMAT = "%(light_black)s%(asctime)s%(reset)s %(cyan)s•%(reset)s %(log_color)s%(shortLevel)s%(reset)s %(white)s%(message)s"
@@ -245,7 +251,7 @@ def setup_gradient_logger(log_file: str = "logs/latest.log", show_seal_art: bool
             
             return f"{gradient_prefix} {message}"
 
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs(paths.LOGS_DIR, exist_ok=True)
     
     # Выводим ASCII-арт тюленя при запуске
     if show_seal_art:

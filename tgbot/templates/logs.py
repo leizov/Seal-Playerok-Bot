@@ -3,6 +3,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pathlib import Path
 import logging
 
+# Импорт путей из центрального модуля
+import paths
+
 from .. import callback_datas as calls
 
 logger = logging.getLogger("seal.telegram.logs")
@@ -16,7 +19,7 @@ def get_latest_logs(lines: int = 30) -> str:
     :return: Текст лога или сообщение об ошибке
     """
     try:
-        log_dir = Path("logs")
+        log_dir = Path(paths.LOGS_DIR)
         if not log_dir.exists():
             return "❌ Директория с логами не найдена."
             

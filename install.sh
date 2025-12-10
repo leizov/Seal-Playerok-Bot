@@ -923,8 +923,8 @@ case "\$1" in
         echo ""
         # Останавливаем сервис если запущен
         sudo systemctl stop \$SERVICE 2>/dev/null || true
-        # Запускаем от имени пользователя бота
-        sudo -u \$BOT_USER env "HOME=\$BOT_HOME" "PYENV_ROOT=\$PYENV_ROOT" "PATH=\$PYENV_PATH:\$PATH" LANG=en_US.UTF-8 \${VENV_DIR}/bin/python \${INSTALL_DIR}/bot.py
+        # Запускаем от имени пользователя бота С ПЕРЕХОДОМ В ДИРЕКТОРИЮ БОТА
+        cd "\$INSTALL_DIR" && sudo -u \$BOT_USER env "HOME=\$BOT_HOME" "PYENV_ROOT=\$PYENV_ROOT" "PATH=\$PYENV_PATH:\$PATH" LANG=en_US.UTF-8 \${VENV_DIR}/bin/python \${INSTALL_DIR}/bot.py
         ;;
     update)
         echo "🔄 Обновление бота..."
@@ -986,10 +986,25 @@ NC='\033[0m'
 INSTALL_URL="https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/install.sh"
 
 case "$1" in
-    install|setup|new)
+    install|new)
         echo -e "${CYAN}🦭 Запуск установщика SealPlayerok Bot...${NC}"
         echo ""
         bash <(curl -sL "$INSTALL_URL")
+        ;;
+    setup)
+        echo -e "${YELLOW}⚠️  Команда 'seal setup' требует имя бота!${NC}"
+        echo ""
+        echo -e "Правильное использование:"
+        echo -e "  ${GREEN}seal <имя> setup${NC}  — настройка конкретного бота"
+        echo -e "  ${GREEN}seal-<имя> setup${NC}  — альтернативный формат"
+        echo ""
+        echo -e "Пример: ${GREEN}seal sealbot setup${NC}"
+        echo ""
+        echo -e "${CYAN}Установленные боты:${NC}"
+        for cmd in /usr/local/bin/seal-*; do
+            [ -x "$cmd" ] && [ -f "$cmd" ] && echo -e "  - $(basename $cmd)"
+        done
+        echo ""
         ;;
     list|ls)
         echo -e "${CYAN}🦭 Установленные боты SealPlayerok:${NC}"
@@ -1017,14 +1032,14 @@ case "$1" in
     help|--help|-h|"")
         echo -e "${CYAN}🦭 SealPlayerok Bot - Глобальные команды${NC}"
         echo ""
-        echo -e "  ${GREEN}seal install${NC}    - 🚀 Установить нового бота"
-        echo -e "  ${GREEN}seal list${NC}       - 📋 Список установленных ботов"
+        echo -e "  ${GREEN}seal install${NC}      - 🚀 Установить нового бота"
+        echo -e "  ${GREEN}seal list${NC}         - 📋 Список установленных ботов"
         echo ""
-        echo -e "${YELLOW}Для управления конкретным ботом используй:${NC}"
-        echo -e "  ${GREEN}seal-<имя> start${NC}   - запустить"
-        echo -e "  ${GREEN}seal-<имя> stop${NC}    - остановить"
-        echo -e "  ${GREEN}seal-<имя> setup${NC}   - настроить"
-        echo -e "  ${GREEN}seal-<имя> logs${NC}    - логи"
+        echo -e "${YELLOW}Для управления конкретным ботом (два формата):${NC}"
+        echo -e "  ${GREEN}seal <имя> start${NC}    или  ${GREEN}seal-<имя> start${NC}"
+        echo -e "  ${GREEN}seal <имя> stop${NC}     или  ${GREEN}seal-<имя> stop${NC}"
+        echo -e "  ${GREEN}seal <имя> setup${NC}    или  ${GREEN}seal-<имя> setup${NC}   - настроить"
+        echo -e "  ${GREEN}seal <имя> logs${NC}     или  ${GREEN}seal-<имя> logs${NC}"
         echo ""
         echo -e "${CYAN}Установленные боты:${NC}"
         for cmd in /usr/local/bin/seal-*; do

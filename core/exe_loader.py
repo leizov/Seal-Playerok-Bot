@@ -33,6 +33,9 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from logging import getLogger
 
+# Импорт путей из центрального модуля
+import paths
+
 logger = getLogger("seal.pyd_loader")
 
 # Информация о текущей системе
@@ -120,7 +123,7 @@ class PydPluginLoader:
         Args:
             plugins_dir: Директория с .pyd плагинами
         """
-        self.plugins_dir = Path(plugins_dir) if plugins_dir else Path("plugins")
+        self.plugins_dir = Path(plugins_dir) if plugins_dir else Path(paths.PLUGINS_DIR)
         self.plugins_dir.mkdir(exist_ok=True)
         
         self._plugins: Dict[str, PydPluginInfo] = {}

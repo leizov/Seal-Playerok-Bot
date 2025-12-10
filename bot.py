@@ -1,8 +1,53 @@
 # ===========================================================================
-# Исправление кодировки консоли Windows для поддержки Unicode
+# РАННЯЯ УСТАНОВКА ЗАВИСИМОСТЕЙ (до любых внешних импортов!)
 # ===========================================================================
+# Эта секция использует ТОЛЬКО стандартную библиотеку Python
 import sys
 import os
+import subprocess
+
+def _early_install_requirements():
+    """Устанавливает зависимости ДО импорта внешних модулей."""
+    requirements_path = "requirements.txt"
+    if not os.path.exists(requirements_path):
+        return
+    
+    try:
+        import pkg_resources
+    except ImportError:
+        # setuptools не установлен - устанавливаем все
+        print("[*] Установка зависимостей...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-r", requirements_path, "-q"],
+            stdout=subprocess.DEVNULL if os.name != 'nt' else None
+        )
+        return
+    
+    # Проверяем каждый пакет
+    missing = []
+    with open(requirements_path, "r", encoding="utf-8") as f:
+        for line in f:
+            pkg = line.strip()
+            if not pkg or pkg.startswith("#"):
+                continue
+            try:
+                pkg_resources.require(pkg)
+            except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict):
+                missing.append(pkg)
+    
+    if missing:
+        print(f"[*] Установка недостающих пакетов: {', '.join(missing)}")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing, "-q"])
+        # Перезагружаем pkg_resources после установки
+        import importlib
+        importlib.reload(pkg_resources)
+
+# Выполняем установку СРАЗУ
+_early_install_requirements()
+
+# ===========================================================================
+# Исправление кодировки консоли Windows для поддержки Unicode
+# ===========================================================================
 
 # Принудительная UTF-8 кодировка на Windows
 if sys.platform == 'win32':
@@ -45,6 +90,14 @@ if sys.version_info.major != REQUIRED_PYTHON_MAJOR or sys.version_info.minor != 
 print(f"[OK] Python {current_version} - версия совместима с плагинами")
 
 # ═══════════════════════════════════════════════════════════════════════
+# СОЗДАНИЕ ВСЕХ НЕОБХОДИМЫХ ДИРЕКТОРИЙ
+# ═══════════════════════════════════════════════════════════════════════
+# Создаём директории ДО любых других операций, чтобы избежать PermissionError
+
+import paths
+paths.ensure_dirs()
+
+# ═══════════════════════════════════════════════════════════════════════
 # ПРОВЕРКА КОДА АКТИВАЦИИ
 # ═══════════════════════════════════════════════════════════════════════
 # Код: 8 символов, 2-й = R или B, последний = 7 или 4
@@ -70,11 +123,12 @@ def validate_activation_code(code: str) -> bool:
 
 def check_activation_code():
     """Проверяет код активации при первом запуске"""
-    config_path = "bot_settings/config.json"
+    config_path = paths.CONFIG_FILE
+    settings_dir = paths.BOT_SETTINGS_DIR
     
     # Проверяем существует ли конфиг
     if not os.path.exists(config_path):
-        os.makedirs("bot_settings", exist_ok=True)
+        os.makedirs(settings_dir, exist_ok=True)
         # Конфиг создастся позже, но код нужен сейчас
         saved_code = ""
     else:
@@ -144,13 +198,13 @@ from colorama import Fore, init as init_colorama
 from logging import getLogger
 
 from playerokapi.account import Account
+from playerokapi.exceptions import CloudflareDetectedException
 
 from __init__ import ACCENT_COLOR, VERSION, SECONDARY_COLOR, HIGHLIGHT_COLOR, SUCCESS_COLOR
 from settings import Settings as sett
 from core.utils import (
     set_title, 
     setup_logger, 
-    install_requirements, 
     patch_requests, 
     init_main_loop, 
     run_async_in_thread
@@ -615,7 +669,7 @@ def check_and_configure_config():
 
 if __name__ == "__main__":
     try:
-        install_requirements("requirements.txt") # установка недостающих зависимостей, если таковые есть
+        # Зависимости уже установлены в начале файла (_early_install_requirements)
         patch_requests()
         setup_logger()
         
@@ -687,6 +741,66 @@ if __name__ == "__main__":
         # Пользователь нажал Ctrl+C - нормальный выход
         logger.info(f"{Fore.LIGHTCYAN_EX}🦭 Бот остановлен пользователем. До свидания! 🌊")
         raise SystemExit(0)  # Нормальный выход (код 0)
+    
+    except CloudflareDetectedException as e:
+        # ═════════════════════════════════════════════════════════════════════
+        # CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ
+        # НЕ сбрасываем конфиг, а отправляем уведомления и останавливаем бот
+        # ═════════════════════════════════════════════════════════════════════
+        logger.error(f"{Fore.LIGHTRED_EX}❌ Cloudflare заблокировал запросы к API!")
+        logger.error(f"{Fore.YELLOW}Требуется смена токена, прокси или user-agent.")
+        
+        # Отправляем уведомление в Telegram
+        try:
+            from tgbot.telegrambot import get_telegram_bot
+            tg_bot = get_telegram_bot()
+            config = sett.get("config")
+            
+            if tg_bot and config["telegram"]["api"]["token"]:
+                notification_text = (
+                    "🚨 <b>CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ!</b>\n\n"
+                    "❌ Бот не может выполнять запросы к Playerok API.\n\n"
+                    "🛠 <b>Инструкция по исправлению:</b>\n"
+                    "1\ufe0f⃣ Перезайдите на playerok.com в браузере\n"
+                    "2\ufe0f⃣ Скопируйте новый токен (Cookie: token=...)\n"
+                    "3\ufe0f⃣ Смените токен через этот бот:\n"
+                    "   • 🔧 <b>Настройки</b> → <b>🔑 Аккаунт</b> → <b>🎫 Токен</b>\n"
+                    "4\ufe0f⃣ При необходимости смените прокси и user-agent\n"
+                    "5\ufe0f⃣ Перезапустите бота\n\n"
+                    "⚠️ <b>Бот остановлен.</b> Настройки сохранены.\n"
+                    "Измените данные через этот бот и перезапустите."
+                )
+                
+                signed_users = config["telegram"]["bot"].get("signed_users", [])
+                for user_id in signed_users:
+                    try:
+                        asyncio.run(tg_bot.bot.send_message(
+                            chat_id=user_id,
+                            text=notification_text,
+                            parse_mode="HTML"
+                        ))
+                        logger.info(f"📨 Уведомление Cloudflare отправлено пользователю {user_id}")
+                    except Exception as notify_err:
+                        logger.warning(f"Не удалось отправить уведомление {user_id}: {notify_err}")
+        except Exception as tg_err:
+            logger.warning(f"Не удалось отправить уведомления в Telegram: {tg_err}")
+        
+        # Выводим инструкцию в консоль
+        print(f"\n{Fore.LIGHTRED_EX}{'='*60}")
+        print(f"{Fore.LIGHTRED_EX}❌ CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ!")
+        print(f"{Fore.LIGHTRED_EX}{'='*60}")
+        print(f"\n{Fore.YELLOW}Требуется смена данных для доступа к API:")
+        print(f"{Fore.WHITE}  1. Перезайдите на playerok.com в браузере")
+        print(f"{Fore.WHITE}  2. Скопируйте новый токен (Cookie: token=...)")
+        print(f"{Fore.WHITE}  3. Смените токен через Telegram бот:")
+        print(f"{Fore.LIGHTWHITE_EX}     🔧 Настройки → 🔑 Аккаунт → 🎫 Токен")
+        print(f"{Fore.WHITE}  4. При необходимости смените прокси и user-agent")
+        print(f"{Fore.WHITE}  5. Перезапустите бота")
+        print(f"\n{Fore.GREEN}✅ Настройки сохранены. Измените через TG и перезапустите.")
+        print(f"{Fore.LIGHTRED_EX}{'='*60}\n")
+        
+        raise SystemExit(2)  # Выход с кодом 2 (требуется смена данных)
+    
     except Exception as e:
         traceback.print_exc()
         print(

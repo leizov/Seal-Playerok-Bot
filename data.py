@@ -2,6 +2,9 @@ import json
 import os
 from dataclasses import dataclass
 
+# Импорт путей из центрального модуля
+import paths
+
 
 @dataclass
 class DataFile:
@@ -12,7 +15,7 @@ class DataFile:
 
 INITIALIZED_USERS = DataFile(
     name="initialized_users",
-    path="bot_data/initialized_users.json",
+    path=paths.INITIALIZED_USERS_FILE,
     default={}  # {user_id: timestamp} - время последнего приветствия
 )
 

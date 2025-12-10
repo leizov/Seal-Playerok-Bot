@@ -3,8 +3,11 @@ import os
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
+# Импорт путей из центрального модуля
+import paths
 
-STATS_FILE = "bot_data/stats.json"
+
+STATS_FILE = paths.STATS_FILE
 
 
 @dataclass

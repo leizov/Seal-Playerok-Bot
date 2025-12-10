@@ -51,7 +51,7 @@ class Account:
             user_agent: str = "",
             proxy: str = None,
             requests_timeout: int = 15,
-            request_max_retries: int = 5,
+            request_max_retries: int = 7,
             auid: str = None
         ):
         if hasattr(self, '_initialized'):
@@ -263,16 +263,25 @@ class Account:
             "cf-browser-verification",
             "Cloudflare Ray ID"
         ]
-        base_delay = 3
+        # Прогрессивные задержки: 1, 2, 3, 3, 3, 3, 3 секунды (max 3 сек)
+        max_delay = 3.0
         for attempt in range(self.request_max_retries):
             resp = make_req()
             if not any(sig in resp.text for sig in cloudflare_signatures):
                 break
-            delay = min(20.0, base_delay * attempt)
-            self.__logger.error(f"Cloudflare Detected, пробую отправить запрос снова через {delay} сек.")
+            # Прогрессивная задержка: 1, 2, 3, 3, 3...
+            delay = min(max_delay, float(attempt + 1))
+            self.__logger.warning(
+                f"⚠️ Cloudflare Detected (попытка {attempt + 1}/{self.request_max_retries}), "
+                f"повтор через {delay:.0f} сек..."
+            )
             time.sleep(delay)
             self._refresh_clients()
         else:
+            self.__logger.error(
+                f"❌ Cloudflare заблокировал все {self.request_max_retries} попыток! "
+                f"Требуется смена токена/прокси/user-agent."
+            )
             raise CloudflareDetectedException(resp)
         try:
             if "errors" in resp.json():

@@ -17,6 +17,9 @@ from datetime import datetime, timezone, timedelta
 from logging import getLogger
 from typing import TYPE_CHECKING
 
+# Импорт путей из центрального модуля
+import paths
+
 if TYPE_CHECKING:
     from playerokapi.account import Account
     from playerokapi.types import ItemDeal
@@ -25,7 +28,7 @@ if TYPE_CHECKING:
 logger = getLogger("seal.review_monitor")
 
 # Путь к файлу с мониторингом сделок
-DEALS_FILE = "bot_data/deals_to_monitor.json"
+DEALS_FILE = paths.DEALS_MONITOR_FILE
 
 
 def load_deals() -> dict:

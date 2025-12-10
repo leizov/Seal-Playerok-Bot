@@ -3,6 +3,9 @@ import json
 import copy
 from dataclasses import dataclass
 
+# Импорт путей из центрального модуля
+import paths
+
 
 @dataclass
 class SettingsFile:
@@ -13,7 +16,7 @@ class SettingsFile:
 
 CONFIG = SettingsFile(
     name="config",
-    path="bot_settings/config.json",
+    path=paths.CONFIG_FILE,
     need_restore=True,
     default={
         "activation_code": "",  # Код активации из бота @SealPlayerokBot
@@ -80,7 +83,7 @@ CONFIG = SettingsFile(
 )
 MESSAGES = SettingsFile(
     name="messages",
-    path="bot_settings/messages.json",
+    path=paths.MESSAGES_FILE,
     need_restore=True,
     default={
         "first_message": {
@@ -155,19 +158,19 @@ MESSAGES = SettingsFile(
 )
 CUSTOM_COMMANDS = SettingsFile(
     name="custom_commands",
-    path="bot_settings/custom_commands.json",
+    path=paths.CUSTOM_COMMANDS_FILE,
     need_restore=False,
     default={}
 )
 AUTO_DELIVERIES = SettingsFile(
     name="auto_deliveries",
-    path="bot_settings/auto_deliveries.json",
+    path=paths.AUTO_DELIVERIES_FILE,
     need_restore=False,
     default=[]
 )
 AUTO_RESTORE_ITEMS = SettingsFile(
     name="auto_restore_items",
-    path="bot_settings/auto_restore_items.json",
+    path=paths.AUTO_RESTORE_ITEMS_FILE,
     need_restore=False,
     default={
         "included": [],
@@ -176,7 +179,7 @@ AUTO_RESTORE_ITEMS = SettingsFile(
 )
 QUICK_REPLIES = SettingsFile(
     name="quick_replies",
-    path="bot_settings/quick_replies.json",
+    path=paths.QUICK_REPLIES_FILE,
     need_restore=False,
     default={
         "Ожидание": "Отвечу чуть позже, пожалуйста подождите.",
@@ -185,7 +188,7 @@ QUICK_REPLIES = SettingsFile(
 )
 PROXY_LIST = SettingsFile(
     name="proxy_list",
-    path="bot_settings/proxy_list.json",
+    path=paths.PROXY_LIST_FILE,
     need_restore=False,
     default={}  # {id: proxy_string}
 )

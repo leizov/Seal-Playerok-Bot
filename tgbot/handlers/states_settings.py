@@ -1,13 +1,19 @@
 import re
+import asyncio
+from logging import getLogger
 from aiogram import types, Router, F
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from settings import Settings as sett
+from core.utils import restart
 
 from .. import templates as templ
 from .. import states
 from .. import callback_datas as calls
 from ..helpful import throw_float_message
+
+logger = getLogger("seal.settings")
 
 
 router = Router()
@@ -49,14 +55,27 @@ async def handler_waiting_for_token(message: types.Message, state: FSMContext):
             raise Exception("❌ Слишком короткое или длинное значение")
 
         config = sett.get("config")
-        config["playerok"]["api"]["token"] = message.text.strip()
+        old_token = config["playerok"]["api"]["token"]
+        new_token = message.text.strip()
+        config["playerok"]["api"]["token"] = new_token
         sett.set("config", config)
+        
+        logger.info(f"🎫 Токен изменён через Telegram")
 
+        # Показываем сообщение с предложением перезапуска
+        restart_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Перезапустить бота", callback_data="restart_bot_confirm")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.SettingsNavigation(to="account").pack())]
+        ])
+        
         await throw_float_message(
             state=state,
             message=message,
-            text=templ.settings_account_float_text(f"✅ <b>Токен</b> был успешно изменён на <b>{message.text.strip()}</b>"),
-            reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
+            text=templ.settings_account_float_text(
+                f"✅ <b>Токен</b> успешно изменён!\n\n"
+                f"⚠️ <b>Важно:</b> Для применения изменений требуется перезапуск бота."
+            ),
+            reply_markup=restart_kb
         )
     except Exception as e:
         await throw_float_message(
@@ -77,12 +96,23 @@ async def handler_waiting_for_user_agent(message: types.Message, state: FSMConte
         config = sett.get("config")
         config["playerok"]["api"]["user_agent"] = message.text.strip()
         sett.set("config", config)
+        
+        logger.info(f"🎩 User-Agent изменён через Telegram")
 
+        # Показываем сообщение с предложением перезапуска
+        restart_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Перезапустить бота", callback_data="restart_bot_confirm")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.SettingsNavigation(to="account").pack())]
+        ])
+        
         await throw_float_message(
             state=state,
             message=message,
-            text=templ.settings_account_float_text(f"✅ <b>user_agent</b> был успешно изменён на <b>{message.text.strip()}</b>"),
-            reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
+            text=templ.settings_account_float_text(
+                f"✅ <b>User-Agent</b> успешно изменён!\n\n"
+                f"⚠️ <b>Важно:</b> Для применения изменений требуется перезапуск бота."
+            ),
+            reply_markup=restart_kb
         )
     except Exception as e:
         await throw_float_message(
@@ -239,3 +269,32 @@ async def handler_waiting_for_watermark_value(message: types.Message, state: FSM
             text=templ.settings_watermark_float_text(e), 
             reply_markup=templ.back_kb(calls.SettingsNavigation(to="watermark").pack())
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ОБРАБОТЧИК ПЕРЕЗАПУСКА БОТА
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data == "restart_bot_confirm")
+async def callback_restart_bot(callback: types.CallbackQuery, state: FSMContext):
+    """Обработчик подтверждения перезапуска бота."""
+    try:
+        logger.info(f"🔄 Перезапуск бота инициирован пользователем {callback.from_user.id}")
+        
+        await callback.message.edit_text(
+            "🔄 <b>Перезапуск бота...</b>\n\n"
+            "⏳ Бот перезапускается для применения новых настроек.\n"
+            "Это займёт несколько секунд.",
+            parse_mode="HTML"
+        )
+        await callback.answer("🔄 Перезапуск бота...")
+        
+        # Небольшая задержка для отправки сообщения
+        await asyncio.sleep(1)
+        
+        # Перезапускаем бота
+        restart()
+        
+    except Exception as e:
+        logger.error(f"Ошибка при перезапуске бота: {e}")
+        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)

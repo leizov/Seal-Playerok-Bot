@@ -6,6 +6,9 @@ import shutil
 from colorama import Fore
 from logging import getLogger
 
+# Импорт путей из центрального модуля
+import paths
+
 from __init__ import VERSION, SKIP_UPDATES
 from core.utils import restart
 
@@ -111,7 +114,7 @@ def install_update(release_info: dict, content: bytes) -> bool:
             for root, _, files in os.walk(archive_root):
                 for file in files:
                     src = os.path.join(root, file)
-                    dst = os.path.join('.', os.path.relpath(src, archive_root))
+                    dst = os.path.join(paths.ROOT_DIR, os.path.relpath(src, archive_root))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     shutil.copy2(src, dst)
             return True

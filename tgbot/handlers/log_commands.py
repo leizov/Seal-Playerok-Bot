@@ -9,6 +9,9 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
+# Импорт путей из центрального модуля
+import paths
+
 from settings import Settings as sett
 from .. import templates as templ
 from .. import callback_datas as calls
@@ -25,7 +28,7 @@ def get_latest_logs(lines: int = 50) -> Optional[str]:
     :return: Текст лога или сообщение об ошибке
     """
     try:
-        log_dir = Path("logs")
+        log_dir = Path(paths.LOGS_DIR)
         if not log_dir.exists():
             return "❌ Директория с логами не найдена."
             

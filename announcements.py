@@ -9,6 +9,9 @@ import requests
 import json
 import os
 
+# Импорт путей из центрального модуля
+import paths
+
 if TYPE_CHECKING:
     from tgbot.telegrambot import TelegramBot
 
@@ -22,10 +25,8 @@ GIST_ID = "37681cb21e62d15b501f23fa4c9d29f2"
 
 def get_cache_path() -> str:
     """Возвращает путь к файлу кэша."""
-    cache_dir = "storage/cache"
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir)
-    return os.path.join(cache_dir, "announcement_tag.txt")
+    os.makedirs(paths.CACHE_DIR, exist_ok=True)
+    return paths.ANNOUNCEMENT_TAG_FILE
 
 
 def get_last_tag() -> str | None:

@@ -6,9 +6,12 @@ import hashlib
 import secrets
 import os
 
+# Импорт путей из центрального модуля
+import paths
+
 
 # Файл для хранения соли (создаётся один раз)
-SALT_FILE = "bot_data/.salt"
+SALT_FILE = paths.SALT_FILE
 
 
 def get_or_create_salt() -> bytes:

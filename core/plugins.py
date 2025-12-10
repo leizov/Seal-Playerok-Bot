@@ -8,6 +8,9 @@ from colorama import Fore
 from dataclasses import dataclass
 from logging import getLogger
 
+# Импорт путей из центрального модуля
+import paths
+
 from __init__ import ACCENT_COLOR
 from core.handlers import (
     register_playerok_event_handlers, 
@@ -230,7 +233,7 @@ def load_plugins() -> list[Plugin]:
     global loaded_plugins
     
     plugins = []
-    plugins_path = "plugins"
+    plugins_path = paths.PLUGINS_DIR
     os.makedirs(plugins_path, exist_ok=True)
 
     # ═══════════════════════════════════════════════════════════════
