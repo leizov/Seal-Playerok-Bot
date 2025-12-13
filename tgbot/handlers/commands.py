@@ -140,13 +140,16 @@ async def handler_power_off(message: types.Message, state: FSMContext):
 
 
 @router.message(Command("fingerprint"))
-async def handler_fingerprint(message: types.Message, state: FSMContext):
+async def handler_fingerprint(message: types.Message, state: FSMContext, bot: Bot):
     """
     Обработчик команды /fingerprint
-    Генерирует HWID для привязки лицензии к железу
+    Генерирует HWID для привязки лицензии к железу И боту
     
-    ВАЖНО: Алгоритм должен совпадать с protection.py!
-    HWID = SHA256(MAC|CPU_ID|MB_SERIAL|DISK_SERIAL)
+    ВАЖНО: Fingerprint V2 включает Bot ID!
+    FINGERPRINT = SHA256(HWID + BOT_ID)[:32]
+    
+    Это гарантирует что плагин работает только на конкретной машине
+    с конкретным ботом. Нельзя перенести на другого бота.
     """
     config = sett.get("config")
     
@@ -160,13 +163,15 @@ async def handler_fingerprint(message: types.Message, state: FSMContext):
         import uuid
         import sys
         
-        # Собираем аппаратные компоненты (КАК В PROTECTION.PY!)
+        # ═══════════════════════════════════════════════════════════════
+        # 1. СОБИРАЕМ HWID (аппаратные компоненты)
+        # ═══════════════════════════════════════════════════════════════
         components = []
         
-        # 1. MAC address
+        # MAC address
         components.append(hex(uuid.getnode()))
         
-        # 2. CPU ID (Windows only)
+        # CPU ID (Windows only)
         try:
             if sys.platform == "win32":
                 result = subprocess.check_output('wmic cpu get processorid', 
@@ -177,7 +182,7 @@ async def handler_fingerprint(message: types.Message, state: FSMContext):
         except Exception:
             pass
         
-        # 3. Motherboard serial (Windows only)
+        # Motherboard serial (Windows only)
         try:
             if sys.platform == "win32":
                 result = subprocess.check_output('wmic baseboard get serialnumber',
@@ -188,7 +193,7 @@ async def handler_fingerprint(message: types.Message, state: FSMContext):
         except Exception:
             pass
         
-        # 4. Disk serial (Windows only)
+        # Disk serial (Windows only)
         try:
             if sys.platform == "win32":
                 result = subprocess.check_output('wmic diskdrive get serialnumber',
@@ -199,24 +204,46 @@ async def handler_fingerprint(message: types.Message, state: FSMContext):
         except Exception:
             pass
         
-        # Генерируем HWID (КАК В PROTECTION.PY!)
-        # ПОЛНЫЙ SHA256 хеш, первые 32 символа для отображения
-        hwid_raw = '|'.join(components)
-        hwid_full = hashlib.sha256(hwid_raw.encode()).hexdigest()
+        # Linux machine-id
+        if sys.platform.startswith("linux"):
+            try:
+                with open("/etc/machine-id", "r") as f:
+                    components.append(f"MACHINE:{f.read().strip()}")
+            except Exception:
+                pass
         
-        # Для покупки используем полный хеш (64 символа)
-        # Но показываем первые 32 в формате XXXX-XXXX-...
-        fingerprint = hwid_full[:32].upper()
+        # ═══════════════════════════════════════════════════════════════
+        # 2. ПОЛУЧАЕМ BOT ID
+        # ═══════════════════════════════════════════════════════════════
+        bot_info = await bot.get_me()
+        bot_id = bot_info.id
+        
+        # ═══════════════════════════════════════════════════════════════
+        # 3. ГЕНЕРИРУЕМ FINGERPRINT V2 (HWID + Bot ID)
+        # ═══════════════════════════════════════════════════════════════
+        # Сначала хешируем HWID
+        hwid_raw = '|'.join(components)
+        hwid_hash = hashlib.sha256(hwid_raw.encode()).hexdigest()
+        
+        # Затем комбинируем с Bot ID и хешируем снова
+        # Это гарантирует что один и тот же HWID с разными ботами
+        # даст разные fingerprint
+        combined = f"{hwid_hash}:{bot_id}"
+        fingerprint_full = hashlib.sha256(combined.encode()).hexdigest()
+        
+        # Берём первые 32 символа для отображения
+        fingerprint = fingerprint_full[:32].upper()
         formatted = "-".join([fingerprint[i:i+4] for i in range(0, 32, 4)])
         
         await message.answer(
-            f"🦭 <b>Твой Hardware Fingerprint</b>\n\n"
+            f"🦭 <b>Твой Fingerprint V2</b>\n\n"
             f"<code>{formatted}</code>\n\n"
             f"📋 <i>Скопируй и отправь при покупке плагина.</i>\n"
-            f"🔒 <i>Плагин будет привязан к этому железу!</i>\n\n"
+            f"🔒 <i>Плагин будет привязан к этому железу И этому боту!</i>\n\n"
             f"<b>Компоненты:</b>\n"
-            f"• MAC: <code>{components[0][:16]}...</code>\n"
-            f"• CPU/MB/Disk: {len(components)-1} компонент(ов)",
+            f"• HWID: <code>{hwid_hash[:12]}...</code>\n"
+            f"• Bot ID: <code>{bot_id}</code>\n"
+            f"• Версия: <code>V2 (с Bot ID)</code>",
             parse_mode="HTML"
         )
         
