@@ -2,7 +2,7 @@ import textwrap
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from settings import Settings as sett
 from .. import callback_datas as calls
-
+#old
 def autoresponse_return_text():
     config = sett.get("config")
     enabled = config.get("autoresponse", {}).get("return", {}).get("enabled", False)

@@ -1,12 +1,12 @@
 from colorama import Fore
 
-# Seal Playerok Bot - Морской стиль с тюленями 🦭
-VERSION = "1.0.19"
+# Seal Playerok Bot - милым быть круто 🦭
+VERSION = "1.0.20"
 DEVELOPER = "@leizov"
 REPOSITORY = "https://github.com/leizov/Seal-Playerok-Bot"
 SKIP_UPDATES = False
 
-# Ссылки для описания бота
+# Ссылки мои типо
 TELEGRAM_CHANNEL = "https://t.me/SealPlayerok"
 TELEGRAM_CHAT = "https://t.me/SealPlayerokChat"
 TELEGRAM_BOT = "https://t.me/SealPlayerokBot"

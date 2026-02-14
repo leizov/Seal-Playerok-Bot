@@ -15,6 +15,11 @@ router = Router()
 async def process_review_monitor_days(message: Message, state: FSMContext):
     """Обработка ввода количества дней ожидания отзыва"""
     try:
+        # шалтайболтай
+        if message.text.startswith('/'):
+            await state.clear()
+            return
+
         # Проверяем, что введено число
         days = int(message.text.strip())
         
@@ -40,7 +45,7 @@ async def process_review_monitor_days(message: Message, state: FSMContext):
         review_config["wait_days"] = days
         
         config["playerok"]["review_monitoring"] = review_config
-        sett.update("config", config)
+        sett.set("config", config)
         
         await message.answer(
             f"✅ Время ожидания отзыва установлено: <b>{days} дн.</b>\n\n"
@@ -55,13 +60,12 @@ async def process_review_monitor_days(message: Message, state: FSMContext):
     except ValueError:
         await message.answer(
             "❌ Пожалуйста, введите корректное число.\n\n"
-            "Попробуйте ещё раз:",
+            "Попробуйте ещё раз",
             parse_mode="HTML"
         )
     except Exception as e:
         await message.answer(
-            f"❌ Произошла ошибка: {e}\n\n"
-            "Попробуйте ещё раз:",
+            f"❌ Произошла ошибка: {e}\n\n",
             parse_mode="HTML"
         )
         await state.clear()

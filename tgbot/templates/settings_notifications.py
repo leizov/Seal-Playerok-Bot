@@ -41,7 +41,7 @@ def settings_notifications_text():
 
 def settings_notifications_kb():
     config = sett.get("config")
-    tg_logging_chat_id = config["playerok"]["tg_logging"]["chat_id"] or "✔️ Ваш чат с ботом"
+    # tg_logging_chat_id = config["playerok"]["tg_logging"]["chat_id"] or "✔️ Ваш чат с ботом"
     tg_logging_events = config["playerok"]["tg_logging"]["events"] or {}
     event_new_user_message = "🔔" if tg_logging_events.get("new_user_message", True) else "🔕"
     event_new_system_message = "🔔" if tg_logging_events.get("new_system_message", True) else "🔕"
@@ -53,7 +53,7 @@ def settings_notifications_kb():
     event_new_problem = "🔔" if tg_logging_events.get("new_problem", True) else "🔕"
     event_deal_status_changed = "🔔" if tg_logging_events.get("deal_status_changed", True) else "🔕"
     rows = [
-        [InlineKeyboardButton(text=f"💬 ID чата для уведомлений: {tg_logging_chat_id}", callback_data="enter_tg_logging_chat_id")],
+        # [InlineKeyboardButton(text=f"💬 ID чата для уведомлений: {tg_logging_chat_id}", callback_data="enter_tg_logging_chat_id")],
         [
             InlineKeyboardButton(text=f"{event_new_user_message} Новое сообщение от пользователя", callback_data="switch_tg_logging_event_new_user_message"),
             InlineKeyboardButton(text=f"{event_new_system_message} Новое системное сообщение", callback_data="switch_tg_logging_event_new_system_message")

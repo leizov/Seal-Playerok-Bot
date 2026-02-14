@@ -67,7 +67,7 @@ def plugin_commands_text(plugin_uuid: UUID):
             else:
                 command_name = command.get('command', 'N/A')
                 description = command.get('description', 'Описание отсутствует')
-            txt += f"<b>{idx}.</b> {command_name}\n"
+            txt += f"<b>{idx}.</b> /{command_name}\n"
             txt += f"   └ <i>{description}</i>\n\n"
     
     return txt

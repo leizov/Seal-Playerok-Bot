@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from settings import Settings as sett
 from .. import callback_datas as calls
 
-
+# old menu 666
 def notifications_text():
     config = sett.get("config")
     tg_logging = config["playerok"]["tg_logging"]
@@ -15,12 +15,15 @@ def notifications_text():
     
     # События
     events = tg_logging["events"]
-    
+
+    '''
+    <b>Чат для уведомлений:</b> <code>{chat_id}</code>
+    '''
+
     txt = textwrap.dedent(f"""
         🔔 <b>Управление уведомлениями</b>
 
         <b>Общий статус:</b> {status}
-        <b>Чат для уведомлений:</b> <code>{chat_id}</code>
 
         <b>Уведомления о событиях:</b>
         ┣ {"✅" if events["new_user_message"] else "❌"} Новые сообщения от пользователей
@@ -46,12 +49,12 @@ def notifications_kb():
                 callback_data="toggle_notifications"
             )
         ],
-        [
-            InlineKeyboardButton(
-                text="💬 Настроить чат для уведомлений",
-                callback_data="set_notification_chat"
-            )
-        ],
+        # [
+        #     InlineKeyboardButton(
+        #         text="💬 Настроить чат для уведомлений",
+        #         callback_data="set_notification_chat"
+        #     )
+        # ],
         [
             InlineKeyboardButton(
                 text="⚙️ Настроить события",

@@ -78,16 +78,13 @@ def download_update(release_info: dict) -> bytes:
     try:
         logger.info(f"Загружаю обновление {release_info['tag_name']}...")
         zip_url = release_info['zipball_url']
-        headers = {
-            "User-Agent": "SealPlayerokBot-Updater"
-        }
-        zip_response = requests.get(zip_url, headers=headers, timeout=60)
+        zip_response = requests.get(zip_url, timeout=60)
         if zip_response.status_code != 200:
             raise Exception(f"При скачивании архива обновления произошла ошибка: {zip_response.status_code}")
         return zip_response.content
     except Exception as e:
         logger.error(f"{Fore.LIGHTRED_EX}При скачивании обновления произошла ошибка: {Fore.WHITE}{e}")
-        return False
+        return None
 
 
 def install_update(release_info: dict, content: bytes) -> bool:

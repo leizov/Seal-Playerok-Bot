@@ -200,7 +200,6 @@ class TelegramBot:
 
 🔗 Ссылки:
 • Канал: t.me/SealPlayerok
-• Чат: t.me/SealPlayerokChat
 • Бот: t.me/SealPlayerokBot
 • GitHub: github.com/leizov/Seal-Playerok-Bot
 

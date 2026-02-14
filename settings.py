@@ -36,7 +36,7 @@ CONFIG = SettingsFile(
                 "enabled": True
             },
             "first_message": {
-                "enabled": True
+                "enabled": False
             },
             "custom_commands": {
                 "enabled": True
@@ -45,7 +45,7 @@ CONFIG = SettingsFile(
                 "enabled": True
             },
             "auto_restore_items": {
-                "enabled": True,
+                "enabled": False,
                 "all": True
             },
             "auto_raise_items": {
@@ -71,7 +71,7 @@ CONFIG = SettingsFile(
                     "new_review": True,
                     "new_problem": True,
                     "deal_status_changed": True,
-                    "item_raised": False,
+                    "item_raised": True,
                 }
             },
         },
@@ -93,14 +93,10 @@ MESSAGES = SettingsFile(
     need_restore=True,
     default={
         "first_message": {
-            "enabled": True,
+            "enabled": False,
             "cooldown_days": 7,  # Количество дней до повторной отправки приветствия
             "text": [
-                "🦭 Привет, {username}! Я Seal Playerok Bot — твой милый помощник! 🌊",
-                "",
-                "💙 Если хочешь поговорить с продавцом, напиши команду !продавец",
-                "",
-                "🐚 Чтобы узнать все команды, напиши !команды"
+                "🦭 Привет, {username}!",
             ]
         },
         "cmd_error": {
