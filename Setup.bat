@@ -13,67 +13,108 @@ echo   🦭✨ ═════════════════════�
 echo.
 
 :: ═══════════════════════════════════════════════════════════════════════
-:: ШАГ 0: Проверка Python 3.11
+:: ШАГ 0: Проверка Python 3.12 (ТОЛЬКО эта версия поддерживается)
 :: ═══════════════════════════════════════════════════════════════════════
 
-echo   🔍 [0/4] Проверяю Python...
+echo   🔍 [0/4] Проверяю Python 3.12...
 echo   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 set "PYTHON_CMD="
 
-:: Сначала пробуем py launcher с 3.11
-py -3.11 --version >nul 2>&1
+:: Сначала пробуем py launcher с 3.12
+py -3.12 --version >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    set "PYTHON_CMD=py -3.11"
-    echo   ✅ Найден Python 3.11 через py launcher
+    set "PYTHON_CMD=py -3.12"
+    echo   ✅ Найден Python 3.12 через py launcher
     goto :python_found
 )
 
-:: Пробуем 3.10
-py -3.10 --version >nul 2>&1
+:: Пробуем python напрямую 3.12
+python3.12 --version >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    set "PYTHON_CMD=py -3.10"
-    echo   ✅ Найден Python 3.10 через py launcher
+    set "PYTHON_CMD=python3.12"
+    echo   ✅ Найден Python 3.12
     goto :python_found
 )
 
-:: Пробуем любой Python через py
-py --version >nul 2>&1
-if %ERRORLEVEL% equ 0 (
-    :: Проверяем версию
-    for /f "tokens=2" %%v in ('py --version 2^>^&1') do set "PY_VER=%%v"
-    echo   ⚠️  Найден Python !PY_VER! 
-    
-    :: Проверяем что это не 3.13+ (проблемы совместимости)
-    echo !PY_VER! | findstr /r "^3\.1[3-9]" >nul
-    if %ERRORLEVEL% equ 0 (
-        echo   ⚠️  Python 3.13+ может иметь проблемы совместимости!
-        echo   💡 Рекомендуется установить Python 3.11
-    )
-    set "PYTHON_CMD=py"
-    goto :python_found
-)
-
-:: Пробуем python напрямую
+:: Пробуем любой python и проверяем версию
 python --version >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    set "PYTHON_CMD=python"
-    echo   ✅ Найден Python через PATH
-    goto :python_found
+    :: Проверяем версию
+    for /f "tokens=2" %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
+    echo   ⚠️  Найден Python !PY_VER!
+    
+    :: Проверяем что это 3.12
+    echo !PY_VER! | findstr /r "^3\.12" >nul
+    if %ERRORLEVEL% equ 0 (
+        echo   ✅ Это Python 3.12
+        set "PYTHON_CMD=python"
+        goto :python_found
+    ) else (
+        echo   ❌ Версия Python !PY_VER! не поддерживается!
+        echo   💡 ТРЕБУЕТСЯ ТОЛЬКО Python 3.12
+    )
 )
 
-:: Python не найден
+:: Python не найден или неподходящая версия
 echo.
-echo   ❌ Python не найден!
+echo   ❌ Python 3.12 не найден!
+echo   💡 SealPlayerok Bot требует ТОЛЬКО Python 3.12
 echo.
-echo   📥 Пожалуйста, установите Python 3.11:
-echo      https://www.python.org/downloads/release/python-3119/
+echo   📥 Попытка автоматической установки Python 3.12...
 echo.
-echo   ⚠️  При установке ОБЯЗАТЕЛЬНО отметьте:
-echo      [✓] Add Python to PATH
-echo.
-pause
-exit /b 1
+
+:: Скачиваем установщик Python 3.12
+echo   🌐 Скачиваю установщик Python 3.12...
+powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe' -OutFile 'python-3.12.7-amd64.exe'"
+if %ERRORLEVEL% neq 0 (
+    echo   ❌ Не удалось скачать установщик Python
+    echo   💡 Пожалуйста, установите Python 3.12 вручную:
+    echo      https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe
+    echo.
+    echo   ⚠️  При установке ОБЯЗАТЕЛЬНО отметьте:
+    echo      [✓] Add Python to PATH
+    pause
+    exit /b 1
+)
+
+:: Устанавливаем Python в тихом режиме
+echo   📦 Устанавливаю Python 3.12...
+python-3.12.7-amd64.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
+if %ERRORLEVEL% neq 0 (
+    echo   ❌ Ошибка установки Python
+    echo   💡 Пожалуйста, установите Python 3.12 вручную:
+    echo      https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe
+    echo.
+    echo   ⚠️  При установке ОБЯЗАТЕЛЬНО отметьте:
+    echo      [✓] Add Python to PATH
+    pause
+    exit /b 1
+)
+
+:: Удаляем установщик
+del python-3.12.7-amd64.exe
+
+:: Обновляем PATH
+echo   🔄 Обновляю PATH...
+call refreshenv
+
+:: Проверяем установку
+python --version >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo   ❌ Python не установился или не добавлен в PATH
+    echo   💡 Пожалуйста, установите Python 3.12 вручную:
+    echo      https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe
+    echo.
+    echo   ⚠️  При установке ОБЯЗАТЕЛЬНО отметьте:
+    echo      [✓] Add Python to PATH
+    pause
+    exit /b 1
+)
+
+echo   ✅ Python 3.12 успешно установлен!
+set "PYTHON_CMD=python"
+goto :python_found
 
 :python_found
 echo.

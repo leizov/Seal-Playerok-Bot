@@ -178,11 +178,23 @@ async def call_bot_event(event: str, args: list = [], func = None):
         handlers = get_bot_event_handlers().get(event, [])
     else:
         handlers = [func]
+    # try:
+    #     if not func and event in ("INIT", "POST_INIT"):
+    #         logger.info(f"BOT_EVENT {event}: handlers={len(handlers)}")
+    # except Exception:
+    #     pass
+    executed = 0
     for handler in handlers:
         try:
             await handler(*args)
+            executed += 1
         except Exception as e:
             logger.error(f"{Fore.LIGHTRED_EX}Ошибка при обработке хендлера «{handler.__module__}.{handler.__qualname__}» для ивента бота «{event}»: {Fore.WHITE}{e}")
+    # try:
+    #     if not func and event in ("INIT", "POST_INIT"):
+    #         logger.info(f"BOT_EVENT {event}: executed={executed}/{len(handlers)}")
+    # except Exception:
+    #     pass
 
 
 async def call_playerok_event(event: EventTypes, args: list = []):

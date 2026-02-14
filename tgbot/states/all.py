@@ -60,3 +60,11 @@ class AutoResponseStates(StatesGroup):
 
 class ReviewMonitorStates(StatesGroup):
     waiting_for_days = State()
+
+
+class RaiseItemsStates(StatesGroup):
+    waiting_for_new_included_raise_item_keyphrases = State()
+    waiting_for_new_included_raise_items_keyphrases_file = State()
+    waiting_for_new_excluded_raise_item_keyphrases = State()
+    waiting_for_new_excluded_raise_items_keyphrases_file = State()
+    waiting_for_raise_interval = State()

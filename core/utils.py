@@ -42,8 +42,22 @@ def shutdown():
 
 def restart():
     """Перезагружает программу."""
-    python = sys.executable
-    os.execv(python, [python] + sys.argv)
+    try:
+        from logging import getLogger
+        logger = getLogger("seal.restart")
+        logger.info("Перезапуск бота...")
+        
+        python = sys.executable
+        os.execv(python, [python] + sys.argv)
+    except Exception as e:
+        from logging import getLogger
+        from colorama import Fore
+        logger = getLogger("seal.restart")
+        logger.error(f"{Fore.LIGHTRED_EX}Ошибка при перезапуске: {Fore.WHITE}{e}")
+        logger.info(f"{Fore.YELLOW}Пожалуйста, перезапустите бота вручную.")
+        # Не падаем, просто логируем ошибку
+        import traceback
+        logger.debug(traceback.format_exc())
 
 
 def set_title(title: str):
@@ -95,7 +109,7 @@ def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant:
         log_colors={
             'DEBUG': 'cyan',  # Голубой для дебага
             'INFO': 'light_cyan',  # Светло-голубой для инфо
-            'WARNING': 'light_magenta',  # Розовый для предупреждений (контраст)
+            'WARNING': 'light_purple',  # Фиолетовый для предупреждений (контраст)
             'ERROR': 'light_red',  # Светло-красный для ошибок
             'CRITICAL': 'bold_red',  # Жирный красный для критических
         },

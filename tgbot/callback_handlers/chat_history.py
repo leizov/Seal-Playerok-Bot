@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from datetime import datetime
+import html
 
 from .. import callback_datas as calls
 from ..helpful import get_playerok_bot
@@ -65,15 +66,15 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
                     msg_time = "??:??"
                 
                 # Формируем текст сообщения
-                msg_text = msg.text or ""
+                msg_text = html.escape(msg.text or "")
                 if msg.file:
-                    msg_text += f" [📎 {msg.file.filename}]"
+                    msg_text += f" [📎 {html.escape(msg.file.filename)}]"
                 
                 # Ограничиваем длину сообщения
                 if len(msg_text) > 100:
                     msg_text = msg_text[:100] + "..."
                 
-                line = f"{emoji} <b>{msg.user.username}</b> ({msg_time}):\n{msg_text}\n\n"
+                line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n{msg_text}\n\n"
             
             # Проверяем, не превысит ли общая длина 4000 символов (лимит Telegram)
             if total_length + len(line) > 3900:

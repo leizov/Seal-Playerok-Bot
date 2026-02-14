@@ -168,9 +168,7 @@ async def check_reviews_task(account: Account, send_message_callback, msg_callba
                 except Exception as e:
                     logger.error(f"Ошибка проверки сделки {deal_id}: {e}")
                     continue
-            
-            # Сохраняем обновленные данные
-            save_deals(deals)
+
             
             # Ждем перед следующей проверкой
             await asyncio.sleep(check_interval)

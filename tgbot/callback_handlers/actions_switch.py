@@ -45,6 +45,44 @@ async def callback_switch_auto_restore_items_all(callback: CallbackQuery, state:
     return await callback_settings_navigation(callback, calls.SettingsNavigation(to="restore"), state)
 
 
+@router.callback_query(F.data == "switch_auto_raise_items_enabled")
+async def callback_switch_auto_raise_items_enabled(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    config["playerok"]["auto_raise_items"]["enabled"] = not config["playerok"]["auto_raise_items"]["enabled"]
+    sett.set("config", config)
+    # Проверяем откуда был вызван переключатель
+    data = await state.get_data()
+    from_menu = data.get("from_menu", "raise")
+    return await callback_settings_navigation(callback, calls.SettingsNavigation(to=from_menu), state)
+
+
+@router.callback_query(F.data == "switch_auto_raise_items_all")
+async def callback_switch_auto_raise_items_all(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    config["playerok"]["auto_raise_items"]["all"] = not config["playerok"]["auto_raise_items"]["all"]
+    sett.set("config", config)
+    return await callback_settings_navigation(callback, calls.SettingsNavigation(to="raise"), state)
+
+
+@router.callback_query(F.data == "set_auto_raise_items_interval")
+async def callback_set_auto_raise_items_interval(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    current_interval = config["playerok"]["auto_raise_items"]["interval_hours"]
+    
+    await state.set_state(states.RaiseItemsStates.waiting_for_raise_interval)
+    
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=f"⏱ <b>Изменение интервала автоподнятия</b>\n\n"
+             f"Текущий интервал: <b>{current_interval}</b> ч.\n\n"
+             f"Введите новый интервал (в часах) ↓\n\n"
+             f"💡 <i>Товары будут подниматься автоматически\n"
+             f"через указанное количество часов после последнего поднятия.</i>",
+        reply_markup=templ.back_kb(calls.SettingsNavigation(to="raise").pack())
+    )
+
+
 @router.callback_query(F.data == "switch_read_chat_enabled")
 async def callback_switch_read_chat_enabled(callback: CallbackQuery, state: FSMContext):
     config = sett.get("config")
@@ -198,6 +236,16 @@ async def callback_switch_tg_logging_event_auto_delivery(callback: CallbackQuery
     if "auto_delivery" not in config["playerok"]["tg_logging"]["events"]:
         config["playerok"]["tg_logging"]["events"]["auto_delivery"] = True
     config["playerok"]["tg_logging"]["events"]["auto_delivery"] = not config["playerok"]["tg_logging"]["events"]["auto_delivery"]
+    sett.set("config", config)
+    return await callback_settings_navigation(callback, calls.SettingsNavigation(to="notifications"), state)
+
+
+@router.callback_query(F.data == "switch_tg_logging_event_item_raised")
+async def callback_switch_tg_logging_event_item_raised(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    if "item_raised" not in config["playerok"]["tg_logging"]["events"]:
+        config["playerok"]["tg_logging"]["events"]["item_raised"] = False
+    config["playerok"]["tg_logging"]["events"]["item_raised"] = not config["playerok"]["tg_logging"]["events"]["item_raised"]
     sett.set("config", config)
     return await callback_settings_navigation(callback, calls.SettingsNavigation(to="notifications"), state)
 

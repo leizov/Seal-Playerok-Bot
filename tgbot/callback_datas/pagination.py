@@ -31,3 +31,11 @@ class MenuPagination(CallbackData, prefix="mainpag"):
 
 class ProxyListPagination(CallbackData, prefix="proxpag"):
     page: int
+
+
+class IncludedRaiseItemsPagination(CallbackData, prefix="inrapag"):
+    page: int
+
+
+class ExcludedRaiseItemsPagination(CallbackData, prefix="exrapag"):
+    page: int

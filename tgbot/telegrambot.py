@@ -7,6 +7,7 @@ from colorama import Fore
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import BotCommand, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError, TelegramForbiddenError, TelegramAPIError
+import re
 
 from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY, TELEGRAM_CHANNEL, TELEGRAM_CHAT, TELEGRAM_BOT
 from settings import Settings as sett
@@ -58,6 +59,9 @@ class TelegramBot:
 
         for plugin in get_plugins():
             try:
+                logger.info(
+                    f"Регистрация TG-роутеров плагина {plugin.meta.name}: {len(plugin.telegram_bot_routers)}"
+                )
                 for router in plugin.telegram_bot_routers:
                     main_router.include_router(router)
                 # Помечаем, что роутеры уже зарегистрированы
@@ -83,20 +87,32 @@ class TelegramBot:
             config = sett.get("config")
             # Стандартные команды бота
             commands = [
-                BotCommand(command="/start", description="🦭 Главное меню"),
+                BotCommand(command="start", description="🦭 Главное меню"),
             ]
             
             # Команды администратора (добавляются только если пользователь авторизован)
             commands.extend([
-                BotCommand(command="/profile", description="🏠 Профиль Playerok"),
-                BotCommand(command="/restart", description="🔄 Перезагрузить бота"),
-                BotCommand(command="/power_off", description="⚡ Выключить бота"),
-                BotCommand(command="/logs", description="📜 Показать логи"),
-                BotCommand(command="/error", description="🛑 Показать последнюю ошибку"),
-                BotCommand(command="/watermark", description="©️ Водяной знак"),
-                BotCommand(command="/fingerprint", description="🧑‍💻 Фингерпринт устройства"),
+                BotCommand(command="profile", description="🏠 Профиль Playerok"),
+                BotCommand(command="restart", description="🔄 Перезагрузить бота"),
+                BotCommand(command="playerok_status", description="🔰 Проверить авторизацию в аккаунте"),
+                BotCommand(command="power_off", description="⚡ Выключить бота"),
+                BotCommand(command="logs", description="📜 Показать логи"),
+                BotCommand(command="error", description="🛑 Показать последнюю ошибку"),
+                BotCommand(command="watermark", description="©️ Водяной знак"),
+                BotCommand(command="fingerprint", description="🧑‍💻 Фингерпринт устройства"),
 
             ])
+            
+            def _normalize_command(raw: str) -> str | None:
+                cmd = (raw or "").strip()
+                if cmd.startswith("/"):
+                    cmd = cmd[1:]
+                cmd = cmd.strip().lower()
+                if not cmd:
+                    return None
+                if not re.fullmatch(r"[a-z0-9_]{1,32}", cmd):
+                    return None
+                return cmd
             
             # Добавляем команды из плагинов
             for plugin in get_plugins():
@@ -105,21 +121,50 @@ class TelegramBot:
                         plugin_cmds = plugin.bot_commands
                         if callable(plugin_cmds):
                             plugin_cmds = plugin_cmds()
+                        if asyncio.iscoroutine(plugin_cmds):
+                            plugin_cmds = await plugin_cmds
+                        if not isinstance(plugin_cmds, (list, tuple)):
+                            raise TypeError(
+                                f"BOT_COMMANDS must be list/tuple, got {type(plugin_cmds).__name__}"
+                            )
+ 
+                        added = 0
                         
                         for cmd in plugin_cmds:
                             # Конвертируем tuple/list в BotCommand
                             if isinstance(cmd, (tuple, list)) and len(cmd) >= 2:
+                                normalized = _normalize_command(str(cmd[0]))
+                                if not normalized:
+                                    logger.warning(
+                                        f"Команда плагина {plugin.meta.name} пропущена (invalid): {cmd[0]!r}"
+                                    )
+                                    continue
                                 commands.append(BotCommand(
-                                    command=f"/{cmd[0]}" if not cmd[0].startswith('/') else cmd[0],
+                                    command=normalized,
                                     description=cmd[1]
                                 ))
+                                added += 1
                             elif isinstance(cmd, BotCommand):
-                                commands.append(cmd)
+                                normalized = _normalize_command(cmd.command)
+                                if not normalized:
+                                    logger.warning(
+                                        f"Команда плагина {plugin.meta.name} пропущена (invalid): {cmd.command!r}"
+                                    )
+                                    continue
+                                commands.append(
+                                    BotCommand(command=normalized, description=cmd.description)
+                                )
+                                added += 1
+
+                        logger.info(
+                            f"Команды плагина {plugin.meta.name} добавлены: {added}"
+                        )
                     except Exception as e:
                         logger.error(f"Ошибка получения команд из плагина {plugin.meta.name}: {e}")
             
             # Устанавливаем обновленный список команд
             await self.bot.set_my_commands(commands)
+            logger.info(f"set_my_commands: установлено команд = {len(commands)}")
             
         except Exception as e:
             logger.error(f"Ошибка при обновлении команд бота: {e}")

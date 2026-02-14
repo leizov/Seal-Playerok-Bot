@@ -32,15 +32,4 @@ def migrate_old_proxy_to_new_system():
         
         return True
     
-    # Если список прокси не пуст, но активный прокси не выбран - выбираем первый
-    elif not old_proxy and proxy_list:
-        first_proxy_id = min(proxy_list.keys(), key=int)
-        first_proxy = proxy_list[first_proxy_id]
-        
-        config["playerok"]["api"]["proxy"] = first_proxy
-        sett.set("config", config)
-        
-        logger.info(f"Автоматически активирован прокси ID {first_proxy_id}: {first_proxy}")
-        return True
-    
     return False

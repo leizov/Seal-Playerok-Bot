@@ -239,6 +239,59 @@ async def start_playerok_bot():
     await PlayerokBot().run_bot()
 
 
+def check_permissions():
+    """Проверяет права доступа к файлам настроек и исправляет их при необходимости."""
+    import stat
+    import pwd
+    from pathlib import Path
+    from colorama import Fore
+    
+    settings_dir = Path("bot_settings").resolve()
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    
+    if not settings_dir.exists():
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        print(f"{Fore.GREEN}[OK] Создана директория настроек: {settings_dir}{Fore.RESET}")
+    
+    if not os.access(settings_dir, os.W_OK):
+        print(f"{Fore.RED}❌ Нет прав на запись в {settings_dir}{Fore.RESET}")
+        print(f"{Fore.YELLOW}Выполните: sudo chown -R {current_user}:{current_user} {settings_dir}{Fore.RESET}")
+        return False
+    
+    fixed_files = []
+    problem_files = []
+    
+    for json_file in settings_dir.glob("*.json"):
+        if not os.access(json_file, os.W_OK):
+            file_stat = os.stat(json_file)
+            current_uid = os.getuid()
+            
+            if file_stat.st_uid != current_uid:
+                problem_files.append((json_file, f"Владелец: uid={file_stat.st_uid}, текущий пользователь: uid={current_uid}"))
+            else:
+                try:
+                    os.chmod(json_file, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+                    fixed_files.append(json_file.name)
+                except Exception as e:
+                    problem_files.append((json_file, str(e)))
+    
+    if fixed_files:
+        print(f"{Fore.GREEN}✅ Исправлены права для файлов: {', '.join(fixed_files)}{Fore.RESET}")
+    
+    if problem_files:
+        print(f"\n{Fore.RED}❌ Не удалось исправить права для файлов:{Fore.RESET}")
+        for file_path, error in problem_files:
+            print(f"{Fore.RED}   - {file_path.name}: {error}{Fore.RESET}")
+        print(f"\n{Fore.YELLOW}Файлы принадлежат другому пользователю (возможно root).{Fore.RESET}")
+        print(f"{Fore.YELLOW}Выполните команду для исправления:{Fore.RESET}")
+        for file_path, _ in problem_files:
+            print(f"{Fore.CYAN}   sudo chown {current_user}:{current_user} {file_path}{Fore.RESET}")
+        print()
+        return False
+    
+    return True
+
+
 def check_and_configure_config():
     import sys
     config = sett.get("config")
@@ -549,120 +602,20 @@ def check_and_configure_config():
         else:
             print(f"\n{Fore.LIGHTRED_EX}Ваш пароль не подходит. Убедитесь, что он соответствует формату и не является лёгким и попробуйте ещё раз.")
 
-    # Проверка прокси (если был введён)
-    if config["playerok"]["api"]["proxy"]:
-        proxy_works = is_proxy_working(config["playerok"]["api"]["proxy"])
-        
-        if not proxy_works:
-            print(f"\n{Fore.WHITE}Хотите:")
-            print(f"  1 - Использовать этот прокси")
-            print(f"  2 - Ввести другой прокси")
-            print(f"  3 - Продолжить без прокси")
-            choice = input(f"\n  {Fore.WHITE}> Ваш выбор (1/2/3): {Fore.LIGHTWHITE_EX}").strip()
-            
-            proxy_check_passed = False
-            
-            if choice == "1":
-                print(f"\n{Fore.GREEN}Прокси будет использован в работе бота.")
-                logger.info(f"Прокси {config['playerok']['api']['proxy']} принят пользователем")
-            elif choice == "2":
-                # Очищаем прокси и возвращаемся к вводу
-                config["playerok"]["api"]["proxy"] = ""
-                sett.set("config", config)
-                # Переходим к вводу нового прокси
-                while True:
-                    print(f"\n{Fore.WHITE}Введите {Fore.LIGHTBLUE_EX}Прокси {Fore.WHITE}в одном из форматов:")
-                    print(f"  {Fore.LIGHTGREEN_EX}HTTP/HTTPS:{Fore.WHITE}")
-                    print(f"    · ip:port:user:password")
-                    print(f"    · user:password@ip:port")
-                    print(f"    · ip:port (без авторизации)")
-                    print(f"  {Fore.LIGHTMAGENTA_EX}SOCKS5:{Fore.WHITE}")
-                    print(f"    · socks5://user:password@ip:port")
-                    print(f"    · socks5://ip:port")
-                    print(f"\n  {Fore.WHITE}Пример HTTP: {Fore.LIGHTWHITE_EX}91.221.39.249:63880:KSbmS3e4:PXHYZPbB")
-                    print(f"  {Fore.WHITE}Пример SOCKS5: {Fore.LIGHTWHITE_EX}socks5://KSbmS3e4:PXHYZPbB@91.221.39.249:63880")
-                    print(f"\n  {Fore.YELLOW}Если не хотите использовать прокси - нажмите Enter.")
-                    proxy = input(f"\n  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
-                    if not proxy:
-                        print(f"\n{Fore.WHITE}Вы пропустили ввод прокси.")
-                        config["playerok"]["api"]["proxy"] = ""
-                        sett.set("config", config)
-                        break
-                    if is_proxy_valid(proxy):
-                        normalized = normalize_proxy(proxy)
-                        config["playerok"]["api"]["proxy"] = normalized
-                        sett.set("config", config)
-                        print(f"\n{Fore.GREEN}Прокси успешно сохранён в конфиг.")
-                        # Повторная проверка
-                        proxy_works = is_proxy_working(normalized)
-                        if proxy_works:
-                            print(f"\n{Fore.GREEN}Прокси работает отлично!")
-                        break
-                    else:
-                        print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный Прокси. Убедитесь, что он соответствует формату и попробуйте ещё раз.")
-            elif choice == "3":
-                config["playerok"]["api"]["proxy"] = ""
-                sett.set("config", config)
-                print(f"\n{Fore.WHITE}Продолжаем без прокси.")
-            else:
-                print(f"\n{Fore.LIGHTRED_EX}Неверный выбор. Используем текущий прокси.")
-        else:
-            logger.info(f"{Fore.GREEN}Прокси успешно работает!")
-
     if not is_pl_account_working():
         print(f"\n{Fore.LIGHTRED_EX}Не удалось подключиться к вашему Playerok аккаунту.")
-        
-        # Если используется прокси, возможно проблема в нём
-        if config["playerok"]["api"]["proxy"]:
-            print(f"\n{Fore.YELLOW}У вас настроен прокси. Возможно, проблема в прокси, а не в токене.")
-            print(f"{Fore.WHITE}Что сделать?")
-            print(f"  1 - Отключить прокси и попробовать без него")
-            print(f"  2 - Ввести новый прокси")
-            print(f"  3 - Ввести новый токен и User-Agent")
-            print(f"  4 - Попытаться запустить бота с текущими настройками (может не работать)")
-            choice = input(f"\n  {Fore.WHITE}> Ваш выбор (1/2/3/4): {Fore.LIGHTWHITE_EX}").strip()
-            
-            if choice == "1":
-                config["playerok"]["api"]["proxy"] = ""
-                sett.set("config", config)
-                print(f"\n{Fore.GREEN}Прокси отключен. Пробуем подключиться...")
-                return check_and_configure_config()
-            elif choice == "2":
-                config["playerok"]["api"]["proxy"] = ""
-                sett.set("config", config)
-                return check_and_configure_config()
-            elif choice == "3":
-                config["playerok"]["api"]["token"] = ""
-                config["playerok"]["api"]["user_agent"] = ""
-                config["playerok"]["api"]["proxy"] = ""
-                sett.set("config", config)
-                return check_and_configure_config()
-            elif choice == "4":
-                print(f"\n{Fore.YELLOW}Пытаемся запустить бота с текущими настройками...")
-                logger.warning(f"{Fore.YELLOW}Проверка Playerok аккаунта не прошла, но продолжаем запуск...")
-            else:
-                print(f"\n{Fore.LIGHTRED_EX}Неверный выбор. Запрашиваем настройки заново.")
-                config["playerok"]["api"]["token"] = ""
-                config["playerok"]["api"]["user_agent"] = ""
-                config["playerok"]["api"]["proxy"] = ""
-                sett.set("config", config)
-                return check_and_configure_config()
-        else:
-            print(f"{Fore.WHITE}Пожалуйста, убедитесь, что у вас указан верный токен и введите его снова.")
-            config["playerok"]["api"]["token"] = ""
-            config["playerok"]["api"]["user_agent"] = ""
-            sett.set("config", config)
-            return check_and_configure_config()
+        print(f"{Fore.YELLOW}Бот продолжит работу. Измените настройки через Telegram бота если нужно.")
+        logger.warning(f"{Fore.YELLOW}Проверка Playerok аккаунта не прошла, но продолжаем запуск...")
     else:
         logger.info(f"{Fore.WHITE}Playerok аккаунт успешно авторизован.")
 
-    if is_pl_account_banned():
-        print(f"{Fore.LIGHTRED_EX}\nВаш Playerok аккаунт забанен! Увы, я не могу запустить бота на заблокированном аккаунте...")
-        config["playerok"]["api"]["token"] = ""
-        config["playerok"]["api"]["user_agent"] = ""
-        config["playerok"]["api"]["proxy"] = ""
-        sett.set("config", config)
-        return check_and_configure_config()
+    # if is_pl_account_banned():
+    #     print(f"{Fore.LIGHTRED_EX}\nВаш Playerok аккаунт забанен! Увы, я не могу запустить бота на заблокированном аккаунте...")
+    #     config["playerok"]["api"]["token"] = ""
+    #     config["playerok"]["api"]["user_agent"] = ""
+    #     config["playerok"]["api"]["proxy"] = ""
+    #     sett.set("config", config)
+    #     return check_and_configure_config()
 
     # Telegram бот уже проверен при вводе токена, дополнительная проверка не нужна
 
@@ -710,6 +663,12 @@ if __name__ == "__main__":
    └──────────────────────────────────────────────────────────────────────────────{Fore.RESET}
 """)
         check_for_updates()
+        
+        if not check_permissions():
+            print(f"\n{Fore.RED}Не удалось запустить бот из-за проблем с правами доступа.{Fore.RESET}")
+            print(f"{Fore.YELLOW}Исправьте права и запустите бот снова.{Fore.RESET}\n")
+            sys.exit(1)
+        
         check_and_configure_config()
         
         # Загружаем плагины
@@ -718,11 +677,11 @@ if __name__ == "__main__":
         
         # Вызываем INIT перед инициализацией
         # print(f"{Fore.CYAN}Инициализация системы...{Fore.RESET}")
-        asyncio.run(call_bot_event("INIT", []))
+        main_loop.run_until_complete(call_bot_event("INIT", []))
         
         # Подключаем плагины
         # print(f"{Fore.CYAN}Подключение плагинов...{Fore.RESET}")
-        asyncio.run(connect_plugins(plugins))
+        main_loop.run_until_complete(connect_plugins(plugins))
         
         # Запускаем Telegram бота
         # print(f"\n{Fore.CYAN}Запуск Telegram бота...{Fore.RESET}")
@@ -730,11 +689,17 @@ if __name__ == "__main__":
         
         # Запускаем PlayerOk бота
         # print(f"{Fore.CYAN}Инициализация аккаунта PlayerOk...{Fore.RESET}")
-        main_loop.run_until_complete(start_playerok_bot())
+        try:
+            main_loop.run_until_complete(start_playerok_bot())
+        except Exception as e:
+            logger.error(f"{Fore.LIGHTRED_EX}Ошибка при запуске Playerok бота: {e}")
+            logger.warning(f"{Fore.YELLOW}Бот продолжит работу без Playerok функционала")
         
         # Вызываем POST_INIT после полной инициализации
         # print(f"{Fore.CYAN}Завершение инициализации...{Fore.RESET}")
-        asyncio.run(call_bot_event("POST_INIT", []))
+        # ВАЖНО: используем main_loop, а не asyncio.run(), чтобы tasks плагинов
+        # (process_queue, check_status) работали в том же event loop
+        main_loop.run_until_complete(call_bot_event("POST_INIT", []))
         
         main_loop.run_forever()
     except KeyboardInterrupt:

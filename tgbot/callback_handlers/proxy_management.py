@@ -9,7 +9,6 @@ from logging import getLogger
 
 from settings import Settings as sett
 from core.proxy_utils import validate_proxy, normalize_proxy, check_proxy, format_proxy_display
-from playerokapi.account import get_account
 
 from .. import templates as templ
 from .. import callback_datas as calls
@@ -28,7 +27,7 @@ async def callback_proxy_list(callback: CallbackQuery, callback_data: calls.Prox
     text = templ.settings_proxy_list_text(page=page)
     kb = templ.settings_proxy_list_kb(page=page)
     
-    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 
@@ -39,7 +38,7 @@ async def callback_proxy_page(callback: CallbackQuery, callback_data: calls.Prox
     text = templ.settings_proxy_page_text(proxy_id=proxy_id)
     kb = templ.settings_proxy_page_kb(proxy_id=proxy_id)
     
-    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 
@@ -161,60 +160,81 @@ async def callback_activate_proxy(callback: CallbackQuery):
         await callback.answer("❌ Прокси не найден", show_alert=True)
         return
     
-    # Отправляем сообщение о проверке
     checking_msg = await callback.message.answer("🔄 Проверяю прокси перед активацией...")
     
-    # Проверка работоспособности
     is_working = check_proxy(proxy_str, timeout=10)
     
     await checking_msg.delete()
     
     if is_working:
-        # Активируем прокси в конфиге
         config = sett.get("config")
+        old_proxy = config["playerok"]["api"]["proxy"]
         config["playerok"]["api"]["proxy"] = proxy_str
+        
+        logger.info(f"[ACTIVATE] Сохранение прокси ID:{proxy_id}")
+        logger.info(f"[ACTIVATE] Старый прокси: '{old_proxy}'")
+        logger.info(f"[ACTIVATE] Новый прокси: '{proxy_str}'")
+        
         sett.set("config", config)
         
-        # Hot-reload: обновляем прокси в работающем Account
-        account = get_account()
-        if account:
-            account.update_proxy(proxy_str)
+        logger.info(f"[ACTIVATE] sett.set() вызван")
+        
+        config_check = sett.get("config")
+        saved_proxy = config_check["playerok"]["api"]["proxy"]
+        logger.info(f"[ACTIVATE] Проверка: прокси после сохранения = '{saved_proxy}'")
         
         display = format_proxy_display(proxy_str)
-        await callback.answer(f"✅ Прокси активирован: {display}", show_alert=True)
-        
-        logger.info(f"Активирован прокси ID:{proxy_id} (hot-reload)")
+        await callback.answer(
+            f"✅ Прокси сохранён: {display}\n\n"
+            f"Для применения изменений используйте /restart",
+            show_alert=True
+        )
+        logger.info(f"Активирован прокси ID:{proxy_id}")
     else:
         await callback.answer(
             "⚠️ Прокси не прошёл проверку!\n\nВы можете попробовать активировать его позже или использовать другой прокси.",
             show_alert=True
         )
     
-    # Обновляем страницу прокси
     text = templ.settings_proxy_page_text(proxy_id=proxy_id)
     kb = templ.settings_proxy_page_kb(proxy_id=proxy_id)
-    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
-@router.callback_query(F.data == "deactivate_proxy")
+@router.callback_query(F.data.startswith("deactivate_proxy:"))
 async def callback_deactivate_proxy(callback: CallbackQuery):
     """Деактивирует текущий прокси."""
+    proxy_id = int(callback.data.split(":")[1])
+    
     config = sett.get("config")
+    old_proxy = config["playerok"]["api"]["proxy"]
     config["playerok"]["api"]["proxy"] = ""
+    
+    logger.info(f"[DEACTIVATE] Деактивация прокси ID:{proxy_id}")
+    logger.info(f"[DEACTIVATE] Старый прокси: '{old_proxy}'")
+    logger.info(f"[DEACTIVATE] Новый прокси: '' (пустой)")
+    
     sett.set("config", config)
     
-    # Hot-reload: отключаем прокси в работающем Account
-    account = get_account()
-    if account:
-        account.update_proxy(None)
+    logger.info(f"[DEACTIVATE] sett.set() вызван")
     
-    await callback.answer("✅ Прокси деактивирован", show_alert=True)
-    logger.info("Прокси деактивирован (hot-reload)")
+    config_check = sett.get("config")
+    saved_proxy = config_check["playerok"]["api"]["proxy"]
+    logger.info(f"[DEACTIVATE] Проверка: прокси после сохранения = '{saved_proxy}'")
     
-    # Возвращаемся к списку
+    if saved_proxy != "":
+        logger.error(f"[DEACTIVATE] ОШИБКА! Прокси не сохранился как пустой!")
+    
+    await callback.answer(
+        "✅ Прокси деактивирован\n\n"
+        "Для применения изменений используйте /restart",
+        show_alert=True
+    )
+    logger.info(f"Деактивирован прокси ID:{proxy_id}")
+    
     text = templ.settings_proxy_list_text(page=0)
     kb = templ.settings_proxy_list_kb(page=0)
-    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("check_proxy:"))
@@ -275,4 +295,4 @@ async def callback_delete_proxy(callback: CallbackQuery):
     # Возвращаемся к списку
     text = templ.settings_proxy_list_text(page=0)
     kb = templ.settings_proxy_list_kb(page=0)
-    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")

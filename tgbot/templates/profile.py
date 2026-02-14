@@ -7,7 +7,27 @@ from .. import callback_datas as calls
 
 def profile_text():
     from plbot.playerokbot import get_playerok_bot
-    acc = get_playerok_bot().playerok_account.get()
+    
+    plbot = get_playerok_bot()
+    
+    # Проверяем, подключен ли аккаунт
+    if not plbot or not plbot.is_connected or not plbot.playerok_account:
+        return textwrap.dedent("""
+            ❌ <b>Не удалось подключиться к аккаунту</b>
+            
+            Playerok аккаунт недоступен. Проверьте настройки:
+            
+            ⚙️ <b>Настройки</b> → <b>🔑 Аккаунт</b>
+            
+            Убедитесь что указаны корректные:
+            • Токен
+            • User Agent
+            • Прокси (если используется)
+            
+            После изменения настроек используйте /restart
+        """)
+    
+    acc = plbot.playerok_account.get()
     profile = acc.profile
     txt = textwrap.dedent(f"""
         👤 <b>Мой профиль</b>

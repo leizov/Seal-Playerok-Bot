@@ -48,6 +48,11 @@ CONFIG = SettingsFile(
                 "enabled": True,
                 "all": True
             },
+            "auto_raise_items": {
+                "enabled": False,
+                "interval_hours": 24,
+                "all": True
+            },
             "auto_complete_deals": {
                 "enabled": False
             },
@@ -66,6 +71,7 @@ CONFIG = SettingsFile(
                     "new_review": True,
                     "new_problem": True,
                     "deal_status_changed": True,
+                    "item_raised": False,
                 }
             },
         },
@@ -177,6 +183,15 @@ AUTO_RESTORE_ITEMS = SettingsFile(
         "excluded": []
     }
 )
+AUTO_RAISE_ITEMS = SettingsFile(
+    name="auto_raise_items",
+    path=paths.AUTO_RAISE_ITEMS_FILE,
+    need_restore=False,
+    default={
+        "included": [],
+        "excluded": []
+    }
+)
 QUICK_REPLIES = SettingsFile(
     name="quick_replies",
     path=paths.QUICK_REPLIES_FILE,
@@ -192,7 +207,7 @@ PROXY_LIST = SettingsFile(
     need_restore=False,
     default={}  # {id: proxy_string}
 )
-DATA = [CONFIG, MESSAGES, CUSTOM_COMMANDS, AUTO_DELIVERIES, AUTO_RESTORE_ITEMS, QUICK_REPLIES, PROXY_LIST]
+DATA = [CONFIG, MESSAGES, CUSTOM_COMMANDS, AUTO_DELIVERIES, AUTO_RESTORE_ITEMS, AUTO_RAISE_ITEMS, QUICK_REPLIES, PROXY_LIST]
 
 
 def validate_config(config, default):
@@ -294,8 +309,59 @@ def set_json(path: str, new: dict):
     :param new: Новые данные.
     :type new: `dict`
     """
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(new, f, indent=4, ensure_ascii=False)
+    import stat
+    from logging import getLogger
+    logger = getLogger("settings")
+    
+    try:
+        logger.debug(f"[set_json] Начало записи в {path}")
+        
+        if os.path.exists(path):
+            if not os.access(path, os.W_OK):
+                logger.warning(f"[set_json] Файл {path} недоступен для записи, пытаюсь исправить права")
+                try:
+                    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+                    logger.info(f"[set_json] Права исправлены для {path}")
+                except Exception as e:
+                    logger.error(f"[set_json] Не удалось исправить права: {e}")
+                    dir_path = os.path.dirname(path)
+                    raise PermissionError(
+                        f"Нет прав на запись в {path}.\n"
+                        f"Выполните: sudo chown -R $USER:$USER {dir_path}"
+                    )
+        
+        logger.debug(f"[set_json] Данные для записи: {json.dumps(new, ensure_ascii=False)[:200]}...")
+        
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(new, f, indent=4, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        
+        logger.debug(f"[set_json] Запись завершена, файл синхронизирован")
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            verify = json.load(f)
+        
+        logger.debug(f"[set_json] Проверка: данные прочитаны обратно из файла")
+        
+        if verify != new:
+            logger.error(f"[set_json] ОШИБКА! Данные в файле не совпадают с записанными!")
+            logger.error(f"[set_json] Ожидалось: {json.dumps(new, ensure_ascii=False)[:200]}...")
+            logger.error(f"[set_json] Получено: {json.dumps(verify, ensure_ascii=False)[:200]}...")
+        else:
+            logger.debug(f"[set_json] Проверка пройдена: данные совпадают")
+            
+    except PermissionError as e:
+        logger.error(f"[set_json] ОШИБКА ПРАВ ДОСТУПА: {e}")
+        raise
+    except IOError as e:
+        logger.error(f"[set_json] ОШИБКА ВВОДА-ВЫВОДА: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"[set_json] НЕОЖИДАННАЯ ОШИБКА: {e}")
+        raise
 
 
 class Settings:
@@ -305,11 +371,18 @@ class Settings:
         try: 
             file = [file for file in data if file.name == name][0]
             return get_json(file.path, file.default, file.need_restore)
-        except: return None
+        except Exception as e:
+            from logging import getLogger
+            getLogger("settings").error(f"Ошибка чтения настроек '{name}': {e}")
+            return None
 
     @staticmethod
     def set(name: str, new: list | dict, data: list[SettingsFile] = DATA):
         try: 
             file = [file for file in data if file.name == name][0]
             set_json(file.path, new)
-        except: pass
+            from logging import getLogger
+            getLogger("settings").debug(f"Настройки '{name}' сохранены в {file.path}")
+        except Exception as e:
+            from logging import getLogger
+            getLogger("settings").error(f"Ошибка сохранения настроек '{name}': {e}", exc_info=True)

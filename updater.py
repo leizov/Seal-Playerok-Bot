@@ -24,11 +24,10 @@ def check_for_updates():
     """
     try:
         headers = {
-            "User-Agent": "SealPlayerokBot-Updater",
-            "Accept": "application/vnd.github.v3+json"
+            "User-Agent": "SealPlayerokBot-Updater"
         }
         response = requests.get(f"https://api.github.com/repos/{REPO}/releases", headers=headers, timeout=15)
-        # Пытаемся распарсить JSON даже при не-200 статусе
+
         try:
             releases = response.json()
         except Exception:
@@ -61,6 +60,9 @@ def check_for_updates():
                 restart()
     except Exception as e:
         logger.error(f"{Fore.LIGHTRED_EX}При проверке на наличие обновлений произошла ошибка: {Fore.WHITE}{e}")
+        logger.info(f"{Fore.YELLOW}Бот продолжит работу без обновления.")
+        # Продолжаем работу бота даже при ошибке обновления
+        return
 
 
 def download_update(release_info: dict) -> bytes:
@@ -77,8 +79,7 @@ def download_update(release_info: dict) -> bytes:
         logger.info(f"Загружаю обновление {release_info['tag_name']}...")
         zip_url = release_info['zipball_url']
         headers = {
-            "User-Agent": "SealPlayerokBot-Updater",
-            "Accept": "application/octet-stream"
+            "User-Agent": "SealPlayerokBot-Updater"
         }
         zip_response = requests.get(zip_url, headers=headers, timeout=60)
         if zip_response.status_code != 200:
@@ -116,6 +117,22 @@ def install_update(release_info: dict, content: bytes) -> bool:
                     src = os.path.join(root, file)
                     dst = os.path.join(paths.ROOT_DIR, os.path.relpath(src, archive_root))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    
+                    # Если файл существует, удаляем его перед копированием
+                    # Это позволяет перезаписывать даже работающие файлы на Linux
+                    if os.path.exists(dst):
+                        try:
+                            os.remove(dst)
+                        except PermissionError as e:
+                            logger.warning(f"Не удалось удалить {dst}: {e}")
+                            # Пробуем изменить права и удалить еще раз
+                            try:
+                                os.chmod(dst, 0o644)
+                                os.remove(dst)
+                            except:
+                                logger.error(f"Не удалось перезаписать файл {dst} из-за прав доступа")
+                                continue
+                    
                     shutil.copy2(src, dst)
             return True
     except Exception as e:

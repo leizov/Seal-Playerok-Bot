@@ -389,18 +389,24 @@ setup_locale() {
     log_success "Локализация настроена"
 }
 
-# Установка Python 3.12
+# Установка Python 3.12 (ТОЛЬКО эта версия поддерживается)
 install_python() {
     log_step "Шаг 3/7: Установка Python ${PYTHON_VERSION}"
     
     # Получаем версию дистрибутива
     DISTRO_VERSION=$(lsb_release -rs 2>/dev/null || echo "20.04")
     
-    # Проверяем есть ли уже Python нужной версии
+    # Проверяем есть ли уже Python НУЖНОЙ версии 3.12
     if command -v python${PYTHON_VERSION} &> /dev/null; then
         CURRENT_VERSION=$(python${PYTHON_VERSION} --version 2>&1 | cut -d' ' -f2)
-        log_success "Python ${CURRENT_VERSION} уже установлен"
-        return 0
+        # Проверяем что это именно 3.12, а не другая версия
+        if [[ "$CURRENT_VERSION" == 3.12* ]]; then
+            log_success "Python ${CURRENT_VERSION} уже установлен"
+            return 0
+        else
+            log_warning "Найден Python ${CURRENT_VERSION}, но требуется ТОЛЬКО Python 3.12"
+            log_info "Будет установлен Python 3.12..."
+        fi
     fi
     
     # Установка Python в зависимости от версии дистрибутива
@@ -549,8 +555,13 @@ download_bot() {
         rm -rf "$TEMP_DIR"
     fi
     
-    # Устанавливаем правильного владельца
+    # Устанавливаем правильного владельца и права доступа
     chown -R "${BOT_USERNAME}:${BOT_USERNAME}" "$INSTALL_DIR"
+    # Даем права на запись для владельца всех файлов
+    chmod -R u+w "$INSTALL_DIR"
+    # Для скриптов добавляем право на выполнение
+    find "$INSTALL_DIR" -name "*.sh" -exec chmod +x {} \;
+    find "$INSTALL_DIR" -name "*.py" -exec chmod u+w {} \;
     
     log_success "Бот загружен в ${INSTALL_DIR}"
 }
@@ -679,8 +690,10 @@ echo "🦭 Запусти: ${COMMAND_NAME} start"
 SCRIPT
     chmod +x "${INSTALL_DIR}/update.sh"
     
-    # Устанавливаем владельца
+    # Устанавливаем владельца и права
     chown -R "${BOT_USERNAME}:${BOT_USERNAME}" "${INSTALL_DIR}"
+    # Убеждаемся что все файлы доступны для записи владельцу
+    chmod -R u+w "${INSTALL_DIR}"
     
     log_success "Скрипты созданы: start.sh, stop.sh, restart.sh, update.sh"
 }
@@ -905,6 +918,21 @@ case "\$1" in
         echo "📋 Последние 100 строк логов:"
         sudo journalctl -u \$SERVICE -n 100 --no-hostname
         ;;
+    logs500)
+        echo "📋 Последние 500 строк логов:"
+        sudo journalctl -u \$SERVICE -n 500 --no-hostname
+        ;;
+    logs1000)
+        echo "📋 Последние 1000 строк логов:"
+        sudo journalctl -u \$SERVICE -n 1000 --no-hostname
+        ;;
+    error)
+        echo "📋 Последние ошибки из логов:"
+        sudo journalctl -u \$SERVICE --priority=err --since "6 hours ago" -n 50 --no-hostname
+        echo ""
+        echo "📋 Последние критические ошибки:"
+        sudo journalctl -u \$SERVICE --priority=crit --since "6 hours ago" -n 20 --no-hostname
+        ;;
     enable)
         echo "✅ Включение автозапуска..."
         sudo systemctl enable \$SERVICE 2>/dev/null
@@ -943,6 +971,9 @@ case "\$1" in
         echo "  ${COMMAND_NAME} status    - 📊 Статус бота"
         echo "  ${COMMAND_NAME} logs      - 📋 Логи в реальном времени"
         echo "  ${COMMAND_NAME} logs100   - 📋 Последние 100 строк логов"
+        echo "  ${COMMAND_NAME} logs500   - 📋 Последние 500 строк логов"
+        echo "  ${COMMAND_NAME} logs1000  - 📋 Последние 1000 строк логов"
+        echo "  ${COMMAND_NAME} error     - 📋 Показать последние ошибки"
         echo "  ${COMMAND_NAME} enable    - ✅ Включить автозапуск"
         echo "  ${COMMAND_NAME} disable   - ❌ Отключить автозапуск"
         echo "  ${COMMAND_NAME} setup     - 🔧 Первоначальная настройка"
@@ -1094,6 +1125,9 @@ show_final_message() {
     echo -e "  ${GREEN}${COMMAND_NAME} status${NC}     - 📊 Статус бота"
     echo -e "  ${GREEN}${COMMAND_NAME} logs${NC}       - 📋 Логи в реальном времени"
     echo -e "  ${GREEN}${COMMAND_NAME} logs100${NC}    - 📋 Последние 100 строк логов"
+    echo -e "  ${GREEN}${COMMAND_NAME} logs500${NC}    - 📋 Последние 500 строк логов"
+    echo -e "  ${GREEN}${COMMAND_NAME} logs1000${NC}   - 📋 Последние 1000 строк логов"
+    echo -e "  ${GREEN}${COMMAND_NAME} error${NC}     - 📋 Показать последние ошибки"
     echo -e ""
     echo -e "  ${CYAN}${COMMAND_NAME} setup${NC}      - 🔧 Повторная настройка"
     echo -e "  ${CYAN}${COMMAND_NAME} update${NC}     - 🔄 Обновить бота"

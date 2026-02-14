@@ -100,6 +100,19 @@ async def _activate_plugin(plugin: Plugin) -> bool:
     # Регистрируем обработчики событий Playerok
     register_playerok_event_handlers(plugin.playerok_event_handlers)
 
+    try:
+        playerok_events = len(plugin.playerok_event_handlers or {})
+        playerok_handlers = sum(len(v or []) for v in (plugin.playerok_event_handlers or {}).values())
+        tg_routers = len(plugin.telegram_bot_routers or [])
+        bot_commands = len(plugin.bot_commands or [])
+        # logger.info(
+        #     f"Плагин активирован: {plugin.meta.name} | "
+        #     f"PlayerOK events={playerok_events}, handlers={playerok_handlers} | "
+        #     f"TG routers={tg_routers} | commands={bot_commands}"
+        # )
+    except Exception:
+        pass
+
     # Помечаем плагин как активный
     # Роутеры уже зарегистрированы при инициализации бота,
     # middleware будет контролировать их выполнение
@@ -229,7 +242,7 @@ async def reload_plugin(plugin_uuid: UUID) -> bool:
 
 
 def load_plugins() -> list[Plugin]:
-    """Загружает все плагины из папки plugins (папки с __init__.py и .pyd файлы)."""
+    """Загружает все плагины из папки plugins (папки с __init__.py, одиночные .py файлы и .pyd файлы)."""
     global loaded_plugins
     
     plugins = []
@@ -237,7 +250,7 @@ def load_plugins() -> list[Plugin]:
     os.makedirs(plugins_path, exist_ok=True)
 
     # ═══════════════════════════════════════════════════════════════
-    # 1. Загрузка обычных плагинов (папки с __init__.py)
+    # 1. Загрузка обычных плагинов (папки с __init__.py и одиночные .py файлы)
     # ═══════════════════════════════════════════════════════════════
     for name in os.listdir(plugins_path):
         playerok_event_handlers = {}
@@ -251,6 +264,16 @@ def load_plugins() -> list[Plugin]:
                 
                 # Регистрируем обработчики событий бота (INIT и POST_INIT)
                 if hasattr(plugin_module, "BOT_EVENT_HANDLERS"):
+                    try:
+                        _init_count = len((plugin_module.BOT_EVENT_HANDLERS or {}).get("INIT", []) or [])
+                        _post_init_count = len((plugin_module.BOT_EVENT_HANDLERS or {}).get("POST_INIT", []) or [])
+                        if _init_count or _post_init_count:
+                            logger.info(
+                                f"Регистрация BOT_EVENT_HANDLERS плагина {name}: "
+                                f"INIT={_init_count}, POST_INIT={_post_init_count}"
+                            )
+                    except Exception:
+                        pass
                     for event_type, funcs in plugin_module.BOT_EVENT_HANDLERS.items():
                         if event_type in ["INIT", "POST_INIT"]:
                             from core.handlers import add_bot_event_handler
@@ -296,6 +319,74 @@ def load_plugins() -> list[Plugin]:
                 logger.error(f"{Fore.LIGHTRED_EX}✗ Ошибка при загрузке плагина {name}: {Fore.WHITE}{e}")
                 logger.debug(f"{Fore.LIGHTRED_EX}Traceback:\n{traceback.format_exc()}")
                 logger.info(f"{Fore.YELLOW}Бот продолжит работу без плагина {name}")
+        
+        # Вариант 2: Одиночный .py файл
+        elif name.endswith('.py') and name not in ['__init__.py']:
+            try:
+                module_name = name[:-3]
+                plugin_module = importlib.import_module(f"plugins.{module_name}")
+                
+                playerok_event_handlers = {}
+                telegram_bot_routers = []
+                
+                # Регистрируем обработчики событий бота (INIT и POST_INIT)
+                if hasattr(plugin_module, "BOT_EVENT_HANDLERS"):
+                    try:
+                        _init_count = len((plugin_module.BOT_EVENT_HANDLERS or {}).get("INIT", []) or [])
+                        _post_init_count = len((plugin_module.BOT_EVENT_HANDLERS or {}).get("POST_INIT", []) or [])
+                        if _init_count or _post_init_count:
+                            logger.info(
+                                f"Регистрация BOT_EVENT_HANDLERS плагина {module_name}: "
+                                f"INIT={_init_count}, POST_INIT={_post_init_count}"
+                            )
+                    except Exception:
+                        pass
+                    for event_type, funcs in plugin_module.BOT_EVENT_HANDLERS.items():
+                        if event_type in ["INIT", "POST_INIT"]:
+                            from core.handlers import add_bot_event_handler
+                            for func in funcs:
+                                add_bot_event_handler(event_type, func)
+                
+                if hasattr(plugin_module, "PLAYEROK_EVENT_HANDLERS"):
+                    for key, funcs in plugin_module.PLAYEROK_EVENT_HANDLERS.items():
+                        playerok_event_handlers.setdefault(key, []).extend(funcs)
+                        
+                if hasattr(plugin_module, "TELEGRAM_BOT_ROUTERS"):
+                    telegram_bot_routers.extend(plugin_module.TELEGRAM_BOT_ROUTERS)
+
+                bot_commands = []
+                if hasattr(plugin_module, "BOT_COMMANDS"):
+                    if callable(plugin_module.BOT_COMMANDS):
+                        bot_commands = plugin_module.BOT_COMMANDS()
+                    elif isinstance(plugin_module.BOT_COMMANDS, list):
+                        bot_commands = plugin_module.BOT_COMMANDS
+                elif hasattr(plugin_module, "get_commands"):
+                    bot_commands = plugin_module.get_commands()
+
+                plugin_data = Plugin(
+                    uuid.uuid5(uuid.NAMESPACE_DNS, module_name),
+                    enabled=False,
+                    meta=PluginMeta(
+                        plugin_module.PREFIX,
+                        plugin_module.VERSION,
+                        plugin_module.NAME,
+                        plugin_module.DESCRIPTION,
+                        plugin_module.AUTHORS,
+                        plugin_module.LINKS
+                    ),
+                    playerok_event_handlers=playerok_event_handlers,
+                    telegram_bot_routers=telegram_bot_routers,
+                    bot_commands=bot_commands,
+                    _dir_name=module_name,
+                    _routers_registered=False
+                )
+                plugins.append(plugin_data)
+                logger.info(f"{Fore.LIGHTGREEN_EX}✓ Загружен .py плагин: {module_name}")
+            except Exception as e:
+                import traceback
+                logger.error(f"{Fore.LIGHTRED_EX}✗ Ошибка при загрузке .py плагина {name}: {Fore.WHITE}{e}")
+                logger.debug(f"{Fore.LIGHTRED_EX}Traceback:\n{traceback.format_exc()}")
+                logger.info(f"{Fore.YELLOW}Бот продолжит работу без плагина {name}")
     
     # ═══════════════════════════════════════════════════════════════
     # 2. Загрузка скомпилированных .pyd плагинов
@@ -311,6 +402,16 @@ def load_plugins() -> list[Plugin]:
             try:
                 # Регистрируем обработчики событий бота (INIT и POST_INIT)
                 if pyd_info.bot_event_handlers:
+                    try:
+                        _init_count = len((pyd_info.bot_event_handlers or {}).get("INIT", []) or [])
+                        _post_init_count = len((pyd_info.bot_event_handlers or {}).get("POST_INIT", []) or [])
+                        if _init_count or _post_init_count:
+                            logger.info(
+                                f"Регистрация BOT_EVENT_HANDLERS плагина {pyd_name}: "
+                                f"INIT={_init_count}, POST_INIT={_post_init_count}"
+                            )
+                    except Exception:
+                        pass
                     for event_type, funcs in pyd_info.bot_event_handlers.items():
                         if event_type in ["INIT", "POST_INIT"]:
                             from core.handlers import add_bot_event_handler

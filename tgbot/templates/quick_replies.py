@@ -9,11 +9,14 @@ def settings_quick_replies_text():
     quick_replies = sett.get("quick_replies")
     
     if not quick_replies:
-        replies_list = "┗ <i>Заготовки отсутствуют</i>"
+        replies_list = "└ <i>Заготовки отсутствуют</i>"
     else:
-        replies_list = "\n".join([f"┣ <b>{name}</b>: {text[:50]}{'...' if len(text) > 50 else ''}" 
-                                   for name, text in quick_replies.items()])
-        replies_list = replies_list.replace("┣", "┗", replies_list.count("┣") - 1) if "┣" in replies_list else replies_list
+        items = list(quick_replies.items())
+        replies_list = []
+        for i, (name, text) in enumerate(items):
+            prefix = "└" if i == len(items) - 1 else "├"
+            replies_list.append(f"{prefix} <b>{name}</b>: {text[:50]}{'...' if len(text) > 50 else ''}")
+        replies_list = "\n".join(replies_list)
     
     txt = textwrap.dedent(f"""
         ⚙️ <b>Настройки → 📋 Заготовки ответов</b>

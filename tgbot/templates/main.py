@@ -40,12 +40,10 @@ def do_action_text(placeholder: str):
 
 
 def log_text(title: str, text: str, by: str = None):
-    txt = textwrap.dedent(f"""
-        <b>{title}</b>
-        {text}
-    """)
+    # Убираем dedent для корректного отображения отступов в Telegram
+    txt = f"<b>{title}</b>\n\n{text}"
     if by:
-        txt += f"\n<i>{by}</i>"
+        txt += f"\n\n<i>{by}</i>"
     return txt
 
 
@@ -63,9 +61,7 @@ def log_new_mess_kb(username: str, chat_id: str = None):
 def log_new_deal_kb(username: str, deal_id: str, chat_id: str = None):
     rows = [
         [InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack())],
-        [InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack())],
-        [InlineKeyboardButton(text="☑️ Выполнил", callback_data=calls.RememberDealId(de_id=deal_id, do="complete").pack())],
-        [InlineKeyboardButton(text="📦 Возврат", callback_data=calls.RememberDealId(de_id=deal_id, do="refund").pack())]
+        [InlineKeyboardButton(text="🔗 Ссылка", url=f"https://playerok.com/deal/{deal_id}/")]
     ]
     if chat_id:
         rows.append([InlineKeyboardButton(text="📜 Больше", callback_data=calls.ChatHistory(chat_id=chat_id).pack())])

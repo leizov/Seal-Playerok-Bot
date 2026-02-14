@@ -37,6 +37,7 @@ MESSAGES_FILE = os.path.join(BOT_SETTINGS_DIR, "messages.json")
 CUSTOM_COMMANDS_FILE = os.path.join(BOT_SETTINGS_DIR, "custom_commands.json")
 AUTO_DELIVERIES_FILE = os.path.join(BOT_SETTINGS_DIR, "auto_deliveries.json")
 AUTO_RESTORE_ITEMS_FILE = os.path.join(BOT_SETTINGS_DIR, "auto_restore_items.json")
+AUTO_RAISE_ITEMS_FILE = os.path.join(BOT_SETTINGS_DIR, "auto_raise_items.json")
 QUICK_REPLIES_FILE = os.path.join(BOT_SETTINGS_DIR, "quick_replies.json")
 PROXY_LIST_FILE = os.path.join(BOT_SETTINGS_DIR, "proxy_list.json")
 
@@ -48,6 +49,7 @@ SALT_FILE = os.path.join(BOT_DATA_DIR, ".salt")
 STATS_FILE = os.path.join(BOT_DATA_DIR, "stats.json")
 DEALS_MONITOR_FILE = os.path.join(BOT_DATA_DIR, "deals_to_monitor.json")
 INITIALIZED_USERS_FILE = os.path.join(BOT_DATA_DIR, "initialized_users.json")
+AUTO_RAISE_ITEMS_TIMES_FILE = os.path.join(BOT_DATA_DIR, "auto_raise_items_times.json")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ФАЙЛЫ ЛОГОВ (logs/)

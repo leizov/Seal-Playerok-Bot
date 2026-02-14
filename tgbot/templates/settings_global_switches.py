@@ -16,6 +16,7 @@ def settings_global_switches_text():
     
     tg_logging_enabled = "💚" if config["playerok"]["tg_logging"]["enabled"] else "💔"
     auto_restore_items_enabled = "💚" if config["playerok"]["auto_restore_items"]["enabled"] else "💔"
+    auto_raise_items_enabled = "💚" if config["playerok"]["auto_raise_items"]["enabled"] else "💔"
     auto_deliveries_enabled = "💚" if config["playerok"]["auto_deliveries"]["enabled"] else "💔"
     read_chat_enabled = "💚" if config["playerok"]["read_chat"]["enabled"] else "💔"
     auto_complete_deals_enabled = "💚" if config["playerok"]["auto_complete_deals"]["enabled"] else "💔"
@@ -29,6 +30,7 @@ def settings_global_switches_text():
         {auto_response_global} <b>Автоответ</b> {'(настроено: ' + str(len([m for m in messages.values() if m.get("enabled", False)])) + ')' if auto_response_active else '(не настроено)'}
         {tg_logging_enabled} <b>Уведомления в Telegram</b>
         {auto_restore_items_enabled} <b>Автовыставление товаров</b>
+        {auto_raise_items_enabled} <b>Автоподнятие товаров</b>
         {auto_deliveries_enabled} <b>Автовыдача товаров</b>
         {read_chat_enabled} <b>Чтение чата перед отправкой</b>
         {auto_complete_deals_enabled} <b>Автоподтверждение заказов</b> ⚠️
@@ -47,6 +49,7 @@ def settings_global_switches_kb():
     auto_response_global = "💚" if config["playerok"].get("auto_response_enabled", True) else "💔"
     tg_logging_enabled = "💚" if config["playerok"]["tg_logging"]["enabled"] else "💔"
     auto_restore_items_enabled = "💚" if config["playerok"]["auto_restore_items"]["enabled"] else "💔"
+    auto_raise_items_enabled = "💚" if config["playerok"]["auto_raise_items"]["enabled"] else "💔"
     auto_deliveries_enabled = "💚" if config["playerok"]["auto_deliveries"]["enabled"] else "💔"
     read_chat_enabled = "💚" if config["playerok"]["read_chat"]["enabled"] else "💔"
     auto_complete_deals_enabled = "💚" if config["playerok"]["auto_complete_deals"]["enabled"] else "💔"
@@ -56,6 +59,7 @@ def settings_global_switches_kb():
         [InlineKeyboardButton(text=f"{auto_response_global} Автоответ", callback_data="switch_auto_response_enabled")],
         [InlineKeyboardButton(text=f"{tg_logging_enabled} Уведомления в Telegram", callback_data="switch_tg_logging_enabled")],
         [InlineKeyboardButton(text=f"{auto_restore_items_enabled} Автовыставление товаров", callback_data="switch_auto_restore_items_enabled")],
+        [InlineKeyboardButton(text=f"{auto_raise_items_enabled} Автоподнятие товаров", callback_data="switch_auto_raise_items_enabled")],
         [InlineKeyboardButton(text=f"{auto_deliveries_enabled} Автовыдача товаров", callback_data="switch_auto_deliveries_enabled")],
         [InlineKeyboardButton(text=f"{read_chat_enabled} Чтение чата перед отправкой", callback_data="switch_read_chat_enabled")],
         [InlineKeyboardButton(text=f"{auto_complete_deals_enabled} Автоподтверждение заказов", callback_data="switch_auto_complete_deals_enabled")],

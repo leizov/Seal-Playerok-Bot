@@ -71,3 +71,19 @@ async def callback_plugin_page(callback: CallbackQuery, callback_data: calls.Plu
         )
     except Exception as e:
         await callback.answer("❌ Ошибка при загрузке страницы плагина", show_alert=True)
+
+
+@router.callback_query(calls.IncludedRaiseItemsPagination.filter())
+async def callback_included_raise_items_pagination(callback: CallbackQuery, callback_data: calls.IncludedRaiseItemsPagination, state: FSMContext):
+    await state.set_state(None)
+    page = callback_data.page
+    await state.update_data(last_page=page)
+    await throw_float_message(state, callback.message, templ.settings_raise_included_text(), templ.settings_raise_included_kb(page), callback)
+
+
+@router.callback_query(calls.ExcludedRaiseItemsPagination.filter())
+async def callback_excluded_raise_items_pagination(callback: CallbackQuery, callback_data: calls.ExcludedRaiseItemsPagination, state: FSMContext):
+    await state.set_state(None)
+    page = callback_data.page
+    await state.update_data(last_page=page)
+    await throw_float_message(state, callback.message, templ.settings_raise_excluded_text(), templ.settings_raise_excluded_kb(page), callback)

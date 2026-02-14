@@ -8,21 +8,11 @@ from .. import callback_datas as calls
 
 
 def menu_text():
-    config = sett.get("config")
-    
-    # Статусы
-    account_active = "🟢" if config["playerok"]["api"]["token"] else "🔴"
-    proxy_active = "🟢" if config["playerok"]["api"].get("proxy") else "⚫"
-    
     txt = textwrap.dedent(f"""
         🏠 <b>Главное меню</b>
 
         🦭 <b>Seal Playerok Bot</b> v{VERSION}
         <b>Милый бот-помощник для Playerok</b>
-
-        <b>Статус:</b>
-        ┣ {account_active} Аккаунт
-        ┗ {proxy_active} Прокси
         
         <b>Ссылки:</b>
         ┣ <b>{DEVELOPER}</b> — разработчик
@@ -45,6 +35,7 @@ def menu_kb(page: int = 0):
             [InlineKeyboardButton(text="👤 Аккаунт", callback_data=calls.SettingsNavigation(to="account").pack())],
             [InlineKeyboardButton(text="🎛 Глобальные Переключатели", callback_data=calls.SettingsNavigation(to="global_switches").pack())],
             [InlineKeyboardButton(text="♻️ Восстановление", callback_data=calls.SettingsNavigation(to="restore").pack())],
+            [InlineKeyboardButton(text="📈 Автоподнятие", callback_data=calls.SettingsNavigation(to="raise").pack())],
             [InlineKeyboardButton(text="🔔 Настройки Уведомлений", callback_data=calls.SettingsNavigation(to="notifications").pack())],
             [InlineKeyboardButton(text="📋 Заготовки ответов", callback_data=calls.SettingsNavigation(to="quick_replies").pack())],
             [InlineKeyboardButton(text="🔌 Плагины", callback_data=calls.PluginsPagination(page=0).pack())],

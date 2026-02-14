@@ -12,7 +12,9 @@ from ..helpful import throw_float_message
 from .navigation import *
 from .pagination import (
     callback_included_restore_items_pagination, 
-    callback_excluded_restore_items_pagination
+    callback_excluded_restore_items_pagination,
+    callback_included_raise_items_pagination,
+    callback_excluded_raise_items_pagination
 )
 from .page import callback_plugin_page
 
@@ -411,3 +413,119 @@ async def callback_reload_plugin(callback: CallbackQuery, state: FSMContext):
             text=templ.plugin_page_float_text(e), 
             reply_markup=templ.back_kb(calls.PluginsPagination(page=last_page).pack())
         )
+
+
+
+@router.callback_query(calls.DeleteIncludedRaiseItem.filter())
+async def callback_delete_included_raise_item(callback: CallbackQuery, callback_data: calls.DeleteIncludedRaiseItem, state: FSMContext):
+    try:
+        await state.set_state(None)
+        index = callback_data.index
+        if index is None:
+            raise Exception("❌ Включенный товар не был найден, повторите процесс с самого начала")
+        
+        auto_raise_items = sett.get("auto_raise_items")
+        auto_raise_items["included"].pop(index)
+        sett.set("auto_raise_items", auto_raise_items)
+
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        return await callback_included_raise_items_pagination(callback, calls.IncludedRaiseItemsPagination(page=last_page), state)
+    except Exception as e:
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        await throw_float_message(
+            state=state, 
+            message=callback.message, 
+            text=templ.settings_raise_included_float_text(e), 
+            reply_markup=templ.back_kb(calls.IncludedRaiseItemsPagination(page=last_page).pack())
+        )
+
+
+@router.callback_query(calls.DeleteExcludedRaiseItem.filter())
+async def callback_delete_excluded_raise_item(callback: CallbackQuery, callback_data: calls.DeleteExcludedRaiseItem, state: FSMContext):
+    try:
+        await state.set_state(None)
+        index = callback_data.index
+        if index is None:
+            raise Exception("❌ Исключенный товар не был найден, повторите процесс с самого начала")
+        
+        auto_raise_items = sett.get("auto_raise_items")
+        auto_raise_items["excluded"].pop(index)
+        sett.set("auto_raise_items", auto_raise_items)
+
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        return await callback_excluded_raise_items_pagination(callback, calls.ExcludedRaiseItemsPagination(page=last_page), state)
+    except Exception as e:
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        await throw_float_message(
+            state=state, 
+            message=callback.message, 
+            text=templ.settings_raise_excluded_float_text(e), 
+            reply_markup=templ.back_kb(calls.ExcludedRaiseItemsPagination(page=last_page).pack())
+        )
+
+
+@router.callback_query(F.data == "send_new_included_raise_items_keyphrases_file")
+async def callback_send_new_included_raise_items_keyphrases_file(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.RaiseItemsStates.waiting_for_new_included_raise_items_keyphrases_file)
+    await throw_float_message(
+        state=state, 
+        message=callback.message, 
+        text=templ.settings_new_raise_included_float_text(f"📄 Отправьте <b>.txt</b> файл с <b>ключевыми фразами</b>, по одной записи в строке (для каждого товара указываются через запятую, например, \"samp аккаунт, со всеми данными\")"), 
+        reply_markup=templ.back_kb(calls.IncludedRaiseItemsPagination(page=last_page).pack())
+    )
+
+
+@router.callback_query(F.data == "send_new_excluded_raise_items_keyphrases_file")
+async def callback_send_new_excluded_raise_items_keyphrases_file(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.RaiseItemsStates.waiting_for_new_excluded_raise_items_keyphrases_file)
+    await throw_float_message(
+        state=state, 
+        message=callback.message, 
+        text=templ.settings_new_raise_excluded_float_text(f"📄 Отправьте <b>.txt</b> файл с <b>ключевыми фразами</b>, по одной записи в строке (для каждого товара указываются через запятую, например, \"samp аккаунт, со всеми данными\")"), 
+        reply_markup=templ.back_kb(calls.ExcludedRaiseItemsPagination(page=last_page).pack())
+    )
+
+
+
+@router.callback_query(F.data == "add_included_raise_item")
+async def callback_add_included_raise_item(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.RaiseItemsStates.waiting_for_new_included_raise_item_keyphrases)
+    await throw_float_message(
+        state=state, 
+        message=callback.message, 
+        text=templ.settings_new_raise_included_float_text(f"✏️ Введите <b>ключевые фразы</b> для товара через запятую (например, \"samp аккаунт, со всеми данными\") ↓"), 
+        reply_markup=templ.back_kb(calls.IncludedRaiseItemsPagination(page=last_page).pack())
+    )
+
+
+@router.callback_query(F.data == "add_included_raise_items_from_file")
+async def callback_add_included_raise_items_from_file(callback: CallbackQuery, state: FSMContext):
+    return await callback_send_new_included_raise_items_keyphrases_file(callback, state)
+
+
+@router.callback_query(F.data == "add_excluded_raise_item")
+async def callback_add_excluded_raise_item(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.RaiseItemsStates.waiting_for_new_excluded_raise_item_keyphrases)
+    await throw_float_message(
+        state=state, 
+        message=callback.message, 
+        text=templ.settings_new_raise_excluded_float_text(f"✏️ Введите <b>ключевые фразы</b> для товара через запятую (например, \"samp аккаунт, со всеми данными\") ↓"), 
+        reply_markup=templ.back_kb(calls.ExcludedRaiseItemsPagination(page=last_page).pack())
+    )
+
+
+@router.callback_query(F.data == "add_excluded_raise_items_from_file")
+async def callback_add_excluded_raise_items_from_file(callback: CallbackQuery, state: FSMContext):
+    return await callback_send_new_excluded_raise_items_keyphrases_file(callback, state)

@@ -145,7 +145,7 @@ def settings_proxy_page_kb(proxy_id: int):
     else:
         rows.append([InlineKeyboardButton(
             text="🔴 Деактивировать прокси",
-            callback_data="deactivate_proxy"
+            callback_data=f"deactivate_proxy:{proxy_id}"
         )])
     
     # Кнопка проверки

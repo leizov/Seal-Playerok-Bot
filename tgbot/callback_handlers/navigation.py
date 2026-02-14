@@ -89,6 +89,22 @@ async def callback_settings_navigation(callback: CallbackQuery, callback_data: c
                 reply_markup=templ.settings_kb(),
                 callback=callback
             )
+        elif to == "raise":
+            try:
+                text = templ.settings_raise_text()
+                kb = templ.settings_raise_kb()
+                await throw_float_message(
+                    state=state,
+                    message=callback.message,
+                    text=text,
+                    reply_markup=kb,
+                    callback=callback
+                )
+            except Exception as e:
+                import traceback
+                from logging import getLogger
+                getLogger("tgbot").error(f"Ошибка при загрузке настроек автоподнятия: {e}", exc_info=True)
+                await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
         else:
             text_func = getattr(templ, f'settings_{to}_text', None)
             kb_func = getattr(templ, f'settings_{to}_kb', None)

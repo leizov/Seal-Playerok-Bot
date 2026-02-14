@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from aiogram import types, Router, Bot
+from aiogram import types, Router, Bot, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
@@ -249,3 +249,212 @@ async def handler_fingerprint(message: types.Message, state: FSMContext, bot: Bo
         
     except Exception as e:
         await message.answer(f"❌ Ошибка при генерации fingerprint: {str(e)}")
+
+
+@router.message(Command("playerok_status"))
+async def handler_playerok_status(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /playerok_status
+    Показывает статус подключения к Playerok
+    """
+    config = sett.get("config")
+    
+    # Проверяем авторизацию
+    if message.from_user.id not in config["telegram"]["bot"].get("signed_users", []):
+        return await do_auth(message, state)
+    
+    # Отправляем промежуточное сообщение
+    checking_msg = await message.answer("🔄 <b>Проверяю подключение к Playerok...</b>", parse_mode="HTML")
+    
+    try:
+        from plbot.playerokbot import PlayerokBot
+        playerok_bot = PlayerokBot()
+        
+        if playerok_bot.is_connected and playerok_bot.playerok_account:
+            # Подключено
+            try:
+                username = playerok_bot.playerok_account.profile.username
+                user_id = playerok_bot.playerok_account.profile.id
+            except:
+                username = "Неизвестно"
+                user_id = "Неизвестно"
+            
+            proxy_status = "🟢 Активен" if config["playerok"]["api"]["proxy"] else "⚫ Не используется"
+            
+            text = (
+                f"🟢 <b>Playerok подключен</b>\n\n"
+                f"<b>Аккаунт:</b> @{username}\n"
+                f"<b>ID:</b> <code>{user_id}</code>\n"
+                f"<b>Прокси:</b> {proxy_status}\n\n"
+                f"<i>✅ Бот работает нормально</i>"
+            )
+            
+            # Кнопка обновления
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить статус", callback_data="refresh_playerok_status")]
+            ])
+            
+            await checking_msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        else:
+            # Не подключено
+            error_msg = str(playerok_bot.connection_error) if playerok_bot.connection_error else "Неизвестная ошибка"
+            # Экранируем HTML теги в ошибке
+            error_msg = error_msg.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+            
+            text = (
+                f"🔴 <b>Playerok не подключен</b>\n\n"
+                f"<b>Ошибка:</b>\n<code>{error_msg[:200]}</code>\n\n"
+                f"<i>⚠️ Проверьте настройки токена и прокси</i>"
+            )
+            
+            # Кнопки переподключения и настроек
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            from .. import callback_datas as calls
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Переподключить", callback_data="reconnect_playerok")],
+                [InlineKeyboardButton(text="⚙️ Настройки аккаунта", callback_data=calls.SettingsNavigation(to="account").pack())]
+            ])
+            
+            await checking_msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
+            
+    except Exception as e:
+        error_text = str(e).replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+        await checking_msg.edit_text(
+            f"❌ <b>Ошибка при проверке статуса</b>\n\n"
+            f"<code>{error_text[:200]}</code>",
+            parse_mode="HTML"
+        )
+
+
+
+@router.callback_query(F.data == "refresh_playerok_status")
+async def callback_refresh_playerok_status(callback: types.CallbackQuery):
+    """Обновляет статус подключения к Playerok."""
+    # Показываем промежуточное сообщение
+    await callback.message.edit_text("🔄 <b>Проверяю подключение...</b>", parse_mode="HTML")
+    await callback.answer()
+    
+    try:
+        from plbot.playerokbot import PlayerokBot
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        from .. import callback_datas as calls
+        
+        config = sett.get("config")
+        playerok_bot = PlayerokBot()
+        
+        if playerok_bot.is_connected and playerok_bot.playerok_account:
+            # Подключено
+            try:
+                username = playerok_bot.playerok_account.profile.username
+                user_id = playerok_bot.playerok_account.profile.id
+            except:
+                username = "Неизвестно"
+                user_id = "Неизвестно"
+            
+            proxy_status = "🟢 Активен" if config["playerok"]["api"]["proxy"] else "⚫ Не используется"
+            
+            text = (
+                f"🟢 <b>Playerok подключен</b>\n\n"
+                f"<b>Аккаунт:</b> @{username}\n"
+                f"<b>ID:</b> <code>{user_id}</code>\n"
+                f"<b>Прокси:</b> {proxy_status}\n\n"
+                f"<i>✅ Бот работает нормально</i>"
+            )
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить статус", callback_data="refresh_playerok_status")]
+            ])
+            
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        else:
+            # Не подключено
+            error_msg = str(playerok_bot.connection_error) if playerok_bot.connection_error else "Неизвестная ошибка"
+            error_msg = error_msg.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+            
+            text = (
+                f"🔴 <b>Playerok не подключен</b>\n\n"
+                f"<b>Ошибка:</b>\n<code>{error_msg[:200]}</code>\n\n"
+                f"<i>⚠️ Проверьте настройки токена и прокси</i>"
+            )
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Переподключить", callback_data="reconnect_playerok")],
+                [InlineKeyboardButton(text="⚙️ Настройки аккаунта", callback_data=calls.SettingsNavigation(to="account").pack())]
+            ])
+            
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+            
+    except Exception as e:
+        error_text = str(e).replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при проверке</b>\n\n<code>{error_text[:200]}</code>",
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data == "reconnect_playerok")
+async def callback_reconnect_playerok(callback: types.CallbackQuery):
+    """Переподключает к Playerok."""
+    # Показываем промежуточное сообщение
+    await callback.message.edit_text("🔄 <b>Переподключаюсь к Playerok...</b>", parse_mode="HTML")
+    await callback.answer()
+    
+    try:
+        from plbot.playerokbot import PlayerokBot
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        from .. import callback_datas as calls
+        
+        playerok_bot = PlayerokBot()
+        success = await playerok_bot.reconnect()
+        
+        config = sett.get("config")
+        
+        if success and playerok_bot.is_connected:
+            # Успешно переподключено
+            try:
+                username = playerok_bot.playerok_account.profile.username
+                user_id = playerok_bot.playerok_account.profile.id
+            except:
+                username = "Неизвестно"
+                user_id = "Неизвестно"
+            
+            proxy_status = "🟢 Активен" if config["playerok"]["api"]["proxy"] else "⚫ Не используется"
+            
+            text = (
+                f"🟢 <b>Playerok подключен</b>\n\n"
+                f"<b>Аккаунт:</b> @{username}\n"
+                f"<b>ID:</b> <code>{user_id}</code>\n"
+                f"<b>Прокси:</b> {proxy_status}\n\n"
+                f"<i>✅ Переподключение успешно!</i>"
+            )
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить статус", callback_data="refresh_playerok_status")]
+            ])
+            
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        else:
+            # Не удалось переподключиться
+            error_msg = str(playerok_bot.connection_error) if playerok_bot.connection_error else "Неизвестная ошибка"
+            error_msg = error_msg.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+            
+            text = (
+                f"🔴 <b>Не удалось переподключиться</b>\n\n"
+                f"<b>Ошибка:</b>\n<code>{error_msg[:200]}</code>\n\n"
+                f"<i>⚠️ Проверьте настройки токена и прокси</i>"
+            )
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="reconnect_playerok")],
+                [InlineKeyboardButton(text="⚙️ Настройки аккаунта", callback_data=calls.SettingsNavigation(to="account").pack())]
+            ])
+            
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+            
+    except Exception as e:
+        error_text = str(e).replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка переподключения</b>\n\n<code>{error_text[:200]}</code>",
+            parse_mode="HTML"
+        )

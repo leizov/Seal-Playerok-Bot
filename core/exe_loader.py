@@ -116,7 +116,7 @@ class PydPluginLoader:
     """
     
     # Поддерживаемые расширения
-    EXTENSIONS = ['.pyd', '.so', '.cpython-312-x86_64-linux-gnu.so']
+    EXTENSIONS = ['.pyd', '.so', '.cpython-312-x86_64-linux-gnu.so', '.cpython-313-x86_64-linux-gnu.so']
     
     def __init__(self, plugins_dir: Path = None):
         """
@@ -140,7 +140,9 @@ class PydPluginLoader:
                 elif '.cpython-' in file.name and file.suffix == '.so':
                     plugins.append(file)
                 elif file.suffix.lower() == '.so' and sys.platform != 'win32':
-                    plugins.append(file)
+                    # Проверяем, что это .so файл для Python
+                    if 'python' in file.name.lower() or 'cp3' in file.name.lower():
+                        plugins.append(file)
         
         return sorted(plugins)
     
@@ -306,6 +308,27 @@ class PydPluginLoader:
                     info.bot_commands = list(module.BOT_COMMANDS)
             elif hasattr(module, 'get_commands'):
                 info.bot_commands = module.get_commands()
+
+            try:
+                _has_routers = hasattr(module, 'TELEGRAM_BOT_ROUTERS')
+                _has_playerok = hasattr(module, 'PLAYEROK_EVENT_HANDLERS')
+                _has_bot_events = hasattr(module, 'BOT_EVENT_HANDLERS')
+                _has_cmds = hasattr(module, 'BOT_COMMANDS') or hasattr(module, 'get_commands')
+
+                _playerok_events = len(info.playerok_event_handlers or {})
+                _playerok_handlers = sum(len(v or []) for v in (info.playerok_event_handlers or {}).values())
+                _init_count = len((info.bot_event_handlers or {}).get('INIT', []) or [])
+                _post_init_count = len((info.bot_event_handlers or {}).get('POST_INIT', []) or [])
+
+                # logger.info(
+                #     f".pyd exports {display_name}: "
+                #     f"routers={_has_routers}({len(info.telegram_bot_routers)}), "
+                #     f"playerok={_has_playerok}({ _playerok_events } events/{ _playerok_handlers } handlers), "
+                #     f"bot_events={_has_bot_events}(INIT={_init_count},POST_INIT={_post_init_count}), "
+                #     f"commands={_has_cmds}({len(info.bot_commands)})"
+                # )
+            except Exception:
+                pass
             
             # Метаданные
             for attr in ['PREFIX', 'VERSION', 'NAME', 'DESCRIPTION', 'AUTHORS', 'LINKS']:

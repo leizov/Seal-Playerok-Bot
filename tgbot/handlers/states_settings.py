@@ -62,20 +62,14 @@ async def handler_waiting_for_token(message: types.Message, state: FSMContext):
         
         logger.info(f"🎫 Токен изменён через Telegram")
 
-        # Показываем сообщение с предложением перезапуска
-        restart_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Перезапустить бота", callback_data="restart_bot_confirm")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.SettingsNavigation(to="account").pack())]
-        ])
-        
         await throw_float_message(
             state=state,
             message=message,
             text=templ.settings_account_float_text(
                 f"✅ <b>Токен</b> успешно изменён!\n\n"
-                f"⚠️ <b>Важно:</b> Для применения изменений требуется перезапуск бота."
+                f"⏳ Применяется автоматически через 3 секунды..."
             ),
-            reply_markup=restart_kb
+            reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
         )
     except Exception as e:
         await throw_float_message(
@@ -99,20 +93,14 @@ async def handler_waiting_for_user_agent(message: types.Message, state: FSMConte
         
         logger.info(f"🎩 User-Agent изменён через Telegram")
 
-        # Показываем сообщение с предложением перезапуска
-        restart_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Перезапустить бота", callback_data="restart_bot_confirm")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.SettingsNavigation(to="account").pack())]
-        ])
-        
         await throw_float_message(
             state=state,
             message=message,
             text=templ.settings_account_float_text(
                 f"✅ <b>User-Agent</b> успешно изменён!\n\n"
-                f"⚠️ <b>Важно:</b> Для применения изменений требуется перезапуск бота."
+                f"⏳ Применяется автоматически через 3 секунды..."
             ),
-            reply_markup=restart_kb
+            reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
         )
     except Exception as e:
         await throw_float_message(

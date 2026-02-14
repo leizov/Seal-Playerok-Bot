@@ -18,6 +18,7 @@ def settings_notifications_text():
     event_deal_status_changed = "🔔" if tg_logging_events.get("deal_status_changed", True) else "🔕"
     event_command_received = "🔔" if tg_logging_events.get("command_received", True) else "🔕"
     event_auto_delivery = "🔔" if tg_logging_events.get("auto_delivery", True) else "🔕"
+    event_item_raised = "🔔" if tg_logging_events.get("item_raised", False) else "🔕"
     txt = textwrap.dedent(f"""
         ⚙️ <b>Настройки → 🔔 Уведомления</b>
 
@@ -28,6 +29,7 @@ def settings_notifications_text():
         ┣ {event_command_received} <b>Получена команда</b>
         ┣ {event_new_deal} <b>Новая сделка</b>
         ┣ {event_auto_delivery} <b>Выдача товара из автовыдачи</b>
+        ┣ {event_item_raised} <b>Товар поднят</b>
         ┣ {event_new_review} <b>Новый отзыв</b>
         ┣ {event_new_problem} <b>Новая жалоба в сделке</b>
         ┗ {event_deal_status_changed} <b>Статус сделки изменился</b>
@@ -46,6 +48,7 @@ def settings_notifications_kb():
     event_command_received = "🔔" if tg_logging_events.get("command_received", True) else "🔕"
     event_new_deal = "🔔" if tg_logging_events.get("new_deal", True) else "🔕"
     event_auto_delivery = "🔔" if tg_logging_events.get("auto_delivery", True) else "🔕"
+    event_item_raised = "🔔" if tg_logging_events.get("item_raised", False) else "🔕"
     event_new_review = "🔔" if tg_logging_events.get("new_review", True) else "🔕"
     event_new_problem = "🔔" if tg_logging_events.get("new_problem", True) else "🔕"
     event_deal_status_changed = "🔔" if tg_logging_events.get("deal_status_changed", True) else "🔕"
@@ -61,6 +64,9 @@ def settings_notifications_kb():
         [
             InlineKeyboardButton(text=f"{event_new_deal} Новая сделка", callback_data="switch_tg_logging_event_new_deal"),
             InlineKeyboardButton(text=f"{event_auto_delivery} Выдача товара из автовыдачи", callback_data="switch_tg_logging_event_auto_delivery")
+        ],
+        [
+            InlineKeyboardButton(text=f"{event_item_raised} Товар поднят", callback_data="switch_tg_logging_event_item_raised")
         ],
         [
             InlineKeyboardButton(text=f"{event_new_review} Новый отзыв", callback_data="switch_tg_logging_event_new_review"),

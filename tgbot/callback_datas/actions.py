@@ -59,3 +59,11 @@ class SetWatermark(CallbackData, prefix="setwm"):
 
 class GreetingCooldownEdit(CallbackData, prefix="grcool"):
     pass  # Активирует режим ввода нового интервала
+
+
+class DeleteIncludedRaiseItem(CallbackData, prefix="delinra"):
+    index: int
+
+
+class DeleteExcludedRaiseItem(CallbackData, prefix="delexra"):
+    index: int
