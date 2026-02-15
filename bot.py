@@ -2,7 +2,8 @@
 # РАННЯЯ УСТАНОВКА ЗАВИСИМОСТЕЙ (до любых внешних импортов!)
 # ===========================================================================
 # Эта секция использует ТОЛЬКО стандартную библиотеку Python
-import sys
+import datetime
+import syslf
 import os
 import subprocess
 
@@ -663,7 +664,15 @@ if __name__ == "__main__":
    └──────────────────────────────────────────────────────────────────────────────{Fore.RESET}
 """)
         check_for_updates()
-        
+
+        from datetime import datetime as datetime_time
+        try:
+            local_time = datetime.datetime.now()
+            logger.info(f'Часовой пояс устройства: {local_time.astimezone().tzinfo}')
+            # logger.info(f'Смещение от UTC: {local_time.utcoffset().total_seconds() // 3600} часов')
+        except Exception as e:
+            logger.error(f'Ошибка при получении часового пояса устройства: {e}')
+
         if not check_permissions():
             print(f"\n{Fore.RED}Не удалось запустить бот из-за проблем с правами доступа.{Fore.RESET}")
             print(f"{Fore.YELLOW}Исправьте права и запустите бот снова.{Fore.RESET}\n")

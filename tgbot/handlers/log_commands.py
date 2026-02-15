@@ -115,23 +115,20 @@ async def close_logs(callback: types.CallbackQuery, callback_data: calls.LogsAct
 
 def find_latest_error(log_text: str) -> str:
     """Находит последнюю ошибку и её traceback в логах"""
-    import re
     
-    # Ищем все ошибки с трейсбэками
-    error_blocks = re.split(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} - .*? - (?:ERROR|CRITICAL) - .*?(?=\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} -|\Z))', 
-                           log_text, 
-                           flags=re.DOTALL)
+    # Ищем строки с маркерами ERROR (• E) или CRITICAL (• C)
+    error_lines = []
     
-    if len(error_blocks) < 2:
+    for line in log_text.split('\n'):
+        # Проверяем наличие маркеров ERROR или CRITICAL
+        if '• E' in line or '• C' in line:
+            error_lines.append(line)
+    
+    if not error_lines:
         return "❌ В логах не найдено ошибок."
     
-    # Берем последнюю ошибку (нечетные элементы содержат совпадения)
-    last_error = ""
-    for i in range(len(error_blocks)-1, -1, -1):
-        if i % 2 == 1:  # Нечетные индексы содержат совпадения
-            last_error = error_blocks[i].strip()
-            if last_error:  # Пропускаем пустые совпадения
-                break
+    # Берем последнюю ошибку
+    last_error = error_lines[-1].strip()
     
     if not last_error:
         return "❌ В логах не найдено ошибок."

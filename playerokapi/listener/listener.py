@@ -166,6 +166,7 @@ class EventListener:
         
         for new_chat in new_chats.chats:
             if not new_chat.last_message:
+                # self.__logger.info(f'Пропускаю чат {new_chat.id} - нет last_message')
                 continue
             
             # Получаем ID последнего обработанного сообщения для этого чата
@@ -180,6 +181,7 @@ class EventListener:
                 # Собираем сообщения, созданные после запуска бота
                 for msg in msg_list.messages:
                     if self.__startup_time and msg.created_at < self.__startup_time:
+                        # self.__logger.info(f'Пропускаю чат {new_chat.id} - сообщение до запуска {msg.created_at}/{self.__startup_time}')
                         continue
                     new_msgs.append(msg)
                 
@@ -275,14 +277,17 @@ class EventListener:
         _or_ `playerokapi.listener.events.DealStatusChangedEvent(message.deal)`
         """
 
-        # Устанавливаем время запуска текущей сессии
-        self.__startup_time = datetime.now(timezone.utc).isoformat()
+
+
         # self.__logger.info(f"Слушатель событий запущен. Время старта: {self.__startup_time}")
         # self.__logger.info(f"При первом проходе события будут сохранены, но не обработаны")
 
         chats: ChatList = None
         
         try:
+            # Устанавливаем время запуска текущей сессии
+            self.__startup_time = datetime.now(timezone.utc).isoformat()
+            self.__logger.info(f'Время запуска слушателя событий: {self.__startup_time} ')
             while True:
                 try:
                     next_chats = self.account.get_chats(24)

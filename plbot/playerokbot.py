@@ -1,8 +1,8 @@
 from __future__ import annotations
 import asyncio
-import time
+
 from datetime import datetime
-import time
+
 from threading import Thread
 import textwrap
 import shutil
@@ -223,7 +223,8 @@ class PlayerokBot:
         self._listener_task = run_async_in_thread(listener_loop)
         self._review_monitor_task = run_async_in_thread(review_monitor_loop)
         self._auto_raise_items_task = run_async_in_thread(auto_raise_items_loop)
-    
+
+
     def _should_send_greeting(self, chat_id: str, current_message_id: str = None) -> bool:
         """
         Проверяет, нужно ли отправлять приветственное сообщение, 
@@ -296,7 +297,54 @@ class PlayerokBot:
             self.logger.warning(f"Ошибка при проверке истории чата для приветствия: {e}")
             # При ошибке лучше не отправлять, чтобы не спамить
             return False
-    
+
+    def _should_send_greeting_with_deal(self, chat_id: str, event: NewDealEvent) -> bool:
+        """
+        Проверяет, нужно ли отправлять приветственное сообщение при получении новой сделки.
+
+        :param chat_id: ID чата.
+        :param event: ивент сделки.
+        :return: True если нужно отправить приветствие, False если нет.
+        """
+
+
+        # Проверяем, включены ли приветствия
+        first_message_config = self.messages.get("first_message", {})
+        if not first_message_config.get("enabled", True):
+            return False
+
+        # Получаем cooldown в днях
+        cooldown_days = first_message_config.get("cooldown_days", 7)
+        cooldown_seconds = cooldown_days * 24 * 60 * 60
+
+        try:
+            # Получаем последние сообщения чата (достаточно небольшого количества)
+            messages_list = self.account.get_chat_messages(chat_id, count=10)
+
+            if not messages_list or len(messages_list.messages) <= 1:
+                # в чате только увед о сделке
+                return True
+
+            # Ищем предыдущее сообщение от пользователя (не от нас и не текущее)
+            for msg in messages_list.messages:
+                # Пропускаем текущее сообщение
+                msg_time = datetime.fromisoformat(msg.created_at.replace("Z", "+00:00"))
+                deal_time = datetime.fromisoformat(event.deal.created_at.replace("Z", "+00:00"))
+
+                if deal_time > msg_time:
+                    # мы поймали самое последнее сообщение до сделки
+                    time_diff = deal_time - msg_time
+                    if time_diff.total_seconds() > cooldown_seconds:
+                        return True
+                    else:
+                        return False
+            return True
+
+        except Exception as e:
+            self.logger.warning(f"Ошибка при проверке истории чата для приветствия: {e}")
+            # При ошибке лучше не отправлять, чтобы не спамить
+            return False
+
     def msg(self, message_name: str, messages_config_name: str = "messages", 
             messages_data: dict = DATA, **kwargs) -> str | None:
         """ 
@@ -403,25 +451,41 @@ class PlayerokBot:
             return
         try:
             profile = self.account.get_user(id=self.account.id)
-            items = profile.get_items(count=24, statuses=[ItemStatuses.SOLD]).items
-            _item = [profile_item for profile_item in items if profile_item.name == item.name]
-            if len(_item) <= 0: return
-            try: item: types.MyItem = self.account.get_item(_item[0].id)
-            except: item = _item[0]
+
+            attempts = 3
+            attempts_delay = 3
+            _item = []
+            for i in range(attempts):
+                items = profile.get_items(count=24, statuses=[ItemStatuses.SOLD]).items
+                _item = [profile_item for profile_item in items if profile_item.name == item.name]
+                if _item:
+                    break
+                self.logger.warning(f'Не нашёл товар {item.name} для востановления на нашём аккаунте\nПопытка {i}/{attempts}')
+                time.sleep(attempts_delay)
+
+            if len(_item) <= 0:
+                self.logger.error(f'Не нашёл товар {item.name} для востановления на нашём аккаунте')
+                return
+            try:
+                item: types.MyItem = self.account.get_item(_item[0].id)
+            except:
+                item = _item[0]
 
             priority_statuses = self.account.get_item_priority_statuses(item.id, item.price)
             try: priority_status = [status for status in priority_statuses if status.type is PriorityTypes.DEFAULT or status.price == 0][0]
             except IndexError: priority_status = [status for status in priority_statuses][0]
 
-            for i in range(2):
+            publish_attempts = 2
+            publish_delay = 3
+            for i in range(publish_attempts):
                 try:
                     new_item = self.account.publish_item(item.id, priority_status.id)
                     if new_item:
                         break
-                    time.sleep(3)
+                    time.sleep(publish_delay)
                 except Exception as e:
                     self.logger.error(
-                        f"{Fore.LIGHTRED_EX}Неудачная попытка востановления предмета {i+1}/2 «{item.name}» произошла ошибка: {Fore.WHITE}{e}")
+                        f"{Fore.LIGHTRED_EX}Неудачная попытка востановления предмета {i+1}/{publish_attempts} «{item.name}» произошла ошибка: {Fore.WHITE}{e}")
                     return
 
             if new_item.status is ItemStatuses.PENDING_APPROVAL or new_item.status is ItemStatuses.APPROVED:
@@ -734,21 +798,21 @@ class PlayerokBot:
         tg_logging_events = self.config["playerok"]["tg_logging"].get("events", {})
         if (
             self.config["playerok"]["tg_logging"]["enabled"]
-            and (tg_logging_events.get("new_user_message", True) 
+            and (tg_logging_events.get("new_user_message", True)
             or tg_logging_events.get("new_system_message", True))
         ):
             do = False
             is_system_user = event.message.user.username in ["Playerok.com", "Поддержка"]
-            
+
             if tg_logging_events.get("new_user_message", True) and not is_system_user:
                 do = True
             if tg_logging_events.get("new_system_message", True) and is_system_user:
                 do = True
-            
+
             if do:
                 # Проверяем, является ли сообщение системным (оплата, подтверждение и т.д.)
                 emoji, formatted_msg = format_system_message(event.message.text, event.message.deal)
-                
+
                 if formatted_msg:
                     # Системное сообщение о событии (оплата, подтверждение и т.д.)
                     title_emoji = emoji
@@ -760,38 +824,41 @@ class PlayerokBot:
                     text = f"{user_emoji} <b>{event.message.user.username}:</b> "
                     text += event.message.text or ""
                     text += f'<b><a href="{event.message.file.url}">{event.message.file.filename}</a></b>' if event.message.file else ""
-                
+
                 asyncio.run_coroutine_threadsafe(
                     get_telegram_bot().log_event(
                         text=log_text(
-                            title=f'{title_emoji} Новое сообщение в <a href="https://playerok.com/chats/{event.chat.id}">чате</a>', 
+                            title=f'{title_emoji} Новое сообщение в <a href="https://playerok.com/chats/{event.chat.id}">чате</a>',
                             text=text.strip()
                         ),
                         kb=log_new_mess_kb(event.message.user.username, event.chat.id)
-                    ), 
+                    ),
                     get_telegram_bot_loop()
                 )
 
+
         if event.chat.id not in [self.account.system_chat_id, self.account.support_chat_id]:
-            # Проверяем, нужно ли отправить приветственное сообщение (по истории чата)
-            if self._should_send_greeting(event.chat.id, event.message.id):
-                greeting_msg = self.msg("first_message", username=event.message.user.username)
-                if greeting_msg:  # Отправляем только если сообщение включено
-                    self.send_message(event.chat.id, greeting_msg)
-            
-            if str(event.message.text).lower() in ["!команды", "!commands"]:
-                self.send_message(event.chat.id, self.msg("cmd_commands"))
-            elif str(event.message.text).lower() in ["!продавец", "!seller"]:
+            # миграция в new deal обработчик
+            # if self._should_send_greeting(event.chat.id, event.message.id):
+            #     greeting_msg = self.msg("first_message", username=event.message.user.username)
+            #     if greeting_msg:
+            #         self.send_message(event.chat.id, greeting_msg)
+
+            #todo отпрвку команд из конфига сделать пизда лень
+            # if str(event.message.text).lower() in ["!команды", "!commands"]:
+            #     self.send_message(event.chat.id, self.msg("cmd_commands"))
+            if str(event.message.text).lower() in ["!продавец", "!seller"]:
                 asyncio.run_coroutine_threadsafe(
-                    get_telegram_bot().call_seller(event.message.user.username, event.chat.id), 
+                    get_telegram_bot().call_seller(event.message.user.username, event.chat.id),
                     get_telegram_bot_loop()
                 )
                 self.send_message(event.chat.id, self.msg("cmd_seller"))
+
             elif self.config["playerok"]["custom_commands"]["enabled"]:
                 if event.message.text.lower() in [key.lower() for key in self.custom_commands.keys()]:
                     msg = "\n".join(self.custom_commands[event.message.text])
                     self.send_message(event.chat.id, msg)
-                    
+
                     # Отправка уведомления о получении команды
                     if (
                         self.config["playerok"]["tg_logging"]["enabled"]
@@ -866,6 +933,13 @@ class PlayerokBot:
                 )
             except Exception as e:
                 self.logger.error(f"Ошибка при попытке отправить уведомление о новой сделке: {e}")
+
+        # Проверяем, нужно ли отправить приветственное сообщение (по истории чата)
+        if self._should_send_greeting_with_deal(event.chat.id, event):
+            greeting_msg = self.msg("first_message", username=event.deal.user.username)
+            if greeting_msg:  # Отправляем только если сообщение включено
+                self.send_message(event.chat.id, greeting_msg)
+
 
         self.send_message(event.chat.id, self.msg("new_deal", deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         if self.config["playerok"]["auto_deliveries"]["enabled"]:
