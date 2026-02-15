@@ -3,7 +3,7 @@
 # ===========================================================================
 # Эта секция использует ТОЛЬКО стандартную библиотеку Python
 import datetime
-import syslf
+import sys
 import os
 import subprocess
 
