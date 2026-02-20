@@ -3,23 +3,6 @@ PYD Plugin Loader
 ==================
 Загрузчик скомпилированных .pyd плагинов из папки plugins/
 
-.pyd - это Python extension modules, скомпилированные через Nuitka --module.
-Они импортируются как обычные Python модули, поэтому:
-- Роутеры aiogram работают ✅
-- Обработчики событий Playerok работают ✅
-- bot.send_message() работает ✅
-
-ВАЖНО: .exe через subprocess НЕ ПОДХОДИТ для плагинов, потому что:
-- subprocess = отдельный процесс
-- Нет доступа к объектам бота (dispatcher, bot instance)
-- Роутеры не зарегистрируются
-- События не придут
-
-ВЕРСИОННОСТЬ:
-- .pyd/.so компилируются под КОНКРЕТНУЮ версию Python
-- plugin.cpython-312-win_amd64.pyd → Python 3.12 + Windows 64-bit
-- plugin.cpython-312-x86_64-linux-gnu.so → Python 3.12 + Linux 64-bit
-- Если версии не совпадают → ImportError!
 """
 
 import os

@@ -632,7 +632,7 @@ if __name__ == "__main__":
         print(f"""
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～
 {Fore.LIGHTCYAN_EX}   ╔═════════════════════════════════════════════════════════════════════════════╗
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭  {Fore.LIGHTCYAN_EX}║
+{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭  {Fore.LIGHTCYAN_EX}  ║
 {Fore.LIGHTCYAN_EX}   ║                                                                             ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗         {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}████████{Fore.WHITE}╗        {Fore.LIGHTCYAN_EX}     ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗╚══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝        {Fore.LIGHTCYAN_EX}     ║
@@ -648,8 +648,8 @@ if __name__ == "__main__":
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║╚{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗       {Fore.LIGHTCYAN_EX}  ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.WHITE}╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝         {Fore.LIGHTCYAN_EX}║
 {Fore.LIGHTCYAN_EX}   ║                                                                             ║
-{Fore.LIGHTCYAN_EX}   ║              {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}                    ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭  {Fore.LIGHTCYAN_EX}║
+{Fore.LIGHTCYAN_EX}   ║              {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}                     ║
+{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭  {Fore.LIGHTCYAN_EX}  ║
 {Fore.LIGHTCYAN_EX}   ╚═════════════════════════════════════════════════════════════════════════════╝
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～{Fore.RESET}
 """)
