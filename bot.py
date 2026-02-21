@@ -243,7 +243,11 @@ async def start_playerok_bot():
 def check_permissions():
     """Проверяет права доступа к файлам настроек и исправляет их при необходимости."""
     import stat
-    import pwd
+    try:
+        import pwd
+    except Exception as e:
+        logger.info('Запуск на Windows, не проверяем права доступа')
+        return True
     from pathlib import Path
     from colorama import Fore
     
@@ -258,7 +262,7 @@ def check_permissions():
         print(f"{Fore.RED}❌ Нет прав на запись в {settings_dir}{Fore.RESET}")
         print(f"{Fore.YELLOW}Выполните: sudo chown -R {current_user}:{current_user} {settings_dir}{Fore.RESET}")
         return False
-    
+
     fixed_files = []
     problem_files = []
     
