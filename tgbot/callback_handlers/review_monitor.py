@@ -49,13 +49,13 @@ async def callback_review_monitor_action(callback: CallbackQuery, callback_data:
     try:
         action = callback_data.action
         
-        if action == "set_days":
-            # Запрашиваем ввод количества дней
+        if action == "set_interval":
+            # Запрашиваем ввод интервала в минутах
             await state.set_state(ReviewMonitorStates.waiting_for_days)
             await callback.message.answer(
                 "⏱️ <b>Изменение времени ожидания отзыва</b>\n\n"
-                "Введите количество дней, в течение которых бот будет ожидать отзыв после подтверждения сделки.\n\n"
-                "<i>Например: 7</i>",
+                "Введите число минут, в течение которых бот будет ожидать отзыв после подтверждения сделки.\n\n"
+                "<i>Например: 10</i>",
                 parse_mode="HTML"
             )
             await callback.answer()

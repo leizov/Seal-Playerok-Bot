@@ -145,7 +145,7 @@ async def handler_fingerprint(message: types.Message, state: FSMContext, bot: Bo
     Обработчик команды /fingerprint
     Генерирует fingerprint для привязки лицензии к боту
     
-    ВАЖНО: Fingerprint V3 использует ТОЛЬКО Bot ID!
+    ВАЖНО: Fingerprint использует ТОЛЬКО Bot ID!
     FINGERPRINT = SHA256(BOT_ID)[:32]
     
     Это гарантирует что плагин работает только с конкретным ботом.
@@ -166,7 +166,7 @@ async def handler_fingerprint(message: types.Message, state: FSMContext, bot: Bo
         bot_id = bot_info.id
         
         # ═══════════════════════════════════════════════════════════════
-        # 2. ГЕНЕРИРУЕМ FINGERPRINT V3 (ТОЛЬКО Bot ID)
+        # 2. ГЕНЕРИРУЕМ FINGERPRINT (ТОЛЬКО Bot ID)
         # ═══════════════════════════════════════════════════════════════
         fingerprint_raw = str(bot_id)
         fingerprint_full = hashlib.sha256(fingerprint_raw.encode()).hexdigest()

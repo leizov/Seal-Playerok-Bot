@@ -1014,6 +1014,43 @@ def chat_message_button(data: dict) -> "ChatMessageButton":
         text=data.get("text"),
     )
 
+def upload_image(data: dict) -> "UploadImage":
+    from .types import UploadImage
+
+    core = data.get('uploadChatImageIntoTemporaryStore')
+    if not core:
+        return None
+
+    expires_at = core.get("expiresAt")
+    id = core.get("id")
+    url = core.get("url")
+    chat_id = core.get("chatId")
+    client_attachment_id = core.get("clientAttachmentId")
+    typename = core.get("__typename")
+    return UploadImage(
+        expires_at=expires_at,
+        id=id,
+        url=url,
+        chat_id=chat_id,
+        client_attachment_id=client_attachment_id,
+        typename=typename
+    )
+
+
+def images(data: dict) -> "ImageList":
+    from .types import Image, ImageList
+
+    if not data: return None
+    image_list = []
+    for image in data:
+        id = image.get('id')
+        typename = image.get('typename')
+        url = image.get('url')
+        image_obj = Image(id, typename, url)
+        image_list.append(image_obj)
+
+    return ImageList(image_list)
+
 
 def chat_message(data: dict) -> "ChatMessage":
     from .types import ChatMessage
@@ -1027,7 +1064,7 @@ def chat_message(data: dict) -> "ChatMessage":
             btns.append(chat_message_button(btn))
     return ChatMessage(
         id=data.get("id"),
-        text=data.get("text"),
+        text=data.get("text") if data.get("text") else "",
         created_at=data.get("createdAt"),
         deleted_at=data.get("deletedAt"),
         is_read=data.get("isRead"),
@@ -1045,6 +1082,7 @@ def chat_message(data: dict) -> "ChatMessage":
         event_to_user=user_profile(data.get("eventToUser")),
         is_auto_response=data.get("isAutoResponse"),
         buttons=btns,
+        images=images(data.get("images"))
     )
 
 

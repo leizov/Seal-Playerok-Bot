@@ -171,20 +171,25 @@ class PlayerokBot:
                     
                     # Получаем все активные товары с премиум статусом
                     my_items = self.get_my_items(statuses=[ItemStatuses.APPROVED])
-                    
+                    self.logger.info(f'items_count: {my_items}')
                     for item in my_items:
                         try:
                             # Проверяем что товар имеет премиум статус (priority != None)
                             if not item.priority or item.priority == "DEFAULT":
                                 continue
-                            
+                            self.logger.info(f'item: {item.name}')
+
                             # Проверяем включения/исключения
                             item_name_lower = item.name.lower()
                             
                             # Проверяем исключения
                             is_excluded = False
                             for excluded_keyphrases in self.auto_raise_items.get("excluded", []):
-                                if all(phrase.lower() in item_name_lower for phrase in excluded_keyphrases):
+                                if any(
+                                        phrase.lower() in item_name_lower
+                                        or item_name_lower == phrase.lower()
+                                        for phrase in excluded_keyphrases
+                                ):
                                     is_excluded = True
                                     break
                             
@@ -195,7 +200,11 @@ class PlayerokBot:
                             if not raise_all:
                                 is_included = False
                                 for included_keyphrases in self.auto_raise_items.get("included", []):
-                                    if all(phrase.lower() in item_name_lower for phrase in included_keyphrases):
+                                    if any(
+                                            phrase.lower() in item_name_lower
+                                            or item_name_lower == phrase.lower()
+                                            for phrase in included_keyphrases
+                                    ):
                                         is_included = True
                                         break
                                 
@@ -219,11 +228,11 @@ class PlayerokBot:
                 except Exception as e:
                     self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка в цикле автоподнятия товаров: {Fore.WHITE}{e}", exc_info=True)
                     await asyncio.sleep(60)
-        
+
+        run_async_in_thread(self.playerok_bot_start)
         self._listener_task = run_async_in_thread(listener_loop)
         self._review_monitor_task = run_async_in_thread(review_monitor_loop)
         self._auto_raise_items_task = run_async_in_thread(auto_raise_items_loop)
-
 
     def _should_send_greeting(self, chat_id: str, current_message_id: str = None) -> bool:
         """
@@ -408,7 +417,7 @@ class PlayerokBot:
             return None
         if not text and not photo_file_path:
             return None
-        
+        text = text if text else ''
         # Определяем нужно ли помечать чат как прочитанный
         should_mark_as_read = (self.config["playerok"]["read_chat"]["enabled"] or False) if mark_chat_as_read is None else mark_chat_as_read
         
@@ -419,7 +428,7 @@ class PlayerokBot:
             except Exception as e:
                 self.logger.warning(f"Не удалось пометить чат {chat_id} как прочитанный: {e}")
         
-        for _ in range(max_attempts):
+        for ix in range(max_attempts):
             try:
                 if (
                     text
@@ -431,13 +440,15 @@ class PlayerokBot:
                 # Передаем mark_chat_as_read=False т.к. уже пометили выше
                 mess = self.account.send_message(chat_id, text, photo_file_path, mark_chat_as_read=False)
                 return mess
-            except plapi_exceptions.RequestFailedError:
+            except plapi_exceptions.RequestFailedError as e:
+                self.logger.error(f'Ошибка при отправке соощения\n{e}\n{ix+1}/{max_attempts} попытка')
+                time.sleep(4)
                 continue
             except Exception as e:
-                text = text.replace('\n', '').strip()
+                text = text.replace('\n', '').strip() if text else 'БЕЗ ТЕКСТА'
                 self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при отправке сообщения {Fore.LIGHTWHITE_EX}«{text}» {Fore.LIGHTRED_EX}в чат {Fore.LIGHTWHITE_EX}{chat_id} {Fore.LIGHTRED_EX}: {Fore.WHITE}{e}")
                 return
-        text = text.replace('\n', '').strip()
+        text = text.replace('\n', '').strip() if text else "БЕЗ ТЕКСТА"
         self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось отправить сообщение {Fore.LIGHTWHITE_EX}«{text}» {Fore.LIGHTRED_EX}в чат {Fore.LIGHTWHITE_EX}{chat_id}")
 
     def restore_last_sold_item(self, item: Item):
@@ -471,6 +482,7 @@ class PlayerokBot:
             except:
                 item = _item[0]
 
+            #todo retry mb
             priority_statuses = self.account.get_item_priority_statuses(item.id, item.price)
             try: priority_status = [status for status in priority_statuses if status.type is PriorityTypes.DEFAULT or status.price == 0][0]
             except IndexError: priority_status = [status for status in priority_statuses][0]
@@ -675,7 +687,7 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'💬✨ Новый отзыв по <a href="https://playerok.com/deal/{deal.id}">сделке</a>', 
+                        title=f'✨ Новый отзыв по <a href="https://playerok.com/deal/{deal.id}">сделке</a>',
                         text=f"<b>Оценка:</b> {'⭐' * deal.review.rating}\n<b>Оставил:</b> {deal.review.creator.username}\n<b>Текст:</b> {deal.review.text}\n<b>Дата:</b> {datetime.fromisoformat(deal.review.created_at).strftime('%d.%m.%Y %H:%M:%S')}"
                     ),
                     kb=log_new_review_kb(deal.user.username, deal.id, chat_id)
@@ -703,17 +715,18 @@ class PlayerokBot:
         self.logger.info(f"{HIGHLIGHT_COLOR}🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘")
 
 
-    async def _on_playerok_bot_init(self):
+    async def playerok_bot_start(self):
         # Устанавливаем время первого запуска только если его еще нет
         if self.stats.bot_launch_time is None:
             self.stats.bot_launch_time = datetime.now()
             set_stats(self.stats)  # Сохраняем время первого запуска
 
-        def endless_loop():
+        def refresh_loop():
             last_token = self.config["playerok"]["api"]["token"]
             last_proxy = self.config["playerok"]["api"]["proxy"]
             last_ua = self.config["playerok"]["api"]["user_agent"]
-            
+
+            self.logger.info(f'Реврешер запущен!')
             while True:
                 if self.account and self.account.profile.balance:
                     balance = self.account.profile.balance.value
@@ -774,7 +787,7 @@ class PlayerokBot:
 
         def refresh_account_loop():
             while True:
-                time.sleep(1)
+                time.sleep(900)
                 self.refresh_account()
 
         def check_banned_loop():
@@ -782,9 +795,10 @@ class PlayerokBot:
                 self.check_banned()
                 time.sleep(900)
 
-        Thread(target=endless_loop, daemon=True).start()
+        Thread(target=refresh_loop(), daemon=True).start()
         Thread(target=refresh_account_loop, daemon=True).start()
         Thread(target=check_banned_loop, daemon=True).start()
+
 
     async def _on_new_message(self, event: NewMessageEvent):
         if not self.is_connected or self.account is None:
@@ -794,6 +808,8 @@ class PlayerokBot:
         self.log_new_message(event.message, event.chat)
         if event.message.user.id == self.account.id:
             return
+
+        msg_text = event.message.text if event.message.text else ""
 
         tg_logging_events = self.config["playerok"]["tg_logging"].get("events", {})
         if (
@@ -809,9 +825,10 @@ class PlayerokBot:
             if tg_logging_events.get("new_system_message", True) and is_system_user:
                 do = True
 
+
             if do:
                 # Проверяем, является ли сообщение системным (оплата, подтверждение и т.д.)
-                emoji, formatted_msg = format_system_message(event.message.text, event.message.deal)
+                emoji, formatted_msg = format_system_message(msg_text, event.message.deal)
 
                 if formatted_msg:
                     # Системное сообщение о событии (оплата, подтверждение и т.д.)
@@ -822,8 +839,12 @@ class PlayerokBot:
                     title_emoji = "🆘" if is_system_user else "💬"
                     user_emoji = "🆘" if is_system_user else "💬"
                     text = f"{user_emoji} <b>{event.message.user.username}:</b> "
-                    text += event.message.text or ""
+                    text += msg_text
                     text += f'<b><a href="{event.message.file.url}">{event.message.file.filename}</a></b>' if event.message.file else ""
+
+                if event.message.images:
+                    for ix, image in enumerate(event.message.images.image_list):
+                        text += f'\n<a href="{image.url}">Приложенное фото {ix+1}</a>'
 
                 asyncio.run_coroutine_threadsafe(
                     get_telegram_bot().log_event(
@@ -844,19 +865,28 @@ class PlayerokBot:
             #     if greeting_msg:
             #         self.send_message(event.chat.id, greeting_msg)
 
-            #todo отпрвку команд из конфига сделать пизда лень
-            # if str(event.message.text).lower() in ["!команды", "!commands"]:
-            #     self.send_message(event.chat.id, self.msg("cmd_commands"))
-            if str(event.message.text).lower() in ["!продавец", "!seller"]:
+
+            if msg_text.lower() in ["!продавец", "!seller"]:
                 asyncio.run_coroutine_threadsafe(
                     get_telegram_bot().call_seller(event.message.user.username, event.chat.id),
                     get_telegram_bot_loop()
                 )
                 self.send_message(event.chat.id, self.msg("cmd_seller"))
 
+            # todo мб сделать возможность регистрации плагинами своих команд
+            elif (
+                    msg_text.lower() in ["!команды", "!commands"]
+                    and self.config["playerok"]["custom_commands"]["enabled"]
+            ):
+                commands = [command for command in self.custom_commands.keys()]
+                commands_row = '!продавец\n' + '\n'.join(commands)
+                text = f'⌨️ Список доступных команд:\n<b>{commands_row}</b>'
+                self.send_message(event.chat.id, text)
+
+
             elif self.config["playerok"]["custom_commands"]["enabled"]:
-                if event.message.text.lower() in [key.lower() for key in self.custom_commands.keys()]:
-                    msg = "\n".join(self.custom_commands[event.message.text])
+                if msg_text.lower() in [key.lower() for key in self.custom_commands.keys()]:
+                    msg = "\n".join(self.custom_commands[msg_text])
                     self.send_message(event.chat.id, msg)
 
                     # Отправка уведомления о получении команды
@@ -868,7 +898,7 @@ class PlayerokBot:
                             get_telegram_bot().log_event(
                                 text=log_text(
                                     title=f'⌨️ Получена команда в <a href="https://playerok.com/chats/{event.chat.id}">чате</a>',
-                                    text=f"<b>Команда:</b> {event.message.text}\n<b>От пользователя:</b> {event.message.user.username}"
+                                    text=f"<b>Команда:</b> {msg_text}\n<b>От пользователя:</b> {event.message.user.username}"
                                 )
                             ),
                             get_telegram_bot_loop()
@@ -973,15 +1003,16 @@ class PlayerokBot:
             return
         elif not self.config["playerok"]["auto_restore_items"]["enabled"]:
             return
-        
+
         included = False
         excluded = False
+
         for included_item in self.auto_restore_items["included"]:
             for keyphrases in included_item:
                 if any(
-                    phrase.lower() in event.deal.item.name.lower() 
-                    or event.deal.item.name.lower() == phrase.lower() 
-                    for phrase in keyphrases
+                        phrase.lower() in event.deal.item.name.lower()
+                        or event.deal.item.name.lower() == phrase.lower()
+                        for phrase in keyphrases
                 ):
                     included = True
                     break
@@ -989,21 +1020,21 @@ class PlayerokBot:
         for excluded_item in self.auto_restore_items["excluded"]:
             for keyphrases in excluded_item:
                 if any(
-                    phrase.lower() in event.deal.item.name.lower() 
-                    or event.deal.item.name.lower() == phrase.lower() 
-                    for phrase in keyphrases
+                        phrase.lower() in event.deal.item.name.lower()
+                        or event.deal.item.name.lower() == phrase.lower()
+                        for phrase in keyphrases
                 ):
                     excluded = True
                     break
             if excluded: break
-
         if (
-            self.config["playerok"]["auto_restore_items"]["all"]
-            and not excluded
+                self.config["playerok"]["auto_restore_items"]["all"]
+                and not excluded
         ) or (
-            not self.config["playerok"]["auto_restore_items"]["all"]
-            and included
+                not self.config["playerok"]["auto_restore_items"]["all"]
+                and included
         ):
+
             self.restore_last_sold_item(event.deal.item)
         
 

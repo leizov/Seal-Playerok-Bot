@@ -77,7 +77,7 @@ async def throw_float_message(state: FSMContext, message: Message, text: str,
                     if message.from_user.id != bot.id: 
                         await bot.delete_message(message.chat.id, message.message_id)
                     mess = await bot.edit_message_text(
-                        text=text, 
+                        text=text,
                         reply_markup=reply_markup, 
                         chat_id=message.chat.id, 
                         message_id=accent_message_id, 

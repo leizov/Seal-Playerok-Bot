@@ -23,7 +23,8 @@ router = Router()
 
 
 @router.callback_query(F.data == "destroy")
-async def callback_back(callback: CallbackQuery):
+async def callback_back(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(None)
     await callback.message.delete()
 
 

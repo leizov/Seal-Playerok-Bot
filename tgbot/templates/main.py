@@ -27,6 +27,7 @@ def confirm_kb(confirm_cb: str, cancel_cb: str):
 
 
 def destroy_kb():
+
     rows = [[InlineKeyboardButton(text="❌ Закрыть", callback_data="destroy")]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

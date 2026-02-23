@@ -57,9 +57,9 @@ CONFIG = SettingsFile(
                 "enabled": False
             },
             "review_monitoring": {
-                "enabled": False,
-                "wait_days": 7,
-                "check_interval": 120
+                "enabled": True,
+                "wait_minutes": 10,
+                "check_interval": 30
             },
             "tg_logging": {
                 "enabled": True,

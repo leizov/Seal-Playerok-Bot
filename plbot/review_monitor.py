@@ -113,8 +113,10 @@ async def check_reviews_task(account: Account, send_message_callback, msg_callba
                 await asyncio.sleep(60)  # Если выключен - ждем минуту и проверяем снова
                 continue
             
-            wait_days = review_config.get("wait_days", 7)
-            check_interval = review_config.get("check_interval", 120)
+            # wait_days = review_config.get("wait_days", 7)
+
+            wait_minutes = review_config.get("wait_minutes", 10)
+            check_interval = review_config.get("check_interval", 30)
             
             deals = load_deals()
             current_time = datetime.now(timezone.utc)
@@ -125,10 +127,10 @@ async def check_reviews_task(account: Account, send_message_callback, msg_callba
                     time_elapsed = current_time - started_at
                     
                     # Если прошло больше времени, чем wait_days - удаляем из мониторинга
-                    if time_elapsed > timedelta(days=wait_days):
+                    if time_elapsed > timedelta(minutes=wait_minutes):
                         logger.info(
                             f"Сделка {deal_id}: превышен лимит ожидания "
-                            f"({wait_days} дней), удаляем из мониторинга"
+                            f"({wait_minutes} минут), удаляем из мониторинга"
                         )
                         remove_deal_from_monitor(deal_id)
                         continue
@@ -198,7 +200,7 @@ def get_monitoring_stats() -> dict:
     for deal_id, deal_data in deals.items():
         started_at = datetime.fromisoformat(deal_data["started_at"])
         time_elapsed = current_time - started_at
-        
+        #todo days_elapsed
         deals_list.append({
             "deal_id": deal_id,
             "user": deal_data["user_username"],

@@ -1,6 +1,7 @@
 bs4==0.0.2
-curl-cffi>=0.7.0
+curl-cffi>=0.13.0
 requests==2.32.3
+Pillow==10.2.0
 requests-toolbelt==0.10.1
 validators==0.34.0
 asyncio==3.4.3

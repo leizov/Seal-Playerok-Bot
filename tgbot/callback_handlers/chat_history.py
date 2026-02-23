@@ -8,6 +8,7 @@ from .. import callback_datas as calls
 from ..helpful import get_playerok_bot
 from ..templates.main import destroy_kb
 from ..utils.message_formatter import format_system_message
+from playerokapi.types import Chat, ChatMessage
 
 router = Router()
 
@@ -29,15 +30,15 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
         messages = list(msg_list.messages)[:10]
         # Переворачиваем для хронологического порядка
         messages.reverse()
-        
         # Формируем текст с историей
         history_text = f"📜 <b>История чата (последние {len(messages)} сообщений)</b>\n"
         history_text += f"<b>Ссылка:</b> <a href='https://playerok.com/chats/{callback_data.chat_id}'>Открыть чат</a>\n\n"
         
         total_length = len(history_text)
         messages_text = []
-        
+
         for msg in messages:
+            msg: ChatMessage
             # Проверяем, является ли сообщение системным
             emoji, formatted_msg = format_system_message(msg.text, msg.deal)
             
@@ -64,17 +65,53 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
                     msg_time = datetime.fromisoformat(msg.created_at).strftime("%d.%m %H:%M")
                 except:
                     msg_time = "??:??"
-                
-                # Формируем текст сообщения
-                msg_text = html.escape(msg.text or "")
+
+                msg_text = html.escape(msg.text) if msg.text else ""
+                # if msg.file:
+                #     msg_text += f" [📎 {html.escape(msg.file.filename) if msg.file.filename else ''}]"
+
+                if msg_text:
+                    # Ограничиваем длину сообщения
+                    if len(msg_text) > 100:
+                        msg_text = msg_text[:100] + "..."
+
+                    # убираем лишние \n для компактности и крутости
+                    lines = msg_text.split('\n')
+                    split_text = []
+                    for line in lines:
+                        if line:
+                            split_text.append(line)
+                        else:
+                            pass
+                    if split_text[0] == '\n':
+                        split_text.pop(0)
+                    if split_text[-1] == '\n':
+                        split_text.pop(-1)
+                    final_text = '\n'.join(split_text)
+                else:
+                    final_text = ''
+
+                images_ix = 1
+                image_row = ''
+                if msg.images:
+                    for image in msg.images.image_list:
+                        image_row += f'<a href="{image.url}">фото_{images_ix}</a> '
+                        images_ix += 1
                 if msg.file:
-                    msg_text += f" [📎 {html.escape(msg.file.filename)}]"
-                
-                # Ограничиваем длину сообщения
-                if len(msg_text) > 100:
-                    msg_text = msg_text[:100] + "..."
-                
-                line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n{msg_text}\n\n"
+                    image_row += f'<a href="{msg.file.url}">фото_{images_ix}</a> '
+                    images_ix += 1
+
+                if not final_text and not image_row:
+                    continue
+
+                if msg_text:
+                    line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n{final_text}\n"
+                else:
+                    line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n"
+                if image_row:
+                    line += image_row
+                    line += '\n'
+                line += '\n'
             
             # Проверяем, не превысит ли общая длина 4000 символов (лимит Telegram)
             if total_length + len(line) > 3900:

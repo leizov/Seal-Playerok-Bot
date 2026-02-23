@@ -15,7 +15,8 @@ def review_monitor_text():
     msg_data = messages.get("new_review_response", {})
     
     enabled = review_config.get("enabled", False)
-    wait_days = review_config.get("wait_days", 7)
+    # wait_days = review_config.get("wait_days", 7)
+    wait_minutes = review_config.get('wait_minutes', 10)
     check_interval = review_config.get("check_interval", 120)
     
     msg_enabled = msg_data.get("enabled", False)
@@ -33,34 +34,34 @@ def review_monitor_text():
         from plbot.review_monitor import get_monitoring_stats
         stats = get_monitoring_stats()
         total_deals = stats["total"]
-        
-        if total_deals > 0:
-            deals_info = f"\n\n📊 <b>Сделки в мониторинге:</b> {total_deals} шт."
-            for deal in stats["deals"][:5]:  # Показываем только первые 5
-                deals_info += f"\n • Сделка #{deal['deal_id']}: {deal['user']} ({deal['days_elapsed']} дн.)"
-            if total_deals > 5:
-                deals_info += f"\n   <i>... и ещё {total_deals - 5}</i>"
-        else:
-            deals_info = "\n\n📊 <b>Сделки в мониторинге:</b> нет"
+        deals_info = f"\n\n📊 <b>Сделок в мониторинге:</b> {total_deals} шт."
+        # if total_deals > 0:
+        #
+        #     for deal in stats["deals"][:5]:  # Показываем только первые 5
+        #         deals_info += f"\n • Сделка #{deal['deal_id']}: {deal['user']} ({deal['days_elapsed']} дн.)"
+        #     if total_deals > 5:
+        #         deals_info += f"\n   <i>... и ещё {total_deals - 5}</i>"
+        # else:
+        #     deals_info = "\n\n📊 <b>Сделки в мониторинге:</b> нет"
     except:
         deals_info = ""
     
     txt = textwrap.dedent(f"""
-        ⭐ <b>Мониторинг отзывов</b>
-        
-        Эта функция автоматически отслеживает подтверждённые сделки и отправляет сообщение покупателю после того, как он оставит отзыв.
-        
-        <b>Статус мониторинга:</b> {status_icon} {status_text}
-        <b>Время ожидания отзыва:</b> {wait_days} дн.
-        <b>Интервал проверки:</b> {check_interval // 60} мин.
-        
-        <b>Автоответ при получении отзыва:</b> {msg_status_icon} {msg_status_text}
-        
-        <b>Текущее сообщение:</b>
-        <code>{current_text}</code>{deals_info}
-        
-        Используйте кнопки ниже для управления ↓
-    """)
+⭐ <b>Мониторинг отзывов</b>
+
+Эта функция автоматически отслеживает подтверждённые сделки и отправляет сообщение покупателю после того, как он оставит отзыв.
+
+<b>Статус мониторинга:</b> {status_icon} {status_text}
+<b>Время ожидания отзыва:</b> {wait_minutes} минут.
+<b>Интервал проверки:</b> {check_interval} секунд.
+
+<b>Автоответ при получении отзыва:</b> {msg_status_icon} {msg_status_text}
+
+<b>Текущее сообщение:</b>
+<code>{current_text}</code>{deals_info}
+
+Используйте кнопки ниже для управления ↓
+""")
     return txt
 
 
@@ -71,8 +72,8 @@ def review_monitor_kb():
     
     enabled = review_config.get("enabled", False)
     
-    monitor_toggle_text = "🔴 Выключить мониторинг" if enabled else "🟢 Включить мониторинг"
-    
+    monitor_toggle_text = "🟢 Мониторинг включён" if enabled else "🔴 Мониторинг выключен"
+
     rows = [
         [InlineKeyboardButton(
             text=monitor_toggle_text, 
@@ -80,7 +81,7 @@ def review_monitor_kb():
         )],
         [InlineKeyboardButton(
             text="⏱️ Изменить время ожидания", 
-            callback_data=calls.ReviewMonitorAction(action="set_days").pack()
+            callback_data=calls.ReviewMonitorAction(action="set_interval").pack()
         )],
         [InlineKeyboardButton(
             text="⚙️ Автоответ на отзывы", 

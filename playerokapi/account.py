@@ -7,9 +7,9 @@ import random
 import time
 
 from curl_cffi.requests import Session as CurlSession, Response as CurlResponse
-
+from curl_cffi import CurlMime
 from .misc import *
-
+import os
 from . import types
 from .exceptions import *
 from .parser import *
@@ -162,7 +162,8 @@ class Account:
         self.__logger.info(f"Прокси обновлён: {self.__proxy_string or 'отключён'}")
 
     def request(self, method: Literal["get", "post"], url: str, headers: dict[str, str], 
-                payload: dict[str, str] | None = None, files: dict | None = None) -> CurlResponse:
+                payload: dict[str, str] | None = None, files: dict | None = None,
+                multipart: CurlMime | None = None) -> CurlResponse:
         """
         Отправляет запрос на сервер playerok.com.
 
@@ -180,6 +181,9 @@ class Account:
         
         :param files: Файлы запроса.
         :type files: `dict` or `None`
+
+        :param multipart: Мультипарт для отправки фото.
+        :type multipart: `CurlMime` or `None`
 
         :return: Ответ запроса.
         :rtype: `curl_cffi.requests.Response`
@@ -247,8 +251,18 @@ class Account:
                         url=url,
                         data=payload,
                         headers=headers_no_ct,
-                        files=files
+                        files=files,
                     )
+
+                elif multipart:
+                    headers_no_ct = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
+                    r = self.__curl_session.post(
+                        url=url,
+                        data=payload,
+                        headers=headers_no_ct,
+                        multipart=multipart
+                    )
+
                 else:
                     r = self.__curl_session.post(
                         url=url, 
@@ -265,7 +279,7 @@ class Account:
             "cf-browser-verification",
             "Cloudflare Ray ID"
         ]
-        # Прогрессивные задержки: 1, 2, 3, 3, 3, 3, 3 секунды (max 3 сек)
+        # Прогрессивные задержки
         max_delay = 3.0
         for attempt in range(self.request_max_retries):
             resp = make_req()
@@ -791,8 +805,13 @@ class Account:
         """
         if mark_chat_as_read:
             self.mark_chat_as_read(chat_id=chat_id)
-        headers = {"accept": "*/*"}
-        if photo_file_path: query = QUERIES.get("createChatMessageWithFile")
+        headers = {
+            "accept": "*/*",
+        }
+
+        if photo_file_path:
+            query = QUERIES.get("createChatMessageWithFile")
+
         elif text: query = QUERIES.get("createChatMessage")
         operations = {
             "operationName": "createChatMessage",
@@ -809,19 +828,50 @@ class Account:
             operations["variables"]["input"]["text"] = text
         
         files = None
+        mp = None
         try:
             if photo_file_path:
-                files = {"1": open(photo_file_path, "rb")}
-                map = {"1":["variables.file"]}
+                # files = {"1": open(photo_file_path, "rb")}
+                map = {"1": ["variables.file"]}
+                mp = CurlMime()
+                mp.addpart(name="operations", data=json.dumps(operations))
+                mp.addpart(name="map", data=json.dumps(map))
+                mp.addpart(
+                    name="1",
+                    filename=os.path.basename(photo_file_path),
+                    content_type="image/jpeg",
+                    local_path=photo_file_path
+
+                )
+
                 payload = {"operations": json.dumps(operations), "map": json.dumps(map)}
             else:
                 payload = operations
-            r = self.request("post", f"{self.base_url}/graphql", headers, payload, files).json()
+            r = self.request("post", f"{self.base_url}/graphql", headers, payload, multipart=mp).json()
             return chat_message(r["data"]["createChatMessage"])
         finally:
             if files:
                 for file_obj in files.values():
                     file_obj.close()
+
+    def upload_image(self, chat_id: str, bytes: str) -> types.UploadImage:
+        """
+        Публикует изображение (чтобы потом его отправить используя полученный url)
+
+        :param chat_id: id чата для публикации
+        :type chat_id: `str`
+
+        :param bytes: Абсолютный путь к изображению
+        :type bytes: `str`
+        """
+        headers = {
+            "accept": "*/*",
+            "referer": f"https://playerok.com/chats/{chat_id}"
+        }
+        file = {'image': bytes}
+        r = self.request("post", f"{self.base_url}/graphql", headers, files=file).json()
+        return upload_image(r)
+
 
     def create_item(self, game_category_id: str, obtaining_type_id: str, name: str, price: int, 
                     description: str, options: list[GameCategoryOption], data_fields: list[GameCategoryDataField],

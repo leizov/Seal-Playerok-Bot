@@ -170,21 +170,57 @@ class EventListener:
                 continue
             
             # Получаем ID последнего обработанного сообщения для этого чата
+            last_msg = new_chat.last_message
             last_known_id = self.__last_message_ids.get(new_chat.id)
             
             # Если это новый чат (нет сохраненного ID)
             if not last_known_id:
+                time.sleep(3)
                 # Получаем всю историю сообщений для нового чата
                 msg_list = self.account.get_chat_messages(new_chat.id, 24)
                 new_msgs = []
-                
-                # Собираем сообщения, созданные после запуска бота
+
+                is_old_chat = False
+                has_new_deal = False
+
                 for msg in msg_list.messages:
                     if self.__startup_time and msg.created_at < self.__startup_time:
-                        # self.__logger.info(f'Пропускаю чат {new_chat.id} - сообщение до запуска {msg.created_at}/{self.__startup_time}')
+                        # пропускаем сообщения до запуска и маркируем чат как старый
+                        is_old_chat = True
                         continue
+
+                    if msg.text == "{{ITEM_PAID}}" and msg.deal is not None:
+                        has_new_deal = True
+
                     new_msgs.append(msg)
-                
+
+                if not is_old_chat and not has_new_deal:
+                    # тут короче супер костыль - мы поймали абсолютно новый чат, но без новой сделки,
+                    # а такого быть не может, пробуем найти новую сделку
+                    self.__logger.info(f'Поймал абсолютно новый чат, но в нём нету сделки, произвожу повторный поиск ')
+                    time.sleep(4)
+
+                    attempts = 3
+                    delay = 4
+                    for attempt in range(attempts):
+
+                        msg_list = self.account.get_chat_messages(new_chat.id, 10)
+                        new_msgs = []
+
+                        for msg in msg_list.messages:
+                            if msg.text == "{{ITEM_PAID}}" and msg.deal is not None:
+                                has_new_deal = True
+                                self.__logger.info(f'Для нахождения сделки {msg.deal.id} пришлось произвести повторный поиск'
+                                                   f', задержка слушателя - {4 + attempt * (delay + 1)} секунд')
+                            new_msgs.append(msg)
+                        if has_new_deal:
+
+                            break
+
+                        time.sleep(delay)
+                    else:
+                        self.__logger.error(f'Не удалось найти сделку для нового чата, id: {new_chat.id}')
+
                 # Обрабатываем в хронологическом порядке (от старых к новым)
                 for msg in reversed(new_msgs):
                     events.extend(self.parse_message_event(msg, new_chat))
@@ -283,13 +319,22 @@ class EventListener:
         # self.__logger.info(f"При первом проходе события будут сохранены, но не обработаны")
 
         chats: ChatList = None
-        
+        last_errors_count = 0
         try:
             # Устанавливаем время запуска текущей сессии
             self.__startup_time = datetime.now(timezone.utc).isoformat()
             self.__logger.info(f'Время запуска слушателя событий: {self.__startup_time} ')
             while True:
                 try:
+
+                    if last_errors_count >= 3:
+                        error_delay = (last_errors_count - 2) * 10
+                        error_log = f'Мы попали под шквал ошибок, ставлю слушатель на паузу на {error_delay} секунд'
+                        if last_errors_count > 7:
+                            error_log += '\n Проверь токен аккаунта и прокси, попробуй перезагрузить бота'
+                        self.__logger.warning(error_log)
+                        time.sleep(error_delay)
+
                     next_chats = self.account.get_chats(24)
                     if not chats:
                         # Первый запуск - инициализируем чаты
@@ -307,11 +352,13 @@ class EventListener:
                             yield event
 
                     chats = next_chats
-                        
+                    last_errors_count = 0
                 except Exception as e:
-                    self.__logger.warning(f"Ошибка при получении ивентов: {e} (не критично, если возникает редко)")
-                    self.__logger.debug(f"Traceback ошибки в listener:\n{traceback.format_exc()}")
-                
+                    self.__logger.warning(f"Ошибка при получении ивентов: {e}\n(не критично, если возникает редко)")
+                    last_traceback = traceback.format_exc()
+                    self.__logger.debug(f"Traceback ошибки в listener:\n{last_traceback}")
+                    last_errors_count += 1
+
                 time.sleep(requests_delay)
         
         except KeyboardInterrupt:

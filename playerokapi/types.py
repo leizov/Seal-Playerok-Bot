@@ -4,6 +4,7 @@ import json
 
 from .account import Account, get_account
 from . import parser
+from .misc import PERSISTED_QUERIES
 from .enums import *
 
 
@@ -350,10 +351,11 @@ class UserProfile:
             "Content-Type": "application/json",
             "Origin": self.__account.base_url
         }
+
         payload = {
             "operationName": "items",
             "variables": json.dumps({"pagination": {"first": count, "after": after_cursor}, "filter": {"userId": self.id, "status": payload_status}, "showForbiddenImage": False}, ensure_ascii=False),
-            "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": "29ff7e8c607c7b3f2fa3c7a9e02a3a184bf92905e8ea75ba237c8c7f005287a3"}}, ensure_ascii=False)
+            "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get('items')}}, ensure_ascii=False)
         }
         r = self.__account.request("get", f"{self.__account.base_url}/graphql", headers, payload).json()
         return parser.item_profile_list(r["data"]["items"])
@@ -426,7 +428,7 @@ class UserProfile:
         payload = {
             "operationName": "testimonials",
             "variables": json.dumps({"pagination": {"first": count, "after": after_cursor}, "filter": filters, "sort": {"direction": sort_direction.name if sort_direction else None, "field": sort_field}}, ensure_ascii=False),
-            "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": "773d40b7efec82a4b86021ba8bcaa462f68eb236e255926f2168c5cd4685e881"}}, ensure_ascii=False)
+            "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get("testimonials")}}, ensure_ascii=False)
         }
         r = self.__account.request("get", f"{self.__account.base_url}/graphql", headers, payload).json()
         return parser.review_list(r["data"]["testimonials"])
@@ -2219,6 +2221,71 @@ class ChatMessageButton:
         self.text: str = text
         """ Текст кнопки. """
 
+class UploadImage:
+    """
+    Объект опубликованного нами изображения
+
+    :param expires_at: Время публикации (например 2025-02-23T16:35:54.810Z)
+    :type expires_at: `str`
+
+    :param id: id изображения
+    :type id: `str`
+
+    :a url: ссылка на изображения (её и перердаём при отправке)
+    :type url: `str`
+
+    :param chat_id: id чата
+    :type chat_id: `str`
+
+    :param client_attachment_id: id клиента
+    :type client_attachment_id: `str`
+
+    :param typename: тип публикации
+    :type typename: `str`
+    """
+    def __init__(
+            self,
+            expires_at: str,
+            id: str,
+            url: str,
+            chat_id: str,
+            client_attachment_id: str,
+            typename: str
+    ):
+        self.expires_at = expires_at
+        self.id = id
+        self.url = url
+        self.chat_id = chat_id
+        self.client_attachment_id = client_attachment_id
+        self.typename = typename
+
+class Image:
+    """
+    Объект изображения.
+
+    :param id: id изображения.
+    :type id: `str`
+
+    :param typename: Тип изображения.
+    :type typename: `str`
+
+    :param url: URL изображения.
+    :type url: `str` or None
+    """
+    def __init__(self, id: str, typename: str, url: str):
+        self.id = id
+        self.typename = typename
+        self.url = url
+
+class ImageList:
+    """
+    Список изображений
+
+    :parm images: список изображений
+    :type images: list[Image]
+    """
+    def __init__(self, images: list[Image]):
+        self.image_list = images
 
 class ChatMessage:
     """
@@ -2280,12 +2347,16 @@ class ChatMessage:
 
     :param buttons: Кнопки сообщения.
     :type buttons: `list[playerokapi.types.MessageButton]`
+
+    :param images: Прикреплённые изображения.
+    :type images: `list[playerokapi.types.ImageList]`
+
     """
     def __init__(self, id: str, text: str, created_at: str, deleted_at: str | None, is_read: bool, 
                  is_suspicious: bool, is_bulk_messaging: bool, game: Game | None, file: FileObject | None,
                  user: UserProfile, deal: ItemDeal | None, item: ItemProfile | None, transaction: Transaction | None,
                  moderator: Moderator | None, event_by_user: UserProfile | None, event_to_user: UserProfile | None, 
-                 is_auto_response: bool, event: Event | None, buttons: list[ChatMessageButton]):
+                 is_auto_response: bool, event: Event | None, buttons: list[ChatMessageButton], images: ImageList | None):
         self.id: str = id
         """ ID сообщения. """
         self.text: str = text
@@ -2324,6 +2395,8 @@ class ChatMessage:
         """ Ивент сообщения. """
         self.buttons: list[ChatMessageButton] = buttons
         """ Кнопки сообщения. """
+        self.images: ImageList = images
+        """ Изображения """
 
 
 class ChatMessagePageInfo:
