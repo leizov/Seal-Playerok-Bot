@@ -5,7 +5,8 @@ from typing import Literal
 import json
 import random
 import time
-
+import tempfile
+import shutil
 from curl_cffi.requests import Session as CurlSession, Response as CurlResponse
 from curl_cffi import CurlMime
 from .misc import *
@@ -69,6 +70,8 @@ class Account:
         """ Таймаут ожидания ответов на запросы. """
         self.proxy = proxy
         """ Прокси. """
+        self.base_url = "https://playerok.com"
+        """ Базовый URL для всех запросов. """
         # Обработка разных типов прокси
         if self.proxy:
             if self.proxy.startswith('socks5://') or self.proxy.startswith('socks4://'):
@@ -81,11 +84,9 @@ class Account:
         else:
             self.__proxy_string = None
         """ Строка прокси. """
+
         self.request_max_retries = request_max_retries
         """ Максимальное количество повторных попыток отправки запроса. """
-
-        self.base_url = "https://playerok.com"
-        """ Базовый URL для всех запросов. """
 
         self.id: str | None = None
         """ ID аккаунта. \n\n_Заполняется при первом использовании get()_ """
@@ -121,6 +122,10 @@ class Account:
         self.interlocutor_ids: dict[str, str] = {}
         """ Кэш: {chat_id: user_id_собеседника}. Заполняется автоматически при получении чатов. """
 
+        self._cert_path = os.path.join(os.path.dirname(__file__), "cacert.pem")
+        self._tmp_cert_path = os.path.join(tempfile.gettempdir(), "cacert.pem")
+        shutil.copyfile(self._cert_path, self._tmp_cert_path)
+
         self._refresh_clients()
         self.__logger = getLogger("playerokapi")
 
@@ -137,7 +142,8 @@ class Account:
         self.__curl_session = CurlSession(
             impersonate="chrome120",
             proxy=self.__proxy_string,
-            timeout=self.requests_timeout
+            timeout=self.requests_timeout,
+            verify=self._tmp_cert_path
         )
 
     def update_proxy(self, proxy: str | None):

@@ -168,7 +168,11 @@ async def handler_waiting_for_new_excluded_raise_items_keyphrases_file(message: 
 async def handler_waiting_for_raise_interval(message: types.Message, state: FSMContext):
     try:
         await state.set_state(None)
-        interval_hours = int(message.text.strip())
+        msg_text = message.text.strip()
+
+        if ',' in msg_text:
+            msg_text.replace(',', '.')
+        interval_hours = float(msg_text)
         
         if interval_hours <= 0:
             raise Exception("❌ Интервал должен быть положительным числом")

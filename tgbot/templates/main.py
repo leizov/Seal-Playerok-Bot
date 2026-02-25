@@ -72,7 +72,7 @@ def log_new_deal_kb(username: str, deal_id: str, chat_id: str = None):
 
 def log_new_review_kb(username: str, deal_id: str, chat_id: str = None):
     rows = [
-        [InlineKeyboardButton(text="💬🌟 Ответить на отзыв", callback_data=calls.RememberDealId(de_id=deal_id, do="answer_rev").pack())],
+        # [InlineKeyboardButton(text="💬🌟 Ответить на отзыв", callback_data=calls.RememberDealId(de_id=deal_id, do="answer_rev").pack())],
         [InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack())],
         [InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack())]
     ]

@@ -1,7 +1,3 @@
-# ===========================================================================
-# РАННЯЯ УСТАНОВКА ЗАВИСИМОСТЕЙ (до любых внешних импортов!)
-# ===========================================================================
-# Эта секция использует ТОЛЬКО стандартную библиотеку Python
 import datetime
 import sys
 import os
@@ -70,7 +66,7 @@ if sys.platform == 'win32':
 
 # ТОЧНАЯ версия Python для совместимости с плагинами
 REQUIRED_PYTHON_MAJOR = 3
-REQUIRED_PYTHON_MINOR = 12  # Плагины скомпилированы на 3.12
+REQUIRED_PYTHON_MINOR = 12
 
 current_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 required_version = f"{REQUIRED_PYTHON_MAJOR}.{REQUIRED_PYTHON_MINOR}"
@@ -88,7 +84,7 @@ if sys.version_info.major != REQUIRED_PYTHON_MAJOR or sys.version_info.minor != 
     print("\n" + "=" * 60)
     sys.exit(1)
 
-print(f"[OK] Python {current_version} - версия совместима с плагинами")
+print(f"[OK] Python {current_version} - версия совместима")
 
 # ═══════════════════════════════════════════════════════════════════════
 # СОЗДАНИЕ ВСЕХ НЕОБХОДИМЫХ ДИРЕКТОРИЙ
@@ -295,7 +291,6 @@ def check_permissions():
         return False
     
     return True
-
 
 def check_and_configure_config():
     import sys

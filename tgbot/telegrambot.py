@@ -95,7 +95,7 @@ class TelegramBot:
                 BotCommand(command="profile", description="🏠 Профиль Playerok"),
                 BotCommand(command="restart", description="🔄 Перезагрузить бота"),
                 BotCommand(command="playerok_status", description="🔰 Проверить авторизацию в аккаунте"),
-                BotCommand(command="power_off", description="⚡ Выключить бота"),
+                # BotCommand(command="power_off", description="⚡ Выключить бота"), #todo продумать логику при автозапуске, пока спряу
                 BotCommand(command="logs", description="📜 Показать логи"),
                 BotCommand(command="error", description="🛑 Показать последнюю ошибку"),
                 BotCommand(command="watermark", description="©️ Водяной знак"),

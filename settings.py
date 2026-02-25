@@ -50,7 +50,7 @@ CONFIG = SettingsFile(
             },
             "auto_raise_items": {
                 "enabled": False,
-                "interval_hours": 24,
+                "interval_hours": 24.0,
                 "all": True
             },
             "auto_complete_deals": {
@@ -251,7 +251,12 @@ def restore_config(config: dict, default: dict):
             if key not in config:
                 config[key] = value
             elif type(value) is not type(config[key]):
-                config[key] = value
+                try:
+                    equal = value == config[key]
+                    if equal:
+                        pass
+                except:
+                    config[key] = value
             elif isinstance(value, dict) and isinstance(config[key], dict):
                 check_default(config[key], value)
         return config

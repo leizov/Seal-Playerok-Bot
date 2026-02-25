@@ -166,18 +166,16 @@ class PlayerokBot:
                         continue
                     
                     # Получаем настройки
-                    interval_hours = self.config["playerok"]["auto_raise_items"].get("interval_hours", 24)
+                    interval_hours = self.config["playerok"]["auto_raise_items"].get("interval_hours", 24.0)
                     raise_all = self.config["playerok"]["auto_raise_items"].get("all", True)
                     
                     # Получаем все активные товары с премиум статусом
                     my_items = self.get_my_items(statuses=[ItemStatuses.APPROVED])
-                    self.logger.info(f'items_count: {my_items}')
                     for item in my_items:
                         try:
                             # Проверяем что товар имеет премиум статус (priority != None)
                             if not item.priority or item.priority == "DEFAULT":
                                 continue
-                            self.logger.info(f'item: {item.name}')
 
                             # Проверяем включения/исключения
                             item_name_lower = item.name.lower()
