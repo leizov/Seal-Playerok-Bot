@@ -319,6 +319,9 @@ class PlayerokBot:
         first_message_config = self.messages.get("first_message", {})
         if not first_message_config.get("enabled", True):
             return False
+        else:
+            #todo возможно починить и вренуть логику с кулдауном
+            return True
 
         # Получаем cooldown в днях
         cooldown_days = first_message_config.get("cooldown_days", 7)
@@ -332,7 +335,7 @@ class PlayerokBot:
                 # в чате только увед о сделке
                 return True
 
-            # Ищем предыдущее сообщение от пользователя (не от нас и не текущее)
+            # Ищем предыдущее сообщение от пользователя
             for msg in messages_list.messages:
                 # Пропускаем текущее сообщение
                 msg_time = datetime.fromisoformat(msg.created_at.replace("Z", "+00:00"))
@@ -967,15 +970,14 @@ class PlayerokBot:
             greeting_msg = self.msg("first_message", username=event.deal.user.username)
             if greeting_msg:  # Отправляем только если сообщение включено
                 self.send_message(event.chat.id, greeting_msg)
+                self.logger.info(f'Отправил приветственное сообщение для {event.deal.user}')
 
-
-        self.send_message(event.chat.id, self.msg("new_deal", deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         if self.config["playerok"]["auto_deliveries"]["enabled"]:
             for auto_delivery in self.auto_deliveries:
                 for phrase in auto_delivery["keyphrases"]:
                     if phrase.lower() in event.deal.item.name.lower() or event.deal.item.name.lower() == phrase.lower():
                         self.send_message(event.chat.id, "\n".join(auto_delivery["message"]))
-                        
+                        self.logger.info(f'Выдал товар из автовыдачи для {event.deal.id}')
                         # Отправка уведомления об автовыдаче
                         if (
                             self.config["playerok"]["tg_logging"]["enabled"]
@@ -992,6 +994,7 @@ class PlayerokBot:
                             )
                         break
         if self.config["playerok"]["auto_complete_deals"]["enabled"]:
+            self.logger.info(f'Автоматически подтвердил сделку {event.deal.id}')
             self.account.update_deal(event.deal.id, ItemDealStatuses.SENT)
 
     async def _on_item_paid(self, event: ItemPaidEvent):
@@ -1035,6 +1038,34 @@ class PlayerokBot:
 
             self.restore_last_sold_item(event.deal.item)
         
+    async def _on_item_sent(self, event: ItemSentEvent):
+        if not self.is_connected or self.account is None:
+            return
+        if event.deal.user.id == self.account.id:
+            return
+
+        first_message_config = self.messages.get("deal_sent", {})
+        if first_message_config.get("enabled", True):
+            self.send_message(event.chat.id,
+                          self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                                   deal_item_price=event.deal.item.price))
+            self.logger.info('Отправил сообщение после нашего подтверждения')
+
+        if (
+            self.config["playerok"]["tg_logging"]["enabled"]
+            and self.config["playerok"]["tg_logging"].get("events", {}).get("deal_status_changed", True)
+        ):
+            asyncio.run_coroutine_threadsafe(
+                get_telegram_bot().log_event(
+                    text=log_text(
+                        title=f'✅ Мы подтвердили заказ <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a> изменился',
+                        text=f"n<b>Товар:</b> {event.deal.item.name}\n<b>Покупатель:</b> {event.deal.user.username}\n<b>Сумма:</b> {event.deal.item.price or '?'}₽"
+                    ),
+                    kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
+                ),
+                get_telegram_bot_loop()
+            )
+
 
     async def _on_deal_status_changed(self, event: DealStatusChangedEvent):
         if not self.is_connected or self.account is None:
@@ -1065,10 +1096,10 @@ class PlayerokBot:
                 get_telegram_bot_loop()
             )
 
-        if event.deal.status is ItemDealStatuses.PENDING:
-            self.send_message(event.chat.id, self.msg("deal_pending", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
-        if event.deal.status is ItemDealStatuses.SENT:
-            self.send_message(event.chat.id, self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+        # if event.deal.status is ItemDealStatuses.PENDING:
+        #     self.send_message(event.chat.id, self.msg("deal_pending", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+        # if event.deal.status is ItemDealStatuses.SENT:
+        #     self.send_message(event.chat.id, self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         if event.deal.status is ItemDealStatuses.CONFIRMED:
             self.send_message(event.chat.id, self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
             self.stats.deals_completed += 1
@@ -1178,6 +1209,7 @@ class PlayerokBot:
         add_playerok_event_handler(EventTypes.NEW_DEAL, PlayerokBot._on_new_deal, 0)
         add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_paid, 0)
         add_playerok_event_handler(EventTypes.DEAL_STATUS_CHANGED, PlayerokBot._on_deal_status_changed, 0)
+        add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_sent, 0)
 
         self._start_listener()
         

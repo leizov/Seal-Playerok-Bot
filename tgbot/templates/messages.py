@@ -44,11 +44,8 @@ def messages_greeting_text():
     txt = textwrap.dedent(f"""
         👋 <b>Приветственное сообщение</b>
         
-        Отправляется при первом сообщении от покупателя.
-        Повторно — если предыдущее сообщение от него было более {cooldown_days} дней назад.
-        
+        Отправляется при первом новой сделке
         <b>Статус:</b> {status}
-        <b>Интервал:</b> {cooldown_days} дн.
         
         <b>Сообщение:</b>
         <code>{current_text}</code>
@@ -67,7 +64,7 @@ def messages_greeting_kb():
     rows = [
         [InlineKeyboardButton(text=toggle_text, callback_data=calls.AutoResponseToggle(message_type="greeting").pack())],
         [InlineKeyboardButton(text="✏️ Изменить текст", callback_data=calls.AutoResponseEdit(message_type="greeting").pack())],
-        [InlineKeyboardButton(text="⏱ Изменить интервал", callback_data=calls.GreetingCooldownEdit().pack())],
+        # [InlineKeyboardButton(text="⏱ Изменить интервал", callback_data=calls.GreetingCooldownEdit().pack())],
         [InlineKeyboardButton(text="⬅️ Назад к автоответам", callback_data=calls.MessagesNavigation(to="main").pack())]
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
