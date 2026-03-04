@@ -916,7 +916,7 @@ class PlayerokBot:
                 for msg_part in msg_text.split():
                     for command_key in commands_keys:
                         if msg_part == command_key or msg_part.lower() == command_key.lower():
-                            command_answer = self.custom_commands[commands_keys]
+                            command_answer = self.custom_commands[command_key]
 
                 if command_answer:
                     msg = "\n".join(command_answer)
