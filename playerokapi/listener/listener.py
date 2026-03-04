@@ -109,22 +109,22 @@ class EventListener:
         elif message.text == "{{DEAL_CONFIRMED}}" and message.deal is not None:
             return [
                 DealConfirmedEvent(message.deal, chat),
-                DealStatusChangedEvent(message.deal, chat),
+                # DealStatusChangedEvent(message.deal, chat),
             ]
         elif message.text == "{{DEAL_ROLLED_BACK}}" and message.deal is not None:
             return [
                 DealRolledBackEvent(message.deal, chat),
-                DealStatusChangedEvent(message.deal, chat),
+                # DealStatusChangedEvent(message.deal, chat),
             ]
         elif message.text == "{{DEAL_HAS_PROBLEM}}" and message.deal is not None:
             return [
                 DealHasProblemEvent(message.deal, chat),
-                DealStatusChangedEvent(message.deal, chat),
+                # DealStatusChangedEvent(message.deal, chat),
             ]
         elif message.text == "{{DEAL_PROBLEM_RESOLVED}}" and message.deal is not None:
             return [
                 DealProblemResolvedEvent(message.deal, chat),
-                DealStatusChangedEvent(message.deal, chat),
+                # DealStatusChangedEvent(message.deal, chat),
             ]
 
         return [NewMessageEvent(message, chat)]

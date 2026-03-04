@@ -56,9 +56,9 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
                 if msg.user.username in ["Playerok.com", "Поддержка"]:
                     emoji = "🆘"
                 elif msg.user.id == playerok_bot.account.id:
-                    emoji = "👤"  # Вы (продавец)
+                    emoji = "🤖"  # Вы (продавец)
                 else:
-                    emoji = "💬"  # Покупатель
+                    emoji = "👤"  # Покупатель
                 
                 # Форматируем время
                 try:

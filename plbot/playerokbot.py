@@ -698,6 +698,7 @@ class PlayerokBot:
         except Exception as e:
             self.logger.error(f"Ошибка отправки уведомления о новом отзыве в Telegram: {e}")
 
+    # old
     def log_deal_status_changed(self, deal: types.ItemDeal, status_frmtd: str = "Неизвестный"):
         self.logger.info(f"{SECONDARY_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
         self.logger.info(f"{SECONDARY_COLOR}🔄 Статус сделки {HIGHLIGHT_COLOR}{deal.id} {SECONDARY_COLOR}изменился")
@@ -707,6 +708,23 @@ class PlayerokBot:
         self.logger.info(f"{ACCENT_COLOR} • {Fore.WHITE}Сумма: {SUCCESS_COLOR}{deal.item.price}₽")
         self.logger.info(f"{SECONDARY_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
 
+    def log_deal_confirm(self, deal: types.ItemDeal,):
+        self.logger.info(f"{SECONDARY_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
+        self.logger.info(f"{SECONDARY_COLOR}✅ Покупатель подтвердил сделку {HIGHLIGHT_COLOR}{deal.id}{SECONDARY_COLOR}")
+        self.logger.info(f"{ACCENT_COLOR} • {Fore.WHITE}Покупатель: {Fore.LIGHTWHITE_EX}{deal.user.username}")
+        self.logger.info(f"{ACCENT_COLOR} • {Fore.WHITE}Товар: {Fore.LIGHTWHITE_EX}{deal.item.name}")
+        self.logger.info(f"{ACCENT_COLOR} • {Fore.WHITE}Сумма: {SUCCESS_COLOR}{deal.item.price}₽")
+        self.logger.info(f"{SECONDARY_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
+
+    def log_deal_rolled_back(self, deal: types.ItemDeal):
+        self.logger.info(f"{SECONDARY_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
+        self.logger.info(f"{SECONDARY_COLOR}❌ Произошёл возврат для сделки {HIGHLIGHT_COLOR}{deal.id}{SECONDARY_COLOR}")
+        self.logger.info(f"{ACCENT_COLOR} • {Fore.WHITE}Покупатель: {Fore.LIGHTWHITE_EX}{deal.user.username}")
+        self.logger.info(f"{ACCENT_COLOR} • {Fore.WHITE}Товар: {Fore.LIGHTWHITE_EX}{deal.item.name}")
+        self.logger.info(f"{ACCENT_COLOR} • {Fore.WHITE}Сумма: {SUCCESS_COLOR}{deal.item.price}₽")
+        self.logger.info(f"{SECONDARY_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
+
+
     def log_new_problem(self, deal: types.ItemDeal):
         self.logger.info(f"{HIGHLIGHT_COLOR}🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘")
         self.logger.info(f"{HIGHLIGHT_COLOR}⚠️ Новая жалоба в сделке {Fore.LIGHTWHITE_EX}{deal.id}")
@@ -715,6 +733,13 @@ class PlayerokBot:
         self.logger.info(f"{SECONDARY_COLOR} • {Fore.WHITE}Сумма: {SUCCESS_COLOR}{deal.item.price}₽")
         self.logger.info(f"{HIGHLIGHT_COLOR}🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘 🆘")
 
+    def log_problem_resolved(self, deal: types.ItemDeal):
+        self.logger.info(f"{HIGHLIGHT_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
+        self.logger.info(f"{HIGHLIGHT_COLOR}🥰 Проблема в сделке {Fore.LIGHTWHITE_EX}{deal.id} разрешена!")
+        self.logger.info(f"{SECONDARY_COLOR} • {Fore.WHITE}Покупатель: {Fore.LIGHTWHITE_EX}{deal.user.username}")
+        self.logger.info(f"{SECONDARY_COLOR} • {Fore.WHITE}Товар: {Fore.LIGHTWHITE_EX}{deal.item.name}")
+        self.logger.info(f"{SECONDARY_COLOR} • {Fore.WHITE}Сумма: {SUCCESS_COLOR}{deal.item.price}₽")
+        self.logger.info(f"{HIGHLIGHT_COLOR}🌊〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰🌊")
 
     async def playerok_bot_start(self):
         # Устанавливаем время первого запуска только если его еще нет
@@ -728,6 +753,7 @@ class PlayerokBot:
             last_ua = self.config["playerok"]["api"]["user_agent"]
 
             self.logger.info(f'Реврешер запущен!')
+
             while True:
                 if self.account and self.account.profile.balance:
                     balance = self.account.profile.balance.value
@@ -737,8 +763,7 @@ class PlayerokBot:
                 username = self.account.username if self.account else "Не подключен"
                 set_title(f"Seal Playerok Bot v{VERSION} | {username}: {balance}₽")
                 
-                if self.stats != get_stats(): 
-                    set_stats(self.stats)
+                set_stats(self.stats)
                 
                 new_config = sett.get("config")
                 if new_config != self.config:
@@ -784,7 +809,7 @@ class PlayerokBot:
                 if sett.get("auto_raise_items") != self.auto_raise_items:
                     self.auto_raise_items = sett.get("auto_raise_items")
                 
-                time.sleep(3)
+                time.sleep(5)
 
         def refresh_account_loop():
             while True:
@@ -886,8 +911,15 @@ class PlayerokBot:
 
 
             elif self.config["playerok"]["custom_commands"]["enabled"]:
-                if msg_text.lower() in [key.lower() for key in self.custom_commands.keys()]:
-                    msg = "\n".join(self.custom_commands[msg_text])
+                command_answer = None
+                commands_keys = [key for key in self.custom_commands.keys()]
+                for msg_part in msg_text.split():
+                    for command_key in commands_keys:
+                        if msg_part == command_key or msg_part.lower() == command_key.lower():
+                            command_answer = self.custom_commands[commands_keys]
+
+                if command_answer:
+                    msg = "\n".join(command_answer)
                     self.send_message(event.chat.id, msg)
 
                     # Отправка уведомления о получении команды
@@ -906,7 +938,7 @@ class PlayerokBot:
                         )
 
 
-    async def _on_new_problem(self, event: ItemPaidEvent):
+    async def _on_new_problem(self, event: DealHasProblemEvent):
         if not self.is_connected or self.account is None:
             return
         if event.deal.user.id == self.account.id:
@@ -925,6 +957,28 @@ class PlayerokBot:
                     ),
                     kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                 ), 
+                get_telegram_bot_loop()
+            )
+
+    async def _on_deal_problem_resolved(self, event: DealProblemResolvedEvent):
+        if not self.is_connected or self.account is None:
+            return
+        if event.deal.user.id == self.account.id:
+            return
+
+        self.log_problem_resolved(event.deal)
+        if (
+                self.config["playerok"]["tg_logging"]["enabled"]
+                and self.config["playerok"]["tg_logging"].get("events", {}).get("new_problem", True)
+        ):
+            asyncio.run_coroutine_threadsafe(
+                get_telegram_bot().log_event(
+                    text=log_text(
+                        title=f'🥰 Проблема <a href="https://playerok.com/deal/{event.deal.id}">сделке #{event.deal.id}</a> разрешена!',
+                        text=f"<b>Покупатель:</b> {event.deal.user.username}\n<b>Предмет:</b> {event.deal.item.name}\n<b>Сумма:</b> {event.deal.item.price or '?'}₽"
+                    ),
+                    kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
+                ),
                 get_telegram_bot_loop()
             )
 
@@ -1067,6 +1121,75 @@ class PlayerokBot:
             )
 
 
+    async def _on_deal_confirmed(self, event: DealConfirmedEvent):
+        if not self.is_connected or self.account is None:
+            return
+        if event.deal.user.id == self.account.id:
+            return
+
+        self.log_deal_confirm(event.deal)
+        if (
+            self.config["playerok"]["tg_logging"]["enabled"]
+            and self.config["playerok"]["tg_logging"].get("events", {}).get("deal_status_changed", True)
+        ):
+            asyncio.run_coroutine_threadsafe(
+                get_telegram_bot().log_event(
+                    text=log_text(
+                        title=f'✅ Покупатель подтвердил <a href="https://playerok.com/deal/{event.deal.id}/">сделку #{event.deal.id}</a>',
+                        text=f"<b>Товар:</b> {event.deal.item.name}\n<b>Покупатель:</b> {event.deal.user.username}\n<b>Сумма:</b> {event.deal.item.price or '?'}₽"
+                    ),
+                    kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
+                ),
+                get_telegram_bot_loop()
+            )
+
+        self.send_message(event.chat.id,
+                          self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                                   deal_item_price=event.deal.item.price))
+        self.stats.deals_completed += 1
+        if not event.deal.transaction:
+            event.deal = self.account.get_deal(event.deal.id)
+        self.stats.earned_money += round(getattr(event.deal.transaction, "value") or 0, 2)
+
+        # Добавляем сделку в мониторинг отзывов, если функция включена
+        review_config = self.config.get("playerok", {}).get("review_monitoring", {})
+        if review_config.get("enabled", False):
+            from plbot.review_monitor import add_deal_to_monitor
+            add_deal_to_monitor(event.deal, event.chat.id)
+            self.logger.info(f"Сделка {event.deal.id} добавлена в мониторинг отзывов")
+
+    async def _on_deal_rolled_back(self, event: DealConfirmedEvent):
+        if not self.is_connected or self.account is None:
+            return
+        if event.deal.user.id == self.account.id:
+            return
+
+        self.log_deal_rolled_back(event.deal)
+        if (
+                self.config["playerok"]["tg_logging"]["enabled"]
+                and self.config["playerok"]["tg_logging"].get("events", {}).get("deal_status_changed", True)
+        ):
+            asyncio.run_coroutine_threadsafe(
+                get_telegram_bot().log_event(
+                    text=log_text(
+                        title=f'❌ Произошёл возврат для <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a>',
+                        text=f"<b>Товар:</b> {event.deal.item.name}\n<b>Покупатель:</b> {event.deal.user.username}\n<b>Сумма:</b> {event.deal.item.price or '?'}₽"
+                    ),
+                    kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
+                ),
+                get_telegram_bot_loop()
+            )
+
+        self.send_message(event.chat.id,
+                          self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                                   deal_item_price=event.deal.item.price))
+        # Добавляем сумму возврата
+        if not event.deal.transaction:
+            event.deal = self.account.get_deal(event.deal.id)
+        self.stats.refunded_money += round(getattr(event.deal.transaction, "value") or 0, 2)
+
+
+    #old handler
     async def _on_deal_status_changed(self, event: DealStatusChangedEvent):
         if not self.is_connected or self.account is None:
             return
@@ -1208,8 +1331,12 @@ class PlayerokBot:
         add_playerok_event_handler(EventTypes.DEAL_HAS_PROBLEM, PlayerokBot._on_new_problem, 0)
         add_playerok_event_handler(EventTypes.NEW_DEAL, PlayerokBot._on_new_deal, 0)
         add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_paid, 0)
-        add_playerok_event_handler(EventTypes.DEAL_STATUS_CHANGED, PlayerokBot._on_deal_status_changed, 0)
+        # add_playerok_event_handler(EventTypes.DEAL_STATUS_CHANGED, PlayerokBot._on_deal_status_changed, 0)
+        add_playerok_event_handler(EventTypes.DEAL_CONFIRMED, PlayerokBot._on_deal_confirmed, 0)
+        add_playerok_event_handler(EventTypes.DEAL_ROLLED_BACK, PlayerokBot._on_deal_rolled_back, 0)
+        add_playerok_event_handler(EventTypes.DEAL_PROBLEM_RESOLVED, PlayerokBot._on_deal_problem_resolved, 0)
         add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_sent, 0)
+
 
         self._start_listener()
         

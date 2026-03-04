@@ -17,12 +17,13 @@ class Stats:
     refunded_money: float
     earned_money: float
 
-        
+#todo возможно добавить ещё прикольных полей для статистики
 _stats = Stats(
     bot_launch_time=None,
     deals_completed=0,
     refunded_money=0.0,
-    earned_money=0.0
+    earned_money=0.0,
+
 )
 
 
