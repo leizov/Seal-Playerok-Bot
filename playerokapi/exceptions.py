@@ -75,3 +75,23 @@ class UnauthorizedError(Exception):
 
     def __str__(self):
         return "Не удалось подключиться к аккаунту Playerok. Может вы указали неверный token?"
+
+
+class CurlTimeoutError(Exception):
+    """
+    Ошибка timeout при запросе через curl_cffi.
+    """
+
+    def __init__(self, url: str, timeout_seconds: int, original_exception: Exception | None = None):
+        self.url = url
+        self.timeout_seconds = timeout_seconds
+        self.original_exception = original_exception
+
+    def __str__(self):
+        msg = (
+            f"Ошибка timeout запроса к {self.url} (таймаут: {self.timeout_seconds} сек).\n"
+            f"Ошибка на стророне сайта, если возникает часто попробуйте перезагрузиться."
+        )
+        if self.original_exception:
+            msg += f"\nТехническая причина: {self.original_exception}"
+        return msg

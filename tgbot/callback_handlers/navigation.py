@@ -164,12 +164,13 @@ async def callback_stats_navigation(callback: CallbackQuery, callback_data: call
         await state.set_state(None)
         to = callback_data.to
         
-        if to in ["default", "main"]:
+        if to in ["default", "main", "all", "month"]:
+            period = "month" if to == "month" else "all"
             await throw_float_message(
                 state=state,
                 message=callback.message,
-                text=templ.stats_text(),
-                reply_markup=templ.stats_kb(),
+                text=templ.stats_text(period=period),
+                reply_markup=templ.stats_kb(period=period),
                 callback=callback
             )
         else:

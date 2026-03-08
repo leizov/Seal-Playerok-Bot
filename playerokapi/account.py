@@ -7,7 +7,7 @@ import random
 import time
 import tempfile
 import shutil
-from curl_cffi.requests import Session as CurlSession, Response as CurlResponse
+from curl_cffi.requests import Session as CurlSession, Response as CurlResponse, exceptions as curl_exceptions
 from curl_cffi import CurlMime
 from .misc import *
 import os
@@ -53,7 +53,7 @@ class Account:
             token: str,
             user_agent: str = "",
             proxy: str = None,
-            requests_timeout: int = 15,
+            requests_timeout: int = 10,
             request_max_retries: int = 7,
             auid: str = None
         ):
@@ -287,8 +287,21 @@ class Account:
         ]
         # Прогрессивные задержки
         max_delay = 3.0
+        last_timeout_exc: Exception | None = None
         for attempt in range(self.request_max_retries):
-            resp = make_req()
+            try:
+                resp = make_req()
+            except (curl_exceptions.Timeout, curl_exceptions.ConnectTimeout, curl_exceptions.ReadTimeout) as e:
+                last_timeout_exc = e
+                delay = min(max_delay, float(attempt + 1))
+                self.__logger.warning(
+                    f"⏱️ Timeout при запросе к Playerok: {url} "
+                    f"(попытка {attempt + 1}/{self.request_max_retries}), "
+                    f"повтор через {delay:.0f} сек..."
+                )
+                time.sleep(delay)
+                self._refresh_clients()
+                continue
             if not any(sig in resp.text for sig in cloudflare_signatures):
                 break
             # Прогрессивная задержка: 1, 2, 3, 3, 3...
@@ -300,6 +313,11 @@ class Account:
             time.sleep(delay)
             self._refresh_clients()
         else:
+            if last_timeout_exc is not None:
+                self.__logger.error(
+                    f"❌ Timeout при запросе к Playerok после {self.request_max_retries} попыток."
+                )
+                raise CurlTimeoutError(url, self.requests_timeout, last_timeout_exc) from last_timeout_exc
             self.__logger.error(
                 f"❌ Cloudflare заблокировал все {self.request_max_retries} попыток! "
                 f"Требуется смена токена/прокси/user-agent."

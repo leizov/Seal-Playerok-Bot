@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+import time
+
 import asyncio
 
 from datetime import datetime
@@ -25,7 +28,7 @@ from tgbot.telegrambot import get_telegram_bot, get_telegram_bot_loop
 from tgbot.templates import log_text, log_new_mess_kb, log_new_deal_kb
 from tgbot.utils.message_formatter import format_system_message
 
-from .stats import get_stats, set_stats, load_stats
+from .stats import get_stats, load_stats, record_new_deal, record_raise, record_refund, set_stats
 from .raise_times import get_raise_times, set_raise_times, load_raise_times, should_raise_item, set_last_raise_time
 
 
@@ -67,6 +70,29 @@ class PlayerokBot:
         self._try_connect()
 
         self.__saved_chats: dict[str, Chat] = {}
+
+    @staticmethod
+    def _deal_amount(deal: types.ItemDeal) -> float:
+        """
+        Возвращает сумму сделки по правилу:
+        transaction.value -> item.price -> 0.0
+        """
+        try:
+            if getattr(deal, "transaction", None):
+                val = getattr(deal.transaction, "value", None)
+                if val is not None:
+                    return round(float(val), 2)
+        except Exception:
+            pass
+
+        try:
+            price = getattr(getattr(deal, "item", None), "price", None)
+            if price is not None:
+                return round(float(price), 2)
+        except Exception:
+            pass
+
+        return 0.0
 
     def _try_connect(self) -> bool:
         try:
@@ -503,6 +529,9 @@ class PlayerokBot:
 
             if new_item.status is ItemStatuses.PENDING_APPROVAL or new_item.status is ItemStatuses.APPROVED:
                 self.logger.info(f"{Fore.LIGHTWHITE_EX}«{item.name}» {Fore.WHITE}— {Fore.YELLOW}товар восстановлен")
+                # Учитываем стоимость автовосстановления (если цена статуса доступна).
+                if getattr(priority_status, "price", None) is not None:
+                    record_raise(priority_status.price)
             else:
                 self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось восстановить предмет «{new_item.name}». Его статус: {Fore.WHITE}{new_item.status.name}")
         except Exception as e:
@@ -551,6 +580,9 @@ class PlayerokBot:
                     
                     if raised_item:
                         self.logger.info(f"{Fore.LIGHTWHITE_EX}«{full_item.name}» {Fore.WHITE}— {Fore.GREEN}товар поднят")
+                        # Учитываем стоимость поднятия (если цена статуса доступна).
+                        if getattr(current_priority_status, "price", None) is not None:
+                            record_raise(current_priority_status.price)
                         
                         # Обновляем время последнего поднятия
                         set_last_raise_time(full_item.id)
@@ -762,9 +794,7 @@ class PlayerokBot:
                 
                 username = self.account.username if self.account else "Не подключен"
                 set_title(f"Seal Playerok Bot v{VERSION} | {username}: {balance}₽")
-                
-                set_stats(self.stats)
-                
+
                 new_config = sett.get("config")
                 if new_config != self.config:
                     self.config = new_config
@@ -989,6 +1019,12 @@ class PlayerokBot:
             return
         
         self.log_new_deal(event.deal)
+        if not event.deal.transaction:
+            try:
+                event.deal = self.account.get_deal(event.deal.id)
+            except Exception:
+                pass
+        record_new_deal(self._deal_amount(event.deal))
         if (
             self.config["playerok"]["tg_logging"]["enabled"] 
             and self.config["playerok"]["tg_logging"].get("events", {}).get("new_deal", True)
@@ -1048,8 +1084,23 @@ class PlayerokBot:
                             )
                         break
         if self.config["playerok"]["auto_complete_deals"]["enabled"]:
-            self.logger.info(f'Автоматически подтвердил сделку {event.deal.id}')
-            self.account.update_deal(event.deal.id, ItemDealStatuses.SENT)
+            success = False
+            attempts = 3
+            delay = 3
+
+            for attempt in range(attempts):
+                try:
+                    self.account.update_deal(event.deal.id, ItemDealStatuses.SENT)
+                    success = True
+                    break
+                except Exception as e:
+                    self.logger.warning(f'Неудачная попытка ({attempt+1}/{attempts}) подтвердить сделку {event.deal.id}:\n{e}')
+                    time.sleep(delay)
+
+            if success:
+                self.logger.info(f'Автоматически подтвердил сделку {event.deal.id}')
+            else:
+                self.logger.error(f'Автоматически подтверждение не сработало {event.deal.id}\nПричина: сайт хуйни')
 
     async def _on_item_paid(self, event: ItemPaidEvent):
         if not self.is_connected or self.account is None:
@@ -1146,10 +1197,6 @@ class PlayerokBot:
         self.send_message(event.chat.id,
                           self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
-        self.stats.deals_completed += 1
-        if not event.deal.transaction:
-            event.deal = self.account.get_deal(event.deal.id)
-        self.stats.earned_money += round(getattr(event.deal.transaction, "value") or 0, 2)
 
         # Добавляем сделку в мониторинг отзывов, если функция включена
         review_config = self.config.get("playerok", {}).get("review_monitoring", {})
@@ -1183,10 +1230,9 @@ class PlayerokBot:
         self.send_message(event.chat.id,
                           self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
-        # Добавляем сумму возврата
         if not event.deal.transaction:
             event.deal = self.account.get_deal(event.deal.id)
-        self.stats.refunded_money += round(getattr(event.deal.transaction, "value") or 0, 2)
+        record_refund(self._deal_amount(event.deal))
 
 
     #old handler
@@ -1225,10 +1271,6 @@ class PlayerokBot:
         #     self.send_message(event.chat.id, self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         if event.deal.status is ItemDealStatuses.CONFIRMED:
             self.send_message(event.chat.id, self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
-            self.stats.deals_completed += 1
-            if not event.deal.transaction:
-                event.deal = self.account.get_deal(event.deal.id)
-            self.stats.earned_money += round(getattr(event.deal.transaction, "value") or 0, 2)
             
             # Добавляем сделку в мониторинг отзывов, если функция включена
             review_config = self.config.get("playerok", {}).get("review_monitoring", {})
@@ -1238,10 +1280,6 @@ class PlayerokBot:
                 self.logger.info(f"Сделка {event.deal.id} добавлена в мониторинг отзывов")
         elif event.deal.status is ItemDealStatuses.ROLLED_BACK:
             self.send_message(event.chat.id, self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
-            # Добавляем сумму возврата
-            if not event.deal.transaction:
-                event.deal = self.account.get_deal(event.deal.id)
-            self.stats.refunded_money += round(getattr(event.deal.transaction, "value") or 0, 2)
 
 
     async def run_bot(self):

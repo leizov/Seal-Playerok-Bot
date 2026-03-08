@@ -46,9 +46,17 @@ def restart():
         from logging import getLogger
         logger = getLogger("seal.restart")
         logger.info("Перезапуск бота...")
-        
+
+        bot_entry = paths.get_path("bot.py")
         python = sys.executable
-        os.execv(python, [python] + sys.argv)
+        os.chdir(paths.ROOT_DIR)
+        if sys.platform == "win32":
+            os.system("cls")
+            # На Windows execv иногда некорректно обрабатывает окружение запуска.
+            # Запускаем новый процесс явно и завершаем текущий.
+            subprocess.Popen([python, bot_entry], cwd=paths.ROOT_DIR)
+            os._exit(0)
+        os.execv(python, [python, bot_entry])
     except Exception as e:
         from logging import getLogger
         from colorama import Fore
@@ -81,6 +89,29 @@ def set_title(title: str):
         pass
 
 
+def trim_log_file(log_file: str, max_lines: int = 5000, keep_lines: int = 3000):
+    """
+    Очищает лог-файл по количеству строк.
+    Если строк больше max_lines, оставляет только последние keep_lines.
+    """
+    try:
+        if not log_file or not os.path.exists(log_file):
+            return
+
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+
+        if len(lines) <= max_lines:
+            return
+
+        tail = lines[-keep_lines:]
+        with open(log_file, "w", encoding="utf-8", errors="replace") as f:
+            f.writelines(tail)
+    except Exception as e:
+        # Здесь нельзя ронять инициализацию логгера.
+        print(f"[WARN] Не удалось обрезать лог-файл {log_file}: {e}")
+
+
 def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant: int = 1):
     """
     Настраивает логгер с морским стилем.
@@ -99,6 +130,7 @@ def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant:
     if log_file is None:
         log_file = paths.LATEST_LOG_FILE
     os.makedirs(paths.LOGS_DIR, exist_ok=True)
+    trim_log_file(log_file, max_lines=5000, keep_lines=3000)
     
     # Морская цветовая палитра для логов
     LOG_FORMAT = "%(light_black)s%(asctime)s%(reset)s %(cyan)s•%(reset)s %(log_color)s%(shortLevel)s%(reset)s %(white)s%(message)s"
@@ -137,13 +169,18 @@ def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant:
         datefmt="%d.%m.%Y %H:%M:%S",
     ))
 
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-    return logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    for handler in root_logger.handlers[:]:
+        try:
+            handler.flush()
+            handler.close()
+        except Exception:
+            pass
+        root_logger.removeHandler(handler)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    return root_logger
 
 
 def _print_seal_art(variant: int = 1):
@@ -266,6 +303,7 @@ def setup_gradient_logger(log_file: str = "logs/latest.log", show_seal_art: bool
             return f"{gradient_prefix} {message}"
 
     os.makedirs(paths.LOGS_DIR, exist_ok=True)
+    trim_log_file(log_file, max_lines=5000, keep_lines=3000)
     
     # Выводим ASCII-арт тюленя при запуске
     if show_seal_art:
@@ -289,13 +327,18 @@ def setup_gradient_logger(log_file: str = "logs/latest.log", show_seal_art: bool
         datefmt="%d.%m.%Y %H:%M:%S",
     ))
 
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-    return logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    for handler in root_logger.handlers[:]:
+        try:
+            handler.flush()
+            handler.close()
+        except Exception:
+            pass
+        root_logger.removeHandler(handler)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    return root_logger
 
 
 def is_package_installed(requirement_string: str) -> bool:

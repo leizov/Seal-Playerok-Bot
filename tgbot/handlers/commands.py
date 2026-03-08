@@ -1,11 +1,11 @@
 import asyncio
 import os
-import sys
 from aiogram import types, Router, Bot, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
 from settings import Settings as sett
+from core.utils import restart as app_restart
 
 from .. import templates as templ
 from ..helpful import throw_float_message, do_auth
@@ -96,18 +96,12 @@ async def handler_restart(message: types.Message, state: FSMContext):
     
     try:
         # Отправляем сообщение о начале перезагрузки
-        restart_msg = await message.answer(
+        await message.answer(
             "🔄 <b>Перезагрузка бота...</b>",
             parse_mode="HTML"
         )
-        
-        # Даем время на отправку сообщения
-        await asyncio.sleep(1)
-        
-        # Завершаем текущий процесс и перезапускаем
-        # os.execl заменяет текущий процесс новым, все ресурсы автоматически освобождаются
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+        await asyncio.sleep(0.5)
+        app_restart()
         
     except Exception as e:
         await message.answer(f"❌ Произошла ошибка при перезагрузке: {str(e)}")

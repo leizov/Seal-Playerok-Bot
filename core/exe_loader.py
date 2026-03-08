@@ -3,65 +3,29 @@ PYD Plugin Loader
 ==================
 Загрузчик скомпилированных .pyd плагинов из папки plugins/
 
+.pyd - это Python extension modules, скомпилированные через Nuitka --module.
+Они импортируются как обычные Python модули, поэтому:
+- Роутеры aiogram работают ✅
+- Обработчики событий Playerok работают ✅
+- bot.send_message() работает ✅
+
+ВАЖНО: .exe через subprocess НЕ ПОДХОДИТ для плагинов, потому что:
+- subprocess = отдельный процесс
+- Нет доступа к объектам бота (dispatcher, bot instance)
+- Роутеры не зарегистрируются
+- События не придут
 """
 
 import os
 import sys
-import re
-import platform
 import importlib.util
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from logging import getLogger
 
-# Импорт путей из центрального модуля
-import paths
-
 logger = getLogger("seal.pyd_loader")
-
-# Информация о текущей системе
-CURRENT_PYTHON_VERSION = f"{sys.version_info.major}{sys.version_info.minor}"  # "312"
-CURRENT_PLATFORM = "win" if sys.platform == "win32" else "linux"
-CURRENT_ARCH = "amd64" if platform.machine().endswith('64') else "x86"
-
-
-def parse_plugin_filename(filename: str) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
-    """
-    Парсит имя файла плагина для извлечения информации о совместимости.
-    
-    Returns:
-        (plugin_name, python_version, platform, arch)
-        
-    Examples:
-        "steam_points.cpython-312-win_amd64.pyd" → ("steam_points", "312", "win", "amd64")
-        "plugin.cp312-win_amd64.pyd" → ("plugin", "312", "win", "amd64")
-        "plugin.cpython-312-x86_64-linux-gnu.so" → ("plugin", "312", "linux", "x86_64")
-    """
-    # Паттерны для извлечения версии
-    patterns = [
-        # .cpython-312-x86_64-linux-gnu.so
-        r'^(.+?)\.cpython-(\d+)-(\w+)-linux.*\.(so|pyd)$',
-        # .cp312-win_amd64.pyd
-        r'^(.+?)\.cp(\d+)-(\w+)_(\w+)\.(pyd|so)$',
-        # .cpython-312-win_amd64.pyd (альтернативный формат)
-        r'^(.+?)\.cpython-(\d+)-(\w+)_(\w+)\.(pyd|so)$',
-    ]
-    
-    for pattern in patterns:
-        match = re.match(pattern, filename, re.IGNORECASE)
-        if match:
-            groups = match.groups()
-            if len(groups) >= 4:
-                name = groups[0]
-                version = groups[1]
-                plat = groups[2] if 'linux' not in groups[2] else 'linux'
-                arch = groups[3] if len(groups) > 3 else 'unknown'
-                return (name, version, plat, arch)
-    
-    # Не удалось распарсить
-    return (filename.rsplit('.', 1)[0], None, None, None)
 
 
 @dataclass
@@ -99,14 +63,14 @@ class PydPluginLoader:
     """
     
     # Поддерживаемые расширения
-    EXTENSIONS = ['.pyd', '.so', '.cpython-312-x86_64-linux-gnu.so', '.cpython-313-x86_64-linux-gnu.so']
+    EXTENSIONS = ['.pyd', '.so', '.cpython-312-x86_64-linux-gnu.so']
     
     def __init__(self, plugins_dir: Path = None):
         """
         Args:
             plugins_dir: Директория с .pyd плагинами
         """
-        self.plugins_dir = Path(plugins_dir) if plugins_dir else Path(paths.PLUGINS_DIR)
+        self.plugins_dir = Path(plugins_dir) if plugins_dir else Path("plugins")
         self.plugins_dir.mkdir(exist_ok=True)
         
         self._plugins: Dict[str, PydPluginInfo] = {}
@@ -123,9 +87,7 @@ class PydPluginLoader:
                 elif '.cpython-' in file.name and file.suffix == '.so':
                     plugins.append(file)
                 elif file.suffix.lower() == '.so' and sys.platform != 'win32':
-                    # Проверяем, что это .so файл для Python
-                    if 'python' in file.name.lower() or 'cp3' in file.name.lower():
-                        plugins.append(file)
+                    plugins.append(file)
         
         return sorted(plugins)
     
@@ -186,31 +148,6 @@ class PydPluginLoader:
         
         return self._plugins
     
-    def check_compatibility(self, plugin_path: Path) -> Tuple[bool, str]:
-        """
-        Проверка совместимости плагина с текущей системой.
-        
-        Returns:
-            (is_compatible, error_message)
-        """
-        filename = plugin_path.name
-        name, version, plat, arch = parse_plugin_filename(filename)
-        
-        # Проверка версии Python
-        if version and version != CURRENT_PYTHON_VERSION:
-            return (False, 
-                f"Плагин скомпилирован для Python 3.{version[1:]}, "
-                f"а у вас Python {sys.version_info.major}.{sys.version_info.minor}")
-        
-        # Проверка платформы
-        if plat:
-            if plat == "win" and CURRENT_PLATFORM != "win":
-                return (False, f"Плагин .pyd для Windows, а вы на {CURRENT_PLATFORM}")
-            if plat == "linux" and CURRENT_PLATFORM != "linux":
-                return (False, f"Плагин .so для Linux, а вы на {CURRENT_PLATFORM}")
-        
-        return (True, "")
-    
     def load(self, plugin_path: Path) -> Optional[PydPluginInfo]:
         """
         Загрузка одного .pyd плагина
@@ -229,36 +166,17 @@ class PydPluginLoader:
             logger.warning(f"Плагин '{display_name}' уже загружен")
             return self._plugins[display_name]
         
-        # Check compatibility before loading
-        is_compatible, error_msg = self.check_compatibility(plugin_path)
-        if not is_compatible:
-            logger.error(f"[X] Plugin '{display_name}' incompatible: {error_msg}")
-            info = PydPluginInfo(
-                name=display_name,
-                path=plugin_path,
-                module=None,
-                status='error',
-                loaded_at=None,
-                error_message=f"Несовместимость: {error_msg}"
-            )
-            self._plugins[display_name] = info
-            return info
-        
-        logger.info(f"Загрузка плагина: {display_name}")
+        logger.info(f"Загрузка .pyd плагина: {display_name}")
         
         try:
-            # Загружаем модуль
+            # Загружаем модуль (используем module_name для импорта!)
             spec = importlib.util.spec_from_file_location(module_name, plugin_path)
             if spec is None or spec.loader is None:
                 raise ImportError(f"Не удалось загрузить spec из {plugin_path}")
             
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
-            
-            try:
-                spec.loader.exec_module(module)
-            except SystemExit as exit_err:
-                raise Exception(f"Плагин завершился с кодом {exit_err.code} - проверьте лицензию")
+            spec.loader.exec_module(module)
             
             # Извлекаем экспорты
             info = PydPluginInfo(
@@ -300,13 +218,14 @@ class PydPluginLoader:
 
                 _playerok_events = len(info.playerok_event_handlers or {})
                 _playerok_handlers = sum(len(v or []) for v in (info.playerok_event_handlers or {}).values())
+                _playerok_key_types = sorted({type(k).__name__ for k in (info.playerok_event_handlers or {}).keys()})
                 _init_count = len((info.bot_event_handlers or {}).get('INIT', []) or [])
                 _post_init_count = len((info.bot_event_handlers or {}).get('POST_INIT', []) or [])
 
                 # logger.info(
                 #     f".pyd exports {display_name}: "
                 #     f"routers={_has_routers}({len(info.telegram_bot_routers)}), "
-                #     f"playerok={_has_playerok}({ _playerok_events } events/{ _playerok_handlers } handlers), "
+                #     f"playerok={_has_playerok}({ _playerok_events } events/{ _playerok_handlers } handlers, key_types={_playerok_key_types}), "
                 #     f"bot_events={_has_bot_events}(INIT={_init_count},POST_INIT={_post_init_count}), "
                 #     f"commands={_has_cmds}({len(info.bot_commands)})"
                 # )
@@ -321,13 +240,12 @@ class PydPluginLoader:
             self._plugins[display_name] = info
             
             plugin_version = info.meta.get('version', '?')
-            logger.info(f"\u2713 Плагин '{display_name}' v{plugin_version} загружен")
+            logger.info(f"✓ Плагин '{display_name}' v{plugin_version} загружен")
             
             return info
             
         except Exception as e:
             import traceback
-            tb = traceback.format_exc()
             info = PydPluginInfo(
                 name=display_name,
                 path=plugin_path,
@@ -338,7 +256,7 @@ class PydPluginLoader:
             )
             self._plugins[display_name] = info
             logger.error(f"✗ Ошибка загрузки плагина '{display_name}': {e}")
-            logger.debug(f"Traceback:\n{tb}")
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             return info
     
     def unload(self, name: str) -> bool:

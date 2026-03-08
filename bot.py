@@ -8,7 +8,7 @@ def _early_install_requirements():
     requirements_path = "requirements.txt"
     if not os.path.exists(requirements_path):
         return
-    
+
     try:
         import pkg_resources
     except ImportError:
@@ -19,7 +19,7 @@ def _early_install_requirements():
             stdout=subprocess.DEVNULL if os.name != 'nt' else None
         )
         return
-    
+
     # Проверяем каждый пакет
     missing = []
     with open(requirements_path, "r", encoding="utf-8") as f:
@@ -31,7 +31,7 @@ def _early_install_requirements():
                 pkg_resources.require(pkg)
             except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict):
                 missing.append(pkg)
-    
+
     if missing:
         print(f"[*] Установка недостающих пакетов: {', '.join(missing)}")
         subprocess.check_call([sys.executable, "-m", "pip", "install", *missing, "-q"])
@@ -55,7 +55,7 @@ if sys.platform == 'win32':
 # ===========================================================================
 # СТРОГАЯ ПРОВЕРКА ВЕРСИИ PYTHON
 # ===========================================================================
-# 
+#
 # ВАЖНО: Скомпилированные плагины (.pyd/.so) работают ТОЛЬКО на той версии
 # Python, на которой были скомпилированы!
 #
@@ -122,7 +122,7 @@ def check_activation_code():
     """Проверяет код активации при первом запуске"""
     config_path = paths.CONFIG_FILE
     settings_dir = paths.BOT_SETTINGS_DIR
-    
+
     # Проверяем существует ли конфиг
     if not os.path.exists(config_path):
         os.makedirs(settings_dir, exist_ok=True)
@@ -135,11 +135,11 @@ def check_activation_code():
             saved_code = config.get("activation_code", "")
         except:
             saved_code = ""
-    
+
     # Если код уже есть и валиден — пропускаем
     if validate_activation_code(saved_code):
         return True
-    
+
     # Запрашиваем код
     print("\n" + "=" * 60)
     print("🦭 АКТИВАЦИЯ SEAL PLAYEROK BOT")
@@ -151,10 +151,10 @@ def check_activation_code():
     print("   3. Введи команду /code")
     print("   4. Скопируй полученный код")
     print("\n" + "=" * 60)
-    
+
     while True:
         code = input("\n🔑 Введи код активации: ").strip().upper()
-        
+
         if validate_activation_code(code):
             # Сохраняем код в конфиг
             if os.path.exists(config_path):
@@ -165,12 +165,12 @@ def check_activation_code():
                     config = {}
             else:
                 config = {}
-            
+
             config["activation_code"] = code
-            
+
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
-            
+
             print("\n✅ Код принят! Бот активирован.")
             print("🐚 Добро пожаловать в SealPlayerok Bot!\n")
             return True
@@ -200,15 +200,15 @@ from playerokapi.exceptions import CloudflareDetectedException
 from __init__ import ACCENT_COLOR, VERSION, SECONDARY_COLOR, HIGHLIGHT_COLOR, SUCCESS_COLOR
 from settings import Settings as sett
 from core.utils import (
-    set_title, 
-    setup_logger, 
-    patch_requests, 
-    init_main_loop, 
+    set_title,
+    setup_logger,
+    patch_requests,
+    init_main_loop,
     run_async_in_thread
 )
 from core.plugins import (
-    load_plugins, 
-    set_plugins, 
+    load_plugins,
+    set_plugins,
     connect_plugins
 )
 from core.handlers import call_bot_event
@@ -246,14 +246,14 @@ def check_permissions():
         return True
     from pathlib import Path
     from colorama import Fore
-    
+
     settings_dir = Path("bot_settings").resolve()
     current_user = pwd.getpwuid(os.getuid()).pw_name
-    
+
     if not settings_dir.exists():
         settings_dir.mkdir(parents=True, exist_ok=True)
         print(f"{Fore.GREEN}[OK] Создана директория настроек: {settings_dir}{Fore.RESET}")
-    
+
     if not os.access(settings_dir, os.W_OK):
         print(f"{Fore.RED}❌ Нет прав на запись в {settings_dir}{Fore.RESET}")
         print(f"{Fore.YELLOW}Выполните: sudo chown -R {current_user}:{current_user} {settings_dir}{Fore.RESET}")
@@ -261,12 +261,12 @@ def check_permissions():
 
     fixed_files = []
     problem_files = []
-    
+
     for json_file in settings_dir.glob("*.json"):
         if not os.access(json_file, os.W_OK):
             file_stat = os.stat(json_file)
             current_uid = os.getuid()
-            
+
             if file_stat.st_uid != current_uid:
                 problem_files.append((json_file, f"Владелец: uid={file_stat.st_uid}, текущий пользователь: uid={current_uid}"))
             else:
@@ -275,10 +275,10 @@ def check_permissions():
                     fixed_files.append(json_file.name)
                 except Exception as e:
                     problem_files.append((json_file, str(e)))
-    
+
     if fixed_files:
         print(f"{Fore.GREEN}✅ Исправлены права для файлов: {', '.join(fixed_files)}{Fore.RESET}")
-    
+
     if problem_files:
         print(f"\n{Fore.RED}❌ Не удалось исправить права для файлов:{Fore.RESET}")
         for file_path, error in problem_files:
@@ -289,20 +289,20 @@ def check_permissions():
             print(f"{Fore.CYAN}   sudo chown {current_user}:{current_user} {file_path}{Fore.RESET}")
         print()
         return False
-    
+
     return True
 
 def check_and_configure_config():
     import sys
     config = sett.get("config")
-    
+
     # Проверяем, нужна ли интерактивная настройка
     needs_config = (
         not config["playerok"]["api"]["token"] or
         not config["telegram"]["api"]["token"] or
         not config["telegram"]["bot"]["password"]
     )
-    
+
     # Если нет TTY (запуск через systemd) и конфиг не настроен - выходим с ошибкой
     if needs_config and not sys.stdin.isatty():
         print("")
@@ -335,7 +335,7 @@ def check_and_configure_config():
             return True
         except Exception:
             return False
-    
+
     def is_pl_account_working() -> bool:
         try:
             Account(
@@ -347,7 +347,7 @@ def check_and_configure_config():
             return True
         except:
             return False
-    
+
     def is_pl_account_banned() -> bool:
         try:
             acc = Account(
@@ -368,7 +368,7 @@ def check_and_configure_config():
 
     # Используем глобальную функцию normalize_proxy из core.proxy_utils
     # вместо локальной для единообразия
-    
+
     def is_proxy_valid(proxy: str) -> bool:
         """Проверяет валидность прокси через глобальную функцию validate_proxy"""
         try:
@@ -376,7 +376,7 @@ def check_and_configure_config():
             return True
         except (ValueError, Exception):
             return False
-    
+
     def is_proxy_working(proxy: str, timeout: int = 10, max_retries: int = 3) -> bool:
         """Проверка прокси через playerok.com. Принимает УЖЕ нормализованный прокси!
         Делает до max_retries попыток. Если хотя бы одна успешна - сразу возвращает True."""
@@ -385,7 +385,7 @@ def check_and_configure_config():
             proxy_string = proxy
         else:
             proxy_string = f"http://{proxy}"
-            
+
 
         print(f"\n{Fore.CYAN}{'='*60}")
         print(f"{Fore.CYAN}Проверка прокси (макс. {max_retries} попыток):")
@@ -394,13 +394,13 @@ def check_and_configure_config():
         print(f"{Fore.WHITE}  URL для теста: {Fore.LIGHTWHITE_EX}https://playerok.com")
         print(f"{Fore.WHITE}  Timeout: {Fore.LIGHTWHITE_EX}{timeout} сек")
         print(f"{Fore.CYAN}{'='*60}")
-        
+
         proxies = {
             "http": proxy_string,
             "https": proxy_string,
         }
         test_url = "https://playerok.com"
-        
+
         for attempt in range(1, max_retries + 1):
             try:
                 print(f"{Fore.CYAN}  Попытка {attempt}/{max_retries}...", end=" ")
@@ -422,7 +422,7 @@ def check_and_configure_config():
             except Exception as e:
                 error_msg = str(e)
                 print(f"{Fore.YELLOW}✗ Ошибка: {error_msg[:50]}...")
-                
+
                 # Различаем типы ошибок для более информативных сообщений
                 if attempt == max_retries:  # Показываем детали только на последней попытке
                     if "SOCKS" in error_msg:
@@ -434,19 +434,19 @@ def check_and_configure_config():
                         print(f"{Fore.WHITE}  Прокси не ответил вовремя (таймаут)")
                     elif "Connection" in error_msg:
                         print(f"{Fore.WHITE}  Не удалось подключиться к прокси-серверу")
-        
+
         # Если ни одна попытка не удалась
         print(f"{Fore.CYAN}{'='*60}")
         print(f"{Fore.YELLOW}⚠ Прокси не работает (все {max_retries} попыток неудачны)")
         print(f"{Fore.CYAN}  Примечание: Бот попытается использовать прокси при запуске.")
         print(f"{Fore.CYAN}{'='*60}")
-        
+
         return False
-    
+
     def is_tg_token_valid(token: str) -> bool:
         pattern = r'^\d{7,12}:[A-Za-z0-9_-]{35}$'
         return bool(re.match(pattern, token))
-    
+
     def is_tg_bot_exists() -> tuple[bool, str | None]:
         """Проверяет Telegram бота. Возвращает (успех, username)."""
         max_retries = 3
@@ -458,27 +458,27 @@ def check_and_configure_config():
                     timeout=10
                 )
                 data = response.json()
-                
+
                 if data.get("ok", False) is True and data.get("result", {}).get("is_bot", False) is True:
                     username = data.get("result", {}).get("username", "")
                     return True, username
-                
+
                 error_msg = data.get('description', 'Неизвестная ошибка')
                 if attempt < max_retries:
                     print(f"{Fore.YELLOW}! Ошибка проверки токена: {error_msg}. Повтор...")
-                
+
             except requests.exceptions.RequestException as e:
                 if attempt < max_retries:
                     print(f"{Fore.YELLOW}! Сетевая ошибка: {str(e)[:50]}. Повтор...")
             except Exception as e:
                 if attempt < max_retries:
                     print(f"{Fore.YELLOW}! Ошибка: {str(e)[:50]}. Повтор...")
-            
+
             if attempt < max_retries:
                 time.sleep(base_delay)
-        
+
         return False, None
-        
+
     def is_password_valid(password: str) -> bool:
         if len(password) < 6 or len(password) > 64:
             return False
@@ -491,7 +491,7 @@ def check_and_configure_config():
         if password.lower() in common_passwords:
             return False
         return True
-    
+
     while not config["playerok"]["api"]["token"]:
         while not config["playerok"]["api"]["token"]:
             print(f"\n{Fore.WHITE}Введите {Fore.LIGHTBLUE_EX}токен {Fore.WHITE}вашего Playerok аккаунта. Его можно узнать из Cookie-данных, воспользуйтесь расширением Cookie-Editor."
@@ -517,7 +517,7 @@ def check_and_configure_config():
                 print(f"\n{Fore.GREEN}User Agent успешно сохранён в конфиг.")
             else:
                 print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный User Agent. Убедитесь, что в нём нет русских символов и попробуйте ещё раз.")
-        
+
         while not config["playerok"]["api"]["proxy"]:
             print(f"\n{Fore.WHITE}Введите {Fore.LIGHTBLUE_EX}Прокси {Fore.WHITE}в одном из форматов:")
             print(f"  {Fore.LIGHTGREEN_EX}HTTP/HTTPS:{Fore.WHITE}")
@@ -539,17 +539,17 @@ def check_and_configure_config():
                 config["playerok"]["api"]["proxy"] = normalized
                 sett.set("config", config)
                 print(f"\n{Fore.GREEN}Прокси успешно сохранён в конфиг.")
-                
+
                 # Проверяем прокси сразу после ввода
                 proxy_works = is_proxy_working(normalized)
-                
+
                 if not proxy_works:
                     print(f"\n{Fore.WHITE}Хотите:")
                     print(f"  1 - Использовать этот прокси (может быть медленный, но рабочий)")
                     print(f"  2 - Ввести другой прокси")
                     print(f"  3 - Продолжить без прокси")
                     choice = input(f"\n  {Fore.WHITE}> Ваш выбор (1/2/3): {Fore.LIGHTWHITE_EX}").strip()
-                    
+
                     if choice == "1":
                         print(f"\n{Fore.GREEN}Прокси будет использован в работе бота.")
                         break  # Выходим из цикла ввода прокси
@@ -573,7 +573,7 @@ def check_and_configure_config():
 
     # Проверка Telegram бота только при первичном вводе токена
     tg_token_is_new = not config["telegram"]["api"]["token"]
-    
+
     while not config["telegram"]["api"]["token"]:
         print(f"\n{Fore.WHITE}Введите {Fore.CYAN}токен вашего Telegram бота{Fore.WHITE}. Бота нужно создать у @BotFather."
               f"\n  {Fore.WHITE}· Пример: 7257913369:AAG2KjLL3-zvvfSQFSVhaTb4w7tR2iXsJXM")
@@ -625,13 +625,13 @@ if __name__ == "__main__":
         # Зависимости уже установлены в начале файла (_early_install_requirements)
         patch_requests()
         setup_logger()
-        
+
         set_title(f"Seal Playerok Bot v{VERSION}")
         # Красивый объёмный заголовок с морской окантовкой
         print(f"""
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～
 {Fore.LIGHTCYAN_EX}   ╔═════════════════════════════════════════════════════════════════════════════╗
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭  {Fore.LIGHTCYAN_EX}  ║
+{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}  ║
 {Fore.LIGHTCYAN_EX}   ║                                                                             ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗         {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}████████{Fore.WHITE}╗        {Fore.LIGHTCYAN_EX}     ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗╚══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝        {Fore.LIGHTCYAN_EX}     ║
@@ -648,7 +648,7 @@ if __name__ == "__main__":
 {Fore.LIGHTCYAN_EX}   ║  {Fore.WHITE}╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝         {Fore.LIGHTCYAN_EX}║
 {Fore.LIGHTCYAN_EX}   ║                                                                             ║
 {Fore.LIGHTCYAN_EX}   ║              {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}                     ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭  {Fore.LIGHTCYAN_EX}  ║
+{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}  ║
 {Fore.LIGHTCYAN_EX}   ╚═════════════════════════════════════════════════════════════════════════════╝
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～{Fore.RESET}
 """)
@@ -662,6 +662,7 @@ if __name__ == "__main__":
    │  {Fore.LIGHTWHITE_EX}👨‍💻 Автор:{Fore.WHITE}  @leizov                                                         {Fore.CYAN}
    └──────────────────────────────────────────────────────────────────────────────{Fore.RESET}
 """)
+        logger.info('Проверяю зависимости...')
         check_for_updates()
 
         from datetime import datetime as datetime_time
@@ -676,25 +677,26 @@ if __name__ == "__main__":
             print(f"\n{Fore.RED}Не удалось запустить бот из-за проблем с правами доступа.{Fore.RESET}")
             print(f"{Fore.YELLOW}Исправьте права и запустите бот снова.{Fore.RESET}\n")
             sys.exit(1)
-        
+
+        logger.info('Загружаю конфигурацию...')
         check_and_configure_config()
-        
+
         # Загружаем плагины
         plugins = load_plugins()
         set_plugins(plugins)
-        
+
         # Вызываем INIT перед инициализацией
         # print(f"{Fore.CYAN}Инициализация системы...{Fore.RESET}")
         main_loop.run_until_complete(call_bot_event("INIT", []))
-        
+
         # Подключаем плагины
         # print(f"{Fore.CYAN}Подключение плагинов...{Fore.RESET}")
         main_loop.run_until_complete(connect_plugins(plugins))
-        
+
         # Запускаем Telegram бота
         # print(f"\n{Fore.CYAN}Запуск Telegram бота...{Fore.RESET}")
         main_loop.run_until_complete(start_telegram_bot())
-        
+
         # Запускаем PlayerOk бота
         # print(f"{Fore.CYAN}Инициализация аккаунта PlayerOk...{Fore.RESET}")
         try:
@@ -702,19 +704,19 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"{Fore.LIGHTRED_EX}Ошибка при запуске Playerok бота: {e}")
             logger.warning(f"{Fore.YELLOW}Бот продолжит работу без Playerok функционала")
-        
+
         # Вызываем POST_INIT после полной инициализации
         # print(f"{Fore.CYAN}Завершение инициализации...{Fore.RESET}")
         # ВАЖНО: используем main_loop, а не asyncio.run(), чтобы tasks плагинов
         # (process_queue, check_status) работали в том же event loop
         main_loop.run_until_complete(call_bot_event("POST_INIT", []))
-        
+
         main_loop.run_forever()
     except KeyboardInterrupt:
         # Пользователь нажал Ctrl+C - нормальный выход
         logger.info(f"{Fore.LIGHTCYAN_EX}🦭 Бот остановлен пользователем. До свидания! 🌊")
         raise SystemExit(0)  # Нормальный выход (код 0)
-    
+
     except CloudflareDetectedException as e:
         # ═════════════════════════════════════════════════════════════════════
         # CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ
@@ -722,13 +724,13 @@ if __name__ == "__main__":
         # ═════════════════════════════════════════════════════════════════════
         logger.error(f"{Fore.LIGHTRED_EX}❌ Cloudflare заблокировал запросы к API!")
         logger.error(f"{Fore.YELLOW}Требуется смена токена, прокси или user-agent.")
-        
+
         # Отправляем уведомление в Telegram
         try:
             from tgbot.telegrambot import get_telegram_bot
             tg_bot = get_telegram_bot()
             config = sett.get("config")
-            
+
             if tg_bot and config["telegram"]["api"]["token"]:
                 notification_text = (
                     "🚨 <b>CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ!</b>\n\n"
@@ -743,7 +745,7 @@ if __name__ == "__main__":
                     "⚠️ <b>Бот остановлен.</b> Настройки сохранены.\n"
                     "Измените данные через этот бот и перезапустите."
                 )
-                
+
                 signed_users = config["telegram"]["bot"].get("signed_users", [])
                 for user_id in signed_users:
                     try:
@@ -757,7 +759,7 @@ if __name__ == "__main__":
                         logger.warning(f"Не удалось отправить уведомление {user_id}: {notify_err}")
         except Exception as tg_err:
             logger.warning(f"Не удалось отправить уведомления в Telegram: {tg_err}")
-        
+
         # Выводим инструкцию в консоль
         print(f"\n{Fore.LIGHTRED_EX}{'='*60}")
         print(f"{Fore.LIGHTRED_EX}❌ CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ!")
@@ -771,9 +773,9 @@ if __name__ == "__main__":
         print(f"{Fore.WHITE}  5. Перезапустите бота")
         print(f"\n{Fore.GREEN}✅ Настройки сохранены. Измените через TG и перезапустите.")
         print(f"{Fore.LIGHTRED_EX}{'='*60}\n")
-        
+
         raise SystemExit(2)  # Выход с кодом 2 (требуется смена данных)
-    
+
     except Exception as e:
         traceback.print_exc()
         print(
@@ -782,7 +784,7 @@ if __name__ == "__main__":
             f"Чат: {Fore.LIGHTWHITE_EX}https://t.me/SealPlayerokChat {Fore.WHITE}(CTRL + Клик ЛКМ)\n"
         )
         raise SystemExit(1)  # Выход с ошибкой (код 1)
-    
+
     # Если run_forever() остановился через shutdown() - нормальный выход
     logger.info(f"{Fore.LIGHTCYAN_EX}🦭 Бот корректно завершил работу. 🌊")
     raise SystemExit(0)  # Нормальный выход (код 0)
