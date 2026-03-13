@@ -31,7 +31,6 @@ class EventTypes(Enum):
     ITEM_SENT = 11
     """ Предмет отправлен (продавец подтвердил выполнение сделки). """
 
-
 class ItemLogEvents(Enum):
     """
     События логов предмета.

@@ -218,6 +218,22 @@ async def callback_messages_navigation(callback: CallbackQuery, callback_data: c
                 reply_markup=templ.messages_confirmation_buyer_kb(),
                 callback=callback
             )
+        elif to == "deal_has_problem":
+            await throw_float_message(
+                state=state,
+                message=callback.message,
+                text=templ.messages_deal_has_problem_text(),
+                reply_markup=templ.messages_deal_has_problem_kb(),
+                callback=callback
+            )
+        elif to == "deal_problem_resolved":
+            await throw_float_message(
+                state=state,
+                message=callback.message,
+                text=templ.messages_deal_problem_resolved_text(),
+                reply_markup=templ.messages_deal_problem_resolved_kb(),
+                callback=callback
+            )
         elif to == "review":
             await throw_float_message(
                 state=state,

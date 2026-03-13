@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import asyncio
 import time
 import traceback
+import threading
+import queue
 
 from ..account import Account
 from ..types import ChatList, ChatMessage, Chat
@@ -26,7 +28,130 @@ class EventListener:
         self.__last_message_times: dict[str, str] = {} # {chat_id: last_processed_message_created_at}
         self.__last_message_ids: dict[str, str] = {} # {chat_id: last_processed_message_id}
         self.__startup_time: str | None = None # Время запуска текущей сессии (ISO 8601)
-    
+        self.__state_lock = threading.Lock()
+        self.__pending_new_deal_chats: set[str] = set()
+        self.__deal_search_queue: queue.Queue[Chat] = queue.Queue()
+        self.__async_events_queue: queue.Queue[list] = queue.Queue()
+        self.__deal_search_worker: threading.Thread | None = None
+        self.__stop_worker = threading.Event()
+
+    def _get_last_message_id(self, chat_id: str) -> str | None:
+        with self.__state_lock:
+            return self.__last_message_ids.get(chat_id)
+
+    def _get_last_message_time(self, chat_id: str) -> str | None:
+        with self.__state_lock:
+            return self.__last_message_times.get(chat_id)
+
+    def _set_last_message_checkpoint(self, chat_id: str, message_id: str | None, created_at: str | None):
+        with self.__state_lock:
+            if message_id:
+                self.__last_message_ids[chat_id] = message_id
+            if created_at:
+                self.__last_message_times[chat_id] = created_at
+
+    def _is_pending_new_chat(self, chat_id: str) -> bool:
+        with self.__state_lock:
+            return chat_id in self.__pending_new_deal_chats
+
+    def _enqueue_new_chat_search(self, chat: Chat) -> bool:
+        with self.__state_lock:
+            if chat.id in self.__pending_new_deal_chats:
+                return False
+            self.__pending_new_deal_chats.add(chat.id)
+        self.__deal_search_queue.put(chat)
+        return True
+
+    def _finish_pending_new_chat(self, chat_id: str):
+        with self.__state_lock:
+            self.__pending_new_deal_chats.discard(chat_id)
+
+    def _start_workers(self):
+        if self.__deal_search_worker and self.__deal_search_worker.is_alive():
+            return
+        self.__stop_worker.clear()
+        self.__deal_search_worker = threading.Thread(
+            target=self._deal_search_worker_loop,
+            daemon=True,
+            name="playerok-deal-search-worker",
+        )
+        self.__deal_search_worker.start()
+
+    def _stop_workers(self):
+        self.__stop_worker.set()
+
+    def _deal_search_worker_loop(self):
+        while not self.__stop_worker.is_set():
+            try:
+                chat = self.__deal_search_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            chat_id = chat.id
+            try:
+                attempts = 3
+                delay = 4
+                has_new_deal = False
+                new_msgs: list[ChatMessage] = []
+                msg_list = None
+
+                for attempt in range(1, attempts + 1):
+                    msg_list = self.account.get_chat_messages(chat_id, 24)
+                    current_msgs = []
+                    for msg in msg_list.messages:
+                        # В фоне также фильтруем сообщения до старта сессии.
+                        if self.__startup_time and msg.created_at < self.__startup_time:
+                            continue
+
+                        if msg.text == "{{ITEM_PAID}}" and msg.deal is not None:
+                            has_new_deal = True
+                            self.__logger.info(
+                                f'Для нахождения сделки {msg.deal.id} пришлось произвести повторный поиск'
+                                f', задержка слушателя - {4 + (attempt - 1) * (delay + 1)} секунд'
+                            )
+                        current_msgs.append(msg)
+
+                    new_msgs = current_msgs
+                    if has_new_deal:
+                        break
+
+                    if attempt < attempts:
+                        self.__logger.debug(
+                            f'Не удалось найти сделку для нового чата {chat_id}. Попытка {attempt}/{attempts}'
+                        )
+                        time.sleep(delay)
+
+                if not has_new_deal:
+                    self.__logger.error(f'Не удалось найти сделку для нового чата, id: {chat_id}')
+
+                events = []
+                for msg in reversed(new_msgs):
+                    events.extend(self.parse_message_event(msg, chat))
+                if events:
+                    self.__async_events_queue.put(events)
+
+                if msg_list and msg_list.messages:
+                    latest_msg = msg_list.messages[0]
+                    self._set_last_message_checkpoint(chat_id, latest_msg.id, latest_msg.created_at)
+                elif chat.last_message:
+                    self._set_last_message_checkpoint(chat_id, chat.last_message.id, chat.last_message.created_at)
+            except Exception as e:
+                self.__logger.warning(f'Ошибка фонового поиска сделки для чата {chat_id}: {e}')
+                self.__logger.debug(f"Traceback ошибки в worker:\n{traceback.format_exc()}")
+            finally:
+                self._finish_pending_new_chat(chat_id)
+                self.__deal_search_queue.task_done()
+
+    def _drain_async_events(self) -> list:
+        events = []
+        while True:
+            try:
+                events_batch = self.__async_events_queue.get_nowait()
+                events.extend(events_batch)
+            except queue.Empty:
+                break
+        return events
+
 
     def parse_chat_event(
         self, chat: Chat
@@ -67,8 +192,25 @@ class EventListener:
                 events.append(event)
         return events
 
+    def _bootstrap_checkpoints_from_chats(self, chats: ChatList):
+        """
+        Заполняет checkpoints по last_message из get_chats на первом проходе.
+        Это позволяет не делать лишний догон всех чатов сразу после инициализации.
+        """
+        filled = 0
+        for chat in chats.chats:
+            if not chat or not chat.last_message:
+                continue
+            self._set_last_message_checkpoint(
+                chat.id,
+                chat.last_message.id,
+                chat.last_message.created_at
+            )
+            filled += 1
+        self.__logger.debug(f"Инициализировано checkpoint'ов чатов: {filled}")
+
     def parse_message_event(
-        self, message: ChatMessage, chat: Chat
+            self, message: ChatMessage, chat: Chat
     ) -> list[
         NewMessageEvent
         | NewDealEvent
@@ -79,15 +221,16 @@ class EventListener:
         | DealHasProblemEvent
         | DealProblemResolvedEvent
         | DealStatusChangedEvent
+        | DealConfirmedAutomatically
     ]:
         """
         Получает ивент с сообщения.
-        
+
         :param message: Объект сообщения.
         :type message: `playerokapi.types.ChatMessage`
 
         :return: Массив ивентов.
-        :rtype: `list` of 
+        :rtype: `list` of
         `playerokapi.listener.events.ChatInitializedEvent` \
         _or_ `playerokapi.listener.events.NewMessageEvent` \
         _or_ `playerokapi.listener.events.NewDealEvent` \
@@ -126,6 +269,10 @@ class EventListener:
                 DealProblemResolvedEvent(message.deal, chat),
                 # DealStatusChangedEvent(message.deal, chat),
             ]
+        elif message.text == "{{DEAL_CONFIRMED_AUTOMATICALLY}}" and message.deal is not None:
+            return [
+                DealConfirmedAutomatically(message.deal, chat),
+            ]
 
         return [NewMessageEvent(message, chat)]
 
@@ -140,16 +287,17 @@ class EventListener:
         | DealRolledBackEvent
         | DealHasProblemEvent
         | DealProblemResolvedEvent
-        | DealStatusChangedEvent,
+        | DealStatusChangedEvent
+        | DealConfirmedAutomatically
     ]:
         """
         Получает новые ивенты сообщений из чатов.
-        
+
         :param new_chats: Чаты для проверки.
         :type new_chats: `playerokapi.types.ChatList`
 
         :return: Массив новых ивентов.
-        :rtype: `list` of 
+        :rtype: `list` of
         `playerokapi.listener.events.ChatInitializedEvent` \
         _or_ `playerokapi.listener.events.NewMessageEvent` \
         _or_ `playerokapi.listener.events.NewDealEvent` \
@@ -163,7 +311,7 @@ class EventListener:
         """
 
         events = []
-        
+
         for new_chat in new_chats.chats:
             try:
                 if not new_chat.last_message:
@@ -172,11 +320,17 @@ class EventListener:
 
                 # Получаем ID последнего обработанного сообщения для этого чата
                 last_msg = new_chat.last_message
-                last_known_id = self.__last_message_ids.get(new_chat.id)
+                last_known_id = self._get_last_message_id(new_chat.id)
+                # если чат не изменился
+                if last_msg.id == last_known_id:
+                    continue
+
+                if self._is_pending_new_chat(new_chat.id):
+                    # Для новых чатов с фоновой ретрай-обработкой пропускаем цикл.
+                    continue
 
                 # Если это новый чат (нет сохраненного ID)
                 if not last_known_id:
-                    time.sleep(3)
                     # Получаем всю историю сообщений для нового чата
 
                     msg_list = self.account.get_chat_messages(new_chat.id, 24)
@@ -197,40 +351,23 @@ class EventListener:
                         new_msgs.append(msg)
 
                     if not is_old_chat and not has_new_deal:
-                        # тут короче супер костыль - мы поймали абсолютно новый чат, но без новой сделки,
-                        # а такого быть не может, пробуем найти новую сделку
-                        self.__logger.info(f'Поймал абсолютно новый чат, но в нём нету сделки, произвожу повторный поиск ')
-                        time.sleep(4)
-
-                        attempts = 3
-                        delay = 4
-                        for attempt in range(attempts):
-
-                            msg_list = self.account.get_chat_messages(new_chat.id, 24)
-
-                            new_msgs = []
-
-                            for msg in msg_list.messages:
-                                if msg.text == "{{ITEM_PAID}}" and msg.deal is not None:
-                                    has_new_deal = True
-                                    self.__logger.info(f'Для нахождения сделки {msg.deal.id} пришлось произвести повторный поиск'
-                                                       f', задержка слушателя - {4 + attempt * (delay + 1)} секунд')
-                                new_msgs.append(msg)
-                            if has_new_deal:
-
-                                break
-
-                            time.sleep(delay)
-                        else:
-                            self.__logger.error(f'Не удалось найти сделку для нового чата, id: {new_chat.id}')
+                        # Переносим ретраи в фон, чтобы не блокировать основной polling-цикл.
+                        if self._enqueue_new_chat_search(new_chat):
+                            self.__logger.info(
+                                f'Поймал абсолютно новый чат без сделки, отправляю в фоновый ретрай: {new_chat.id}'
+                            )
+                        continue
 
                     # Обрабатываем в хронологическом порядке (от старых к новым)
                     for msg in reversed(new_msgs):
                         events.extend(self.parse_message_event(msg, new_chat))
 
                     # Сохраняем ID и время для будущих проверок
-                    self.__last_message_ids[new_chat.id] = new_chat.last_message.id
-                    self.__last_message_times[new_chat.id] = new_chat.last_message.created_at
+                    self._set_last_message_checkpoint(
+                        new_chat.id,
+                        new_chat.last_message.id,
+                        new_chat.last_message.created_at
+                    )
 
                     continue
 
@@ -249,7 +386,7 @@ class EventListener:
                 new_msgs = []
 
                 # Получаем время последнего обработанного сообщения для дополнительной фильтрации
-                last_known_time = self.__last_message_times.get(new_chat.id)
+                last_known_time = self._get_last_message_time(new_chat.id)
 
                 for msg in msg_list.messages:
                     # Основная проверка: по сохраненному ID
@@ -275,8 +412,7 @@ class EventListener:
                 # Обновляем ID и время последнего обработанного сообщения
                 if new_msgs:
                     latest_msg = new_msgs[0]
-                    self.__last_message_ids[new_chat.id] = latest_msg.id
-                    self.__last_message_times[new_chat.id] = latest_msg.created_at
+                    self._set_last_message_checkpoint(new_chat.id, latest_msg.id, latest_msg.created_at)
 
                     self.__logger.debug(
                         f"Чат {new_chat.id}: обработано {len(new_msgs)} сообщений, "
@@ -302,12 +438,13 @@ class EventListener:
         | DealRolledBackEvent
         | DealHasProblemEvent
         | DealProblemResolvedEvent
+        | DealConfirmedAutomatically
         | DealStatusChangedEvent,
         None,
         None,
     ]:
         """
-        "Слушает" события в чатах. 
+        "Слушает" события в чатах.
         Бесконечно отправляет запросы, узнавая новые события из чатов.
 
         :param requests_delay: Периодичность отправления запросов (в секундах).
@@ -332,12 +469,13 @@ class EventListener:
         # self.__logger.info(f"Слушатель событий запущен. Время старта: {self.__startup_time}")
         # self.__logger.info(f"При первом проходе события будут сохранены, но не обработаны")
 
-        chats: ChatList = None
+        init_chats: ChatList | None = None
         last_errors_count = 0
         try:
             # Устанавливаем время запуска текущей сессии
             self.__startup_time = datetime.now(timezone.utc).isoformat()
             self.__logger.info(f'Время запуска слушателя событий: {self.__startup_time} ')
+            self._start_workers()
             while True:
                 try:
 
@@ -350,22 +488,27 @@ class EventListener:
                         time.sleep(error_delay)
 
                     next_chats = self.account.get_chats(24)
-                    if not chats:
+                    if not init_chats:
                         # Первый запуск - инициализируем чаты
                         events = self.initialize_chats(next_chats)
+                        self._bootstrap_checkpoints_from_chats(next_chats)
                         for event in events:
                             yield event
                         # self.__logger.info(
                         #     f"Инициализация завершена. Обнаружено {len(next_chats.chats)} чатов. "
                         #     f"Далее будут обрабатываться только новые сообщения."
                         # )
-                    elif chats != next_chats:
+                        init_chats = next_chats
+                    else:
                         # Последующие запуски - проверяем изменения
                         events = self.get_message_events(next_chats)
                         for event in events:
                             yield event
 
-                    chats = next_chats
+                    async_events = self._drain_async_events()
+                    for event in async_events:
+                        yield event
+
                     last_errors_count = 0
                 except Exception as e:
                     self.__logger.warning(f"Ошибка при получении ивентов: {e}\n(не критично, если возникает редко)")
@@ -374,10 +517,12 @@ class EventListener:
                     last_errors_count += 1
 
                 time.sleep(requests_delay)
-        
+
         except KeyboardInterrupt:
             self.__logger.info("Получен сигнал остановки")
             raise
         except Exception as e:
             self.__logger.error(f"Критическая ошибка в listen: {e}")
             raise
+        finally:
+            self._stop_workers()

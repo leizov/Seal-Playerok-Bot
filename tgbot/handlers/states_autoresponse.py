@@ -17,6 +17,8 @@ MESSAGE_TYPE_MAPPING = {
     "greeting": "first_message",
     "confirmation_seller": "deal_sent",
     "confirmation_buyer": "deal_confirmed",
+    "deal_has_problem": "deal_has_problem",
+    "deal_problem_resolved": "deal_problem_resolved",
     "review": "new_review_response"
 }
 
@@ -116,6 +118,62 @@ async def handler_waiting_for_confirmation_buyer_text(message: types.Message, st
             message=message,
             text=str(e),
             reply_markup=templ.back_kb(calls.MessagesNavigation(to="confirmation_buyer").pack())
+        )
+
+
+@router.message(states.AutoResponseStates.waiting_for_deal_has_problem_text, F.text)
+async def handler_waiting_for_deal_has_problem_text(message: types.Message, state: FSMContext):
+    try:
+        await state.set_state(None)
+
+        if len(message.text.strip()) < 1:
+            raise Exception("❌ Текст не может быть пустым")
+
+        if len(message.text) > 2000:
+            raise Exception("❌ Текст слишком длинный (максимум 2000 символов)")
+
+        save_auto_response_text("deal_has_problem", message.text)
+
+        await throw_float_message(
+            state=state,
+            message=message,
+            text="✅ <b>Сообщение при проблеме в сделке</b> успешно обновлено!",
+            reply_markup=templ.back_kb(calls.MessagesNavigation(to="deal_has_problem").pack())
+        )
+    except Exception as e:
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=str(e),
+            reply_markup=templ.back_kb(calls.MessagesNavigation(to="deal_has_problem").pack())
+        )
+
+
+@router.message(states.AutoResponseStates.waiting_for_deal_problem_resolved_text, F.text)
+async def handler_waiting_for_deal_problem_resolved_text(message: types.Message, state: FSMContext):
+    try:
+        await state.set_state(None)
+
+        if len(message.text.strip()) < 1:
+            raise Exception("❌ Текст не может быть пустым")
+
+        if len(message.text) > 2000:
+            raise Exception("❌ Текст слишком длинный (максимум 2000 символов)")
+
+        save_auto_response_text("deal_problem_resolved", message.text)
+
+        await throw_float_message(
+            state=state,
+            message=message,
+            text="✅ <b>Сообщение после решения проблемы</b> успешно обновлено!",
+            reply_markup=templ.back_kb(calls.MessagesNavigation(to="deal_problem_resolved").pack())
+        )
+    except Exception as e:
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=str(e),
+            reply_markup=templ.back_kb(calls.MessagesNavigation(to="deal_problem_resolved").pack())
         )
 
 

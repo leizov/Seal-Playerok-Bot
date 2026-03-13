@@ -20,11 +20,11 @@ class DeleteExcludedRestoreItem(CallbackData, prefix="delexre"):
 
 
 class AutoResponseToggle(CallbackData, prefix="artog"):
-    message_type: str  # greeting, confirmation_seller, confirmation_buyer, review
+    message_type: str  # greeting, confirmation_seller, confirmation_buyer, deal_has_problem, deal_problem_resolved, review
 
 
 class AutoResponseEdit(CallbackData, prefix="aredit"):
-    message_type: str  # greeting, confirmation_seller, confirmation_buyer, review
+    message_type: str  # greeting, confirmation_seller, confirmation_buyer, deal_has_problem, deal_problem_resolved, review
 
 
 class LogsAction(CallbackData, prefix="logact"):

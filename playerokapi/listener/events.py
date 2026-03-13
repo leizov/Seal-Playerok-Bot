@@ -159,6 +159,14 @@ class DealProblemResolvedEvent(BaseEvent):
         self.deal: types.ItemDeal = deal_obj
         """ Объект сделки. """
 
+class DealConfirmedAutomatically(BaseEvent):
+    def __init__(self, deal_obj: types.ItemDeal, chat_obj: types.Chat):
+        super(DealConfirmedAutomatically, self).__init__(
+            EventTypes.DEAL_CONFIRMED_AUTOMATICALLY, chat_obj
+        )
+        self.deal: types.ItemDeal = deal_obj
+        """ Объект сделки. """
+
 
 class DealStatusChangedEvent(BaseEvent):
     """

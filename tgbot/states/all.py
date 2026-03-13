@@ -55,6 +55,8 @@ class AutoResponseStates(StatesGroup):
     waiting_for_greeting_cooldown = State()  # Ожидание ввода интервала приветствий (дней)
     waiting_for_confirmation_seller_text = State()
     waiting_for_confirmation_buyer_text = State()
+    waiting_for_deal_has_problem_text = State()
+    waiting_for_deal_problem_resolved_text = State()
     waiting_for_review_text = State()
 
 

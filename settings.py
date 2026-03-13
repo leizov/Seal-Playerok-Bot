@@ -150,6 +150,18 @@ MESSAGES = SettingsFile(
                 "📦 Заказ был возвращён. Надеюсь эта сделка не принесла вам неудобств. Жду вас в своём магазине в следующий раз, удачи!"
             ]
         },
+        "deal_has_problem": {
+            "enabled": False,
+            "text": [
+                "Пожалуйста, опишите детали своей претензии в чате, чтобы мы быстрее её решили."
+            ]
+        },
+        "deal_problem_resolved": {
+            "enabled": False,
+            "text": [
+                "Если остались вопросы, напишите в чат."
+            ]
+        },
         "new_review_response": {
             "enabled": False,
             "text": [
@@ -263,7 +275,7 @@ def restore_config(config: dict, default: dict):
 
     config = check_default(config, default)
     return config
-    
+
 
 def get_json(path: str, default: dict, need_restore: bool = True) -> dict:
     """
@@ -298,7 +310,7 @@ def get_json(path: str, default: dict, need_restore: bool = True) -> dict:
             json.dump(config, f, indent=4, ensure_ascii=False)
     finally:
         return config
-    
+
 
 def set_json(path: str, new: dict):
     """
@@ -313,10 +325,10 @@ def set_json(path: str, new: dict):
     import stat
     from logging import getLogger
     logger = getLogger("settings")
-    
+
     try:
         logger.debug(f"[set_json] Начало записи в {path}")
-        
+
         if os.path.exists(path):
             if not os.access(path, os.W_OK):
                 logger.warning(f"[set_json] Файл {path} недоступен для записи, пытаюсь исправить права")
@@ -330,30 +342,30 @@ def set_json(path: str, new: dict):
                         f"Нет прав на запись в {path}.\n"
                         f"Выполните: sudo chown -R $USER:$USER {dir_path}"
                     )
-        
+
         logger.debug(f"[set_json] Данные для записи: {json.dumps(new, ensure_ascii=False)[:200]}...")
-        
+
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(new, f, indent=4, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        
+
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-        
+
         logger.debug(f"[set_json] Запись завершена, файл синхронизирован")
-        
+
         with open(path, 'r', encoding='utf-8') as f:
             verify = json.load(f)
-        
+
         logger.debug(f"[set_json] Проверка: данные прочитаны обратно из файла")
-        
+
         if verify != new:
             logger.error(f"[set_json] ОШИБКА! Данные в файле не совпадают с записанными!")
             logger.error(f"[set_json] Ожидалось: {json.dumps(new, ensure_ascii=False)[:200]}...")
             logger.error(f"[set_json] Получено: {json.dumps(verify, ensure_ascii=False)[:200]}...")
         else:
             logger.debug(f"[set_json] Проверка пройдена: данные совпадают")
-            
+
     except PermissionError as e:
         logger.error(f"[set_json] ОШИБКА ПРАВ ДОСТУПА: {e}")
         raise
@@ -366,10 +378,10 @@ def set_json(path: str, new: dict):
 
 
 class Settings:
-    
+
     @staticmethod
     def get(name: str, data: list[SettingsFile] = DATA) -> dict | None:
-        try: 
+        try:
             file = [file for file in data if file.name == name][0]
             return get_json(file.path, file.default, file.need_restore)
         except Exception as e:
@@ -379,7 +391,7 @@ class Settings:
 
     @staticmethod
     def set(name: str, new: list | dict, data: list[SettingsFile] = DATA):
-        try: 
+        try:
             file = [file for file in data if file.name == name][0]
             set_json(file.path, new)
             from logging import getLogger

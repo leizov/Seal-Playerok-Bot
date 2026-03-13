@@ -1,4 +1,5 @@
 bs4==0.0.2
+websocket-client==1.8.0
 curl-cffi>=0.13.0
 requests==2.32.3
 Pillow==10.2.0

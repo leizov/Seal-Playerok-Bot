@@ -280,6 +280,8 @@ MESSAGE_TYPE_MAPPING = {
     "greeting": "first_message",
     "confirmation_seller": "deal_sent",
     "confirmation_buyer": "deal_confirmed",
+    "deal_has_problem": "deal_has_problem",
+    "deal_problem_resolved": "deal_problem_resolved",
     "review": "new_review_response"
 }
 
@@ -288,6 +290,8 @@ MESSAGE_TYPE_NAVIGATION = {
     "greeting": "greeting",
     "confirmation_seller": "confirmation_seller",
     "confirmation_buyer": "confirmation_buyer",
+    "deal_has_problem": "deal_has_problem",
+    "deal_problem_resolved": "deal_problem_resolved",
     "review": "review"
 }
 
@@ -336,6 +340,8 @@ async def callback_auto_response_edit(callback: CallbackQuery, callback_data: ca
             "greeting": states.AutoResponseStates.waiting_for_greeting_text,
             "confirmation_seller": states.AutoResponseStates.waiting_for_confirmation_seller_text,
             "confirmation_buyer": states.AutoResponseStates.waiting_for_confirmation_buyer_text,
+            "deal_has_problem": states.AutoResponseStates.waiting_for_deal_has_problem_text,
+            "deal_problem_resolved": states.AutoResponseStates.waiting_for_deal_problem_resolved_text,
             "review": states.AutoResponseStates.waiting_for_review_text
         }
         
@@ -346,6 +352,8 @@ async def callback_auto_response_edit(callback: CallbackQuery, callback_data: ca
             "greeting": "приветственного сообщения",
             "confirmation_seller": "сообщения при подтверждении с нашей стороны",
             "confirmation_buyer": "сообщения при подтверждении покупателем",
+            "deal_has_problem": "сообщения при проблеме в сделке",
+            "deal_problem_resolved": "сообщения после решения проблемы",
             "review": "сообщения при получении отзыва"
         }
         
