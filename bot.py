@@ -489,8 +489,20 @@ def check_and_configure_config():
         request_timeout = 20
         backoff = (1, 2)
         last_reason = "api_error"
+        max_wait_time = max_attempts * request_timeout + sum(backoff)
+
+        print(f"\n{Fore.CYAN}Проверяю токен Telegram: начинаю подключение к API, подождите...")
+        print(
+            f"{Fore.CYAN}Это может занять до {max_wait_time} сек при нестабильной сети."
+            f" Если ответ долго не приходит, будет автоматический повтор."
+        )
 
         for attempt in range(1, max_attempts + 1):
+            print(
+                f"{Fore.WHITE}  Попытка {attempt}/{max_attempts}: проверка токена...",
+                end=" ",
+                flush=True
+            )
             ok, username, reason, retry_after = asyncio.run(
                 _fetch_tg_bot_data(
                     token=config["telegram"]["api"]["token"],
@@ -498,12 +510,15 @@ def check_and_configure_config():
                 )
             )
             if ok:
+                print(f"{Fore.GREEN}OK")
                 return True, username, None
 
             last_reason = reason or "api_error"
             if last_reason == "invalid_token":
+                print(f"{Fore.LIGHTRED_EX}неверный токен")
                 return False, None, "invalid_token"
 
+            print(f"{Fore.YELLOW}ошибка")
             if attempt < max_attempts:
                 if last_reason == "rate_limit":
                     delay = retry_after if retry_after is not None else 1
