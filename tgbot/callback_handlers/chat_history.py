@@ -1,16 +1,48 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram import Router
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from datetime import datetime
 import html
 
 from .. import callback_datas as calls
 from ..helpful import get_playerok_bot
-from ..templates.main import destroy_kb
 from ..utils.message_formatter import format_system_message
-from playerokapi.types import Chat, ChatMessage
+from playerokapi.types import ChatMessage
 
 router = Router()
+
+
+def _resolve_recipient_username(messages: list[ChatMessage], seller_id: str | None) -> str | None:
+    seller_id_str = str(seller_id) if seller_id is not None else None
+    for msg in messages:
+        user = getattr(msg, "user", None)
+        if not user:
+            continue
+        username = getattr(user, "username", None)
+        user_id = getattr(user, "id", None)
+        if not username:
+            continue
+        if seller_id_str is not None and str(user_id) == seller_id_str:
+            continue
+        if username in ("Playerok.com", "Поддержка"):
+            continue
+        return username
+    return None
+
+
+def _chat_history_kb(chat_id: str, username: str | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if username:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="💬 Написать",
+                    callback_data=calls.RememberUsername(name=username, do="send_mess").pack(),
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="🔗 Открыть чат", url=f"https://playerok.com/chats/{chat_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.callback_query(calls.ChatHistory.filter())
@@ -122,10 +154,29 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
             total_length += len(line)
         
         history_text += "".join(messages_text)
+
+        recipient_username = _resolve_recipient_username(list(msg_list.messages), playerok_bot.account.id)
+        if not recipient_username:
+            try:
+                chat_obj = playerok_bot.account.get_chat(callback_data.chat_id)
+                seller_id_str = str(playerok_bot.account.id) if playerok_bot.account.id is not None else None
+                for user in chat_obj.users:
+                    username = getattr(user, "username", None)
+                    user_id = getattr(user, "id", None)
+                    if not username:
+                        continue
+                    if seller_id_str is not None and str(user_id) == seller_id_str:
+                        continue
+                    if username in ("Playerok.com", "Поддержка"):
+                        continue
+                    recipient_username = username
+                    break
+            except Exception:
+                pass
         
         await callback.message.edit_text(
             history_text,
-            reply_markup=destroy_kb(),
+            reply_markup=_chat_history_kb(callback_data.chat_id, recipient_username),
             disable_web_page_preview=True,
             parse_mode="HTML"
         )

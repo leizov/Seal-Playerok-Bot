@@ -99,21 +99,40 @@ del python-3.12.7-amd64.exe
 echo   🔄 Обновляю PATH...
 call refreshenv
 
-:: Проверяем установку
-python --version >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo   ❌ Python не установился или не добавлен в PATH
-    echo   💡 Пожалуйста, установите Python 3.12 вручную:
-    echo      https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe
-    echo.
-    echo   ⚠️  При установке ОБЯЗАТЕЛЬНО отметьте:
-    echo      [✓] Add Python to PATH
-    pause
-    exit /b 1
+:: Проверяем установку и жёстко выбираем Python 3.12 для venv
+py -3.12 --version >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    set "PYTHON_CMD=py -3.12"
+    goto :python_installed_ok
 )
 
+python3.12 --version >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    set "PYTHON_CMD=python3.12"
+    goto :python_installed_ok
+)
+
+python --version >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    for /f "tokens=2" %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
+    echo !PY_VER! | findstr /r "^3\.12" >nul
+    if %ERRORLEVEL% equ 0 (
+        set "PYTHON_CMD=python"
+        goto :python_installed_ok
+    )
+)
+
+echo   ❌ Python 3.12 не установился или не добавлен в PATH
+echo   💡 Пожалуйста, установите Python 3.12 вручную:
+echo      https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe
+echo.
+echo   ⚠️  При установке ОБЯЗАТЕЛЬНО отметьте:
+echo      [✓] Add Python to PATH
+pause
+exit /b 1
+
+:python_installed_ok
 echo   ✅ Python 3.12 успешно установлен!
-set "PYTHON_CMD=python"
 goto :python_found
 
 :python_found
@@ -136,6 +155,18 @@ if exist "%~dp0venv" (
 %PYTHON_CMD% -m venv "%~dp0venv"
 if %ERRORLEVEL% neq 0 (
     echo   ❌ Не удалось создать виртуальное окружение!
+    pause
+    exit /b 1
+)
+
+:: Контроль: venv должен быть именно на Python 3.12
+for /f "tokens=2" %%v in ('"%~dp0venv\Scripts\python.exe" --version 2^>^&1') do set "VENV_PY_VER=%%v"
+echo !VENV_PY_VER! | findstr /r "^3\.12" >nul
+if %ERRORLEVEL% neq 0 (
+    echo   ❌ Создано окружение на Python !VENV_PY_VER!, а требуется 3.12.x
+    echo   🗑️  Удаляю созданное несовместимое окружение...
+    rmdir /s /q "%~dp0venv" 2>nul
+    echo   💡 Удалите другие версии из PATH или запускайте через py -3.12
     pause
     exit /b 1
 )

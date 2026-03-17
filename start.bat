@@ -9,6 +9,7 @@ set PYTHONUTF8=1
 
 set "VENV_PYTHON=venv\Scripts\python.exe"
 
+
 if "%VENV_PYTHON%"=="" (
     echo.
     echo   ERROR: Virtual environment not found!

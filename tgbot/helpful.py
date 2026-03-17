@@ -35,7 +35,8 @@ async def do_auth(message: Message, state: FSMContext) -> Message | None:
 async def throw_float_message(state: FSMContext, message: Message, text: str, 
                               reply_markup: InlineKeyboardMarkup = None,
                               callback: CallbackQuery = None,
-                              send: bool = False) -> Message | None:
+                              send: bool = False,
+                              delete_user_message: bool = True) -> Message | None:
     """
     Изменяет плавающее сообщение (изменяет текст акцентированного сообщения) или родительское сообщение бота, переданное в аргумент `message`.\n
     Если не удалось найти акцентированное сообщение, или это сообщение - команда, отправит новое акцентированное сообщение.
@@ -74,7 +75,7 @@ async def throw_float_message(state: FSMContext, message: Message, text: str,
 
             if accent_message_id is not None and not new_mess_cond:
                 try:
-                    if message.from_user.id != bot.id: 
+                    if message.from_user.id != bot.id and delete_user_message:
                         await bot.delete_message(message.chat.id, message.message_id)
                     mess = await bot.edit_message_text(
                         text=text,

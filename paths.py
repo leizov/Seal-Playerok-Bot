@@ -17,6 +17,7 @@ BOT_SETTINGS_DIR = os.path.join(ROOT_DIR, "bot_settings")
 
 # Директория данных бота
 BOT_DATA_DIR = os.path.join(ROOT_DIR, "bot_data")
+ERROR_STATS_DIR = os.path.join(BOT_DATA_DIR, "error_stats")
 
 # Директория логов
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
@@ -73,6 +74,7 @@ def ensure_dirs():
     dirs = [
         BOT_SETTINGS_DIR,
         BOT_DATA_DIR,
+        ERROR_STATS_DIR,
         LOGS_DIR,
         PLUGINS_DIR,
         STORAGE_DIR,

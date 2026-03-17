@@ -86,7 +86,7 @@ async def callback_remember_username(callback: CallbackQuery, callback_data: cal
     username = callback_data.name
     await state.update_data(username=username)
     await state.set_state(states.ActionsStates.waiting_for_message_text)
-    await throw_float_message(
+    prompt_message = await throw_float_message(
         state=state, 
         message=callback.message, 
         text=templ.do_action_text(f"💬 Введите <b>сообщение</b> для отправки <b>{username}</b> ↓"), 
@@ -94,6 +94,8 @@ async def callback_remember_username(callback: CallbackQuery, callback_data: cal
         callback=callback,
         send=True
     )
+    if prompt_message:
+        await state.update_data(accent_message_id=prompt_message.message_id, write_prompt_message_id=prompt_message.message_id)
 
 
 @router.callback_query(calls.RememberDealId.filter())

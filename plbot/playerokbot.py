@@ -71,22 +71,37 @@ class PlayerokBot:
 
         self.__saved_chats: dict[str, Chat] = {}
 
-    @staticmethod
-    def _deal_amount(deal: types.ItemDeal) -> float:
+    def _deal_amount(self, deal: types.ItemDeal) -> float:
         """
         Возвращает сумму сделки по правилу:
         transaction.value -> item.price -> 0.0
         """
-        try:
-            if getattr(deal, "transaction", None):
-                val = getattr(deal.transaction, "value", None)
-                if val is not None:
-                    return round(float(val), 2)
-        except Exception:
-            pass
+        full_deal = deal
+        deal_id = getattr(deal, "id", None)
+
+        # Приоритетно пытаемся получить "полную" сделку с transaction.value.
+        for attempt in range(1, 6):
+            try:
+                if self.is_connected and self.account is not None and deal_id:
+                    fetched_deal = self.account.get_deal(deal_id)
+                    if fetched_deal is not None:
+                        full_deal = fetched_deal
+
+                if getattr(full_deal, "transaction", None):
+                    val = getattr(full_deal.transaction, "value", None)
+                    if val is not None:
+                        return round(float(val), 2)
+            except Exception as e:
+                self.logger.warning(
+                    f"Не удалось получить transaction.value для сделки {deal_id} "
+                    f"(попытка {attempt}/5): {e}"
+                )
+
+            if attempt < 5:
+                time.sleep(4)
 
         try:
-            price = getattr(getattr(deal, "item", None), "price", None)
+            price = getattr(getattr(full_deal, "item", None), "price", None)
             if price is not None:
                 return round(float(price), 2)
         except Exception:
@@ -1077,11 +1092,6 @@ class PlayerokBot:
             return
 
         self.log_new_deal(event.deal)
-        if not event.deal.transaction:
-            try:
-                event.deal = self.account.get_deal(event.deal.id)
-            except Exception:
-                pass
         record_new_deal(self._deal_amount(event.deal))
         if (
             self.config["playerok"]["tg_logging"]["enabled"]
@@ -1223,7 +1233,7 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'✅ Мы подтвердили заказ <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a> изменился',
+                        title=f'✅ Мы подтвердили заказ <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a>',
                         text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
                              f"<b>📦 Товар:</b> {event.deal.item.name}\n"
                              f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
@@ -1296,8 +1306,6 @@ class PlayerokBot:
         self.send_message(event.chat.id,
                           self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
-        if not event.deal.transaction:
-            event.deal = self.account.get_deal(event.deal.id)
         record_refund(self._deal_amount(event.deal))
 
 
@@ -1469,7 +1477,7 @@ class PlayerokBot:
         add_playerok_event_handler(EventTypes.DEAL_CONFIRMED, PlayerokBot._on_deal_confirmed, 0)
         add_playerok_event_handler(EventTypes.DEAL_ROLLED_BACK, PlayerokBot._on_deal_rolled_back, 0)
         add_playerok_event_handler(EventTypes.DEAL_PROBLEM_RESOLVED, PlayerokBot._on_deal_problem_resolved, 0)
-        add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_sent, 0)
+        add_playerok_event_handler(EventTypes.ITEM_SENT, PlayerokBot._on_item_sent, 0)
         add_playerok_event_handler(EventTypes.DEAL_CONFIRMED_AUTOMATICALLY, PlayerokBot._on_deal_confirmed_automatically, 0)
 
         self._start_listener()

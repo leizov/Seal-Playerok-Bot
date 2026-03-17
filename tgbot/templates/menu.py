@@ -50,6 +50,7 @@ def menu_kb(page: int = 0):
             [InlineKeyboardButton(text="⌨️ Команды", callback_data=calls.CustomCommandsPagination(page=0).pack())],
             [InlineKeyboardButton(text="👥 Пользователи", callback_data=calls.SettingsNavigation(to="users").pack())],
             [InlineKeyboardButton(text="📋 Логи", callback_data=calls.LogsNavigation(to="main").pack())],
+            [InlineKeyboardButton(text="🚨 Ошибки API", callback_data=calls.ErrorStatsNavigation(to="main").pack())],
             # [InlineKeyboardButton(text="👨‍💻 Настройки разработчика", callback_data=calls.SettingsNavigation(to="developer").pack())],
         ]
     

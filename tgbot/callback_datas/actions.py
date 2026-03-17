@@ -67,3 +67,7 @@ class DeleteIncludedRaiseItem(CallbackData, prefix="delinra"):
 
 class DeleteExcludedRaiseItem(CallbackData, prefix="delexra"):
     index: int
+
+
+class ErrorStatsDay(CallbackData, prefix="errday"):
+    day: str

@@ -8,6 +8,7 @@ from .stats import *
 from .logs import *
 from .messages import *
 from .review_monitor import *
+from .error_stats import *
 
 from .settings import *
 from .settings_account import *

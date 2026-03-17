@@ -447,37 +447,85 @@ def check_and_configure_config():
         pattern = r'^\d{7,12}:[A-Za-z0-9_-]{35}$'
         return bool(re.match(pattern, token))
 
-    def is_tg_bot_exists() -> tuple[bool, str | None]:
-        """Проверяет Telegram бота. Возвращает (успех, username)."""
-        max_retries = 3
-        base_delay = 1
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = requests.get(
-                    f"https://api.telegram.org/bot{config['telegram']['api']['token']}/getMe",
-                    timeout=10
+    async def _fetch_tg_bot_data(
+            token: str,
+            request_timeout: int
+    ) -> tuple[bool, str | None, str | None, int | None]:
+        """Проверяет токен Telegram через aiogram. Возвращает (ok, username, reason, retry_after)."""
+        from aiogram import Bot
+        from aiogram.exceptions import (
+            TelegramAPIError,
+            TelegramBadRequest,
+            TelegramNetworkError,
+            TelegramNotFound,
+            TelegramRetryAfter,
+            TelegramServerError,
+            TelegramUnauthorizedError,
+        )
+
+        bot = Bot(token=token)
+        try:
+            me = await bot.get_me(request_timeout=request_timeout)
+            if me and me.is_bot:
+                return True, me.username or "", None, None
+            return False, None, "api_error", None
+        except (TelegramUnauthorizedError, TelegramBadRequest, TelegramNotFound):
+            return False, None, "invalid_token", None
+        except TelegramRetryAfter as exc:
+            retry_after = min(int(getattr(exc, "retry_after", 1)), 5)
+            return False, None, "rate_limit", retry_after
+        except (TelegramNetworkError, TelegramServerError, asyncio.TimeoutError, TimeoutError):
+            return False, None, "network", None
+        except TelegramAPIError:
+            return False, None, "api_error", None
+        except Exception:
+            return False, None, "api_error", None
+        finally:
+            await bot.session.close()
+
+    def is_tg_bot_exists() -> tuple[bool, str | None, str | None]:
+        """Проверяет Telegram бота. Возвращает (успех, username, reason)."""
+        max_attempts = 3
+        request_timeout = 20
+        backoff = (1, 2)
+        last_reason = "api_error"
+
+        for attempt in range(1, max_attempts + 1):
+            ok, username, reason, retry_after = asyncio.run(
+                _fetch_tg_bot_data(
+                    token=config["telegram"]["api"]["token"],
+                    request_timeout=request_timeout
                 )
-                data = response.json()
+            )
+            if ok:
+                return True, username, None
 
-                if data.get("ok", False) is True and data.get("result", {}).get("is_bot", False) is True:
-                    username = data.get("result", {}).get("username", "")
-                    return True, username
+            last_reason = reason or "api_error"
+            if last_reason == "invalid_token":
+                return False, None, "invalid_token"
 
-                error_msg = data.get('description', 'Неизвестная ошибка')
-                if attempt < max_retries:
-                    print(f"{Fore.YELLOW}! Ошибка проверки токена: {error_msg}. Повтор...")
+            if attempt < max_attempts:
+                if last_reason == "rate_limit":
+                    delay = retry_after if retry_after is not None else 1
+                    print(
+                        f"{Fore.YELLOW}! Telegram временно ограничил запросы."
+                        f" Повтор через {delay} сек..."
+                    )
+                elif last_reason == "network":
+                    delay = backoff[min(attempt - 1, len(backoff) - 1)]
+                    print(
+                        f"{Fore.YELLOW}! Сетевая ошибка при проверке Telegram API."
+                        f" Повтор через {delay} сек..."
+                    )
+                else:
+                    delay = backoff[min(attempt - 1, len(backoff) - 1)]
+                    print(
+                        f"{Fore.YELLOW}! Временная ошибка Telegram API."
+                        f" Повтор через {delay} сек..."
+                    )
+                time.sleep(delay)
 
-            except requests.exceptions.RequestException as e:
-                if attempt < max_retries:
-                    print(f"{Fore.YELLOW}! Сетевая ошибка: {str(e)[:50]}. Повтор...")
-            except Exception as e:
-                if attempt < max_retries:
-                    print(f"{Fore.YELLOW}! Ошибка: {str(e)[:50]}. Повтор...")
-
-            if attempt < max_retries:
-                time.sleep(base_delay)
-
-        return False, None
+        return False, None, last_reason
 
     def is_password_valid(password: str) -> bool:
         if len(password) < 6 or len(password) > 64:
@@ -581,13 +629,32 @@ def check_and_configure_config():
         if is_tg_token_valid(token):
             # Проверяем бота сразу при вводе токена
             config["telegram"]["api"]["token"] = token
-            tg_ok, tg_username = is_tg_bot_exists()
+            tg_ok, tg_username, tg_error_reason = is_tg_bot_exists()
             if tg_ok:
                 sett.set("config", config)
                 print(f"\n{Fore.GREEN}Telegram бот подключен: {Fore.LIGHTCYAN_EX}@{tg_username}")
             else:
                 config["telegram"]["api"]["token"] = ""
-                print(f"\n{Fore.LIGHTRED_EX}Не удалось подключиться к боту. Проверьте токен и попробуйте снова.")
+                if tg_error_reason == "invalid_token":
+                    print(
+                        f"\n{Fore.LIGHTRED_EX}Токен Telegram недействителен"
+                        f" или отозван. Проверьте токен и попробуйте снова."
+                    )
+                elif tg_error_reason == "network":
+                    print(
+                        f"\n{Fore.LIGHTRED_EX}Не удалось проверить токен из-за сетевой ошибки"
+                        f" (доступ к Telegram API нестабилен). Попробуйте снова позже."
+                    )
+                elif tg_error_reason == "rate_limit":
+                    print(
+                        f"\n{Fore.LIGHTRED_EX}Telegram временно ограничил проверку токена."
+                        f" Подождите немного и повторите ввод."
+                    )
+                else:
+                    print(
+                        f"\n{Fore.LIGHTRED_EX}Не удалось проверить токен из-за ошибки Telegram API."
+                        f" Попробуйте снова."
+                    )
         else:
             print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный токен. Убедитесь, что он соответствует формату и попробуйте ещё раз.")
 
@@ -647,7 +714,7 @@ if __name__ == "__main__":
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║╚{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗       {Fore.LIGHTCYAN_EX}  ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.WHITE}╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝         {Fore.LIGHTCYAN_EX}║
 {Fore.LIGHTCYAN_EX}   ║                                                                             ║
-{Fore.LIGHTCYAN_EX}   ║              {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}                     ║
+{Fore.LIGHTCYAN_EX}   ║              {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}                      ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}  ║
 {Fore.LIGHTCYAN_EX}   ╚═════════════════════════════════════════════════════════════════════════════╝
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～{Fore.RESET}

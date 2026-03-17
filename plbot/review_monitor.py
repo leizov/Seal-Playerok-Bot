@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 # Импорт путей из центрального модуля
 import paths
+from .stats import record_review
 
 if TYPE_CHECKING:
     from playerokapi.account import Account
@@ -70,7 +71,8 @@ def add_deal_to_monitor(deal: ItemDeal, chat_id: str):
         "deal_id": deal.id,
         "user_username": deal.user.username,
         "item_name": deal.item.name,
-        "last_check": None
+        "last_check": None,
+        "review_recorded": False,
     }
     
     deals[str(deal.id)] = deal_data
@@ -143,6 +145,11 @@ async def check_reviews_task(account: Account, send_message_callback, msg_callba
                         logger.info(
                             f"Сделка {deal_id}: обнаружен отзыв от {deal.review.creator.username}"
                         )
+                        if not deal_data.get("review_recorded", False):
+                            record_review()
+                            deal_data["review_recorded"] = True
+                            deals[deal_id] = deal_data
+                            save_deals(deals)
                         
                         # Отправляем уведомление в Telegram (если включено)
                         if log_new_review_callback:

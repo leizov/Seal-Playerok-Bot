@@ -17,11 +17,13 @@ class Stats:
     month_started_at: datetime | None
     month_key: str
     sales_total_count: int
+    reviews_total_count: int
     refund_total_count: int
     sales_total_sum: float
     refund_total_sum: float
     raises_total_sum: float
     sales_month_count: int
+    reviews_month_count: int
     refund_month_count: int
     sales_month_sum: float
     refund_month_sum: float
@@ -33,11 +35,13 @@ _stats = Stats(
     month_started_at=None,
     month_key="",
     sales_total_count=0,
+    reviews_total_count=0,
     refund_total_count=0,
     sales_total_sum=0.0,
     refund_total_sum=0.0,
     raises_total_sum=0.0,
     sales_month_count=0,
+    reviews_month_count=0,
     refund_month_count=0,
     sales_month_sum=0.0,
     refund_month_sum=0.0,
@@ -74,6 +78,7 @@ def ensure_month_window():
     _stats.month_key = current_key
     _stats.month_started_at = datetime.now()
     _stats.sales_month_count = 0
+    _stats.reviews_month_count = 0
     _stats.refund_month_count = 0
     _stats.sales_month_sum = 0.0
     _stats.refund_month_sum = 0.0
@@ -94,6 +99,13 @@ def record_new_deal(amount: float):
     _stats.sales_month_count += 1
     _stats.sales_total_sum = round(_stats.sales_total_sum + val, 2)
     _stats.sales_month_sum = round(_stats.sales_month_sum + val, 2)
+    save_stats()
+
+
+def record_review():
+    ensure_month_window()
+    _stats.reviews_total_count += 1
+    _stats.reviews_month_count += 1
     save_stats()
 
 
@@ -127,11 +139,13 @@ def _from_legacy(data: dict[str, Any]) -> dict[str, Any]:
         "month_started_at": data.get("month_started_at"),
         "month_key": data.get("month_key", ""),
         "sales_total_count": int(data.get("sales_total_count", data.get("deals_completed", 0)) or 0),
+        "reviews_total_count": int(data.get("reviews_total_count", 0) or 0),
         "refund_total_count": int(data.get("refund_total_count", 0) or 0),
         "sales_total_sum": _normalize_amount(data.get("sales_total_sum", data.get("earned_money", 0.0))),
         "refund_total_sum": _normalize_amount(data.get("refund_total_sum", data.get("refunded_money", 0.0))),
         "raises_total_sum": _normalize_amount(data.get("raises_total_sum", 0.0)),
         "sales_month_count": int(data.get("sales_month_count", 0) or 0),
+        "reviews_month_count": int(data.get("reviews_month_count", 0) or 0),
         "refund_month_count": int(data.get("refund_month_count", 0) or 0),
         "sales_month_sum": _normalize_amount(data.get("sales_month_sum", 0.0)),
         "refund_month_sum": _normalize_amount(data.get("refund_month_sum", 0.0)),

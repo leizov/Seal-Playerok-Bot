@@ -55,9 +55,19 @@ class RequestError(Exception):
 
     def __init__(self, response: requests.Response):
         self.response = response
-        self.json = response.json() or None
-        self.error_code = self.json["errors"][0]["extensions"]["code"]
-        self.error_message = self.json["errors"][0]["message"]
+        self.json = response.json() or {}
+        errors = self.json.get("errors", []) if isinstance(self.json, dict) else []
+        first_error = errors[0] if errors and isinstance(errors[0], dict) else {}
+        extensions = first_error.get("extensions", {}) if isinstance(first_error, dict) else {}
+
+        raw_error_code = None
+        if isinstance(extensions, dict):
+            raw_error_code = extensions.get("code") or extensions.get("statusCode")
+        if raw_error_code is None and isinstance(first_error, dict):
+            raw_error_code = first_error.get("code")
+
+        self.error_code = str(raw_error_code or "UNKNOWN_GRAPHQL_ERROR")
+        self.error_message = str(first_error.get("message") if isinstance(first_error, dict) else "" or "Неизвестная GraphQL ошибка")
 
     def __str__(self):
         msg = (

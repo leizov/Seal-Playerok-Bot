@@ -5,8 +5,10 @@ from typing import Literal
 import json
 import random
 import time
+import email.utils
 import tempfile
 import shutil
+from datetime import datetime
 from curl_cffi.requests import Session as CurlSession, Response as CurlResponse, exceptions as curl_exceptions
 from curl_cffi import CurlMime
 from .misc import *
@@ -16,6 +18,10 @@ from .exceptions import *
 from .parser import *
 from .enums import *
 
+try:
+    from core.error_stats import record_playerok_request_error as _record_playerok_request_error
+except Exception:
+    _record_playerok_request_error = None
 
 
 def get_account() -> Account | None:
@@ -283,54 +289,300 @@ class Account:
             "Enable JavaScript and cookies to continue",
             "Checking your browser before accessing",
             "cf-browser-verification",
-            "Cloudflare Ray ID"
+            "Cloudflare Ray ID",
         ]
-        # Прогрессивные задержки
         max_delay = 3.0
+        max_attempts = max(1, int(self.request_max_retries))
+        session_refresh_attempts = {2, 4, 7}
+
+        timeout_exception_types = (
+            curl_exceptions.Timeout,
+            curl_exceptions.ConnectTimeout,
+            curl_exceptions.ReadTimeout,
+        )
+        retriable_network_exceptions = (
+            curl_exceptions.Timeout,
+            curl_exceptions.ConnectTimeout,
+            curl_exceptions.ReadTimeout,
+            curl_exceptions.ConnectionError,
+            curl_exceptions.ProxyError,
+            curl_exceptions.SSLError,
+            curl_exceptions.DNSError,
+            curl_exceptions.RequestException,
+            curl_exceptions.SessionClosed,
+        )
+
+        def _parse_retry_after(value: str | None) -> float | None:
+            if not value:
+                return None
+            raw = value.strip()
+            if not raw:
+                return None
+            if raw.isdigit():
+                return max(0.0, float(int(raw)))
+            try:
+                dt = email.utils.parsedate_to_datetime(raw)
+                if dt is None:
+                    return None
+                if dt.tzinfo is not None:
+                    now_ts = datetime.now(dt.tzinfo)
+                else:
+                    now_ts = datetime.now()
+                return max(0.0, (dt - now_ts).total_seconds())
+            except Exception:
+                return None
+
+        def _retry_delay(attempt: int, retry_after: str | None = None) -> float:
+            retry_after_seconds = _parse_retry_after(retry_after)
+            if retry_after_seconds is not None:
+                return min(30.0, max(0.5, retry_after_seconds))
+            return min(max_delay, float(attempt))
+
+        def _to_int(value: Any) -> int | None:
+            try:
+                return int(value) if value is not None else None
+            except Exception:
+                return None
+
+        def _record_error(
+            *,
+            kind: str,
+            error_text: str,
+            status_code: int | None = None,
+            error_code: str | None = None,
+            attempt: int,
+            retryable: bool,
+            retry_exhausted: bool,
+            session_recreated: bool,
+        ) -> None:
+            if _record_playerok_request_error is None:
+                return
+            _record_playerok_request_error(
+                kind=kind,
+                error_text=error_text,
+                method=method.upper(),
+                url=url,
+                status_code=status_code,
+                error_code=error_code,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                retryable=retryable,
+                retry_exhausted=retry_exhausted,
+                session_recreated=session_recreated,
+            )
+
         last_timeout_exc: Exception | None = None
-        for attempt in range(self.request_max_retries):
+        last_network_exc: Exception | None = None
+        last_request_error: RequestError | None = None
+        last_failed_response: CurlResponse | None = None
+        last_cloudflare_response: CurlResponse | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            session_recreated = False
+            if attempt in session_refresh_attempts:
+                try:
+                    self._refresh_clients()
+                    session_recreated = True
+                    self.__logger.info(
+                        f"🔄 Session recreated (attempt={attempt}/{max_attempts}, reason=scheduled_2_4_7)"
+                    )
+                except Exception as refresh_error:
+                    self.__logger.warning(
+                        f"⚠️ Не удалось пересоздать curl-сессию перед попыткой {attempt}/{max_attempts}: {refresh_error}"
+                    )
+
             try:
                 resp = make_req()
-            except (curl_exceptions.Timeout, curl_exceptions.ConnectTimeout, curl_exceptions.ReadTimeout) as e:
-                last_timeout_exc = e
-                delay = min(max_delay, float(attempt + 1))
+            except retriable_network_exceptions as network_error:
+                is_timeout = isinstance(network_error, timeout_exception_types)
+                kind = "timeout" if is_timeout else "other"
+                last_network_exc = network_error
+                if is_timeout:
+                    last_timeout_exc = network_error
+
+                retry_exhausted = attempt >= max_attempts
+                _record_error(
+                    kind=kind,
+                    error_text=str(network_error),
+                    status_code=None,
+                    error_code=type(network_error).__name__,
+                    attempt=attempt,
+                    retryable=True,
+                    retry_exhausted=retry_exhausted,
+                    session_recreated=session_recreated,
+                )
+
+                if retry_exhausted:
+                    if is_timeout:
+                        self.__logger.error(
+                            f"❌ Timeout при запросе к Playerok после {max_attempts} попыток."
+                        )
+                        raise CurlTimeoutError(url, self.requests_timeout, network_error) from network_error
+                    self.__logger.error(
+                        f"❌ Ошибка сети при запросе к Playerok после {max_attempts} попыток: {network_error}"
+                    )
+                    raise network_error
+
+                delay = _retry_delay(attempt)
                 self.__logger.warning(
-                    f"⏱️ Timeout при запросе к Playerok: {url} "
-                    f"(попытка {attempt + 1}/{self.request_max_retries}), "
-                    f"повтор через {delay:.0f} сек..."
+                    f"⚠️ Сетевая ошибка при запросе к Playerok: {url} "
+                    f"(попытка {attempt}/{max_attempts}, retryable=true), "
+                    f"повтор через {delay:.1f} сек..."
                 )
                 time.sleep(delay)
-                self._refresh_clients()
                 continue
-            if not any(sig in resp.text for sig in cloudflare_signatures):
-                break
-            # Прогрессивная задержка: 1, 2, 3, 3, 3...
-            delay = min(max_delay, float(attempt + 1))
-            self.__logger.warning(
-                f"⚠️ Cloudflare Detected (попытка {attempt + 1}/{self.request_max_retries}), "
-                f"повтор через {delay:.0f} сек..."
-            )
-            time.sleep(delay)
-            self._refresh_clients()
-        else:
-            if last_timeout_exc is not None:
-                self.__logger.error(
-                    f"❌ Timeout при запросе к Playerok после {self.request_max_retries} попыток."
+
+            if any(sig in resp.text for sig in cloudflare_signatures):
+                last_cloudflare_response = resp
+                retry_exhausted = attempt >= max_attempts
+                _record_error(
+                    kind="cloudflare",
+                    error_text="Cloudflare challenge detected",
+                    status_code=_to_int(resp.status_code),
+                    error_code="CLOUDFLARE",
+                    attempt=attempt,
+                    retryable=True,
+                    retry_exhausted=retry_exhausted,
+                    session_recreated=session_recreated,
                 )
-                raise CurlTimeoutError(url, self.requests_timeout, last_timeout_exc) from last_timeout_exc
-            self.__logger.error(
-                f"❌ Cloudflare заблокировал все {self.request_max_retries} попыток! "
-                f"Требуется смена токена/прокси/user-agent."
-            )
-            raise CloudflareDetectedException(resp)
-        try:
-            if "errors" in resp.json():
+
+                if retry_exhausted:
+                    self.__logger.error(
+                        f"❌ Cloudflare заблокировал все {max_attempts} попыток! "
+                        f"Требуется смена токена/прокси/user-agent."
+                    )
+                    raise CloudflareDetectedException(resp)
+
+                delay = _retry_delay(attempt)
+                self.__logger.warning(
+                    f"⚠️ Cloudflare Detected (попытка {attempt}/{max_attempts}), "
+                    f"повтор через {delay:.1f} сек..."
+                )
+                time.sleep(delay)
+                continue
+
+            response_json: dict[str, Any] | None = None
+            try:
+                parsed_json = resp.json()
+                if isinstance(parsed_json, dict):
+                    response_json = parsed_json
+            except Exception:
+                response_json = None
+
+            if response_json and isinstance(response_json.get("errors"), list) and response_json["errors"]:
+                first_error = response_json["errors"][0] if isinstance(response_json["errors"][0], dict) else {}
+                extensions = first_error.get("extensions", {}) if isinstance(first_error, dict) else {}
+                graphql_status = _to_int(extensions.get("statusCode")) if isinstance(extensions, dict) else None
+                graphql_code = ""
+                if isinstance(extensions, dict):
+                    graphql_code = str(extensions.get("code") or "")
+                if not graphql_code and isinstance(first_error, dict):
+                    graphql_code = str(first_error.get("code") or "")
+                graphql_message = str(first_error.get("message") or "GraphQL error") if isinstance(first_error, dict) else "GraphQL error"
+                graphql_message_l = graphql_message.lower()
+                graphql_code_u = graphql_code.upper()
+
+                is_rate_limit = (
+                    graphql_status == 429
+                    or graphql_code_u == "TOO_MANY_REQUESTS"
+                    or "too many" in graphql_message_l
+                    or "слишком много попыток" in graphql_message_l
+                )
+                is_server_error = graphql_status is not None and 500 <= graphql_status <= 599
+                retriable_graphql = is_rate_limit or is_server_error
+                retry_exhausted = attempt >= max_attempts or not retriable_graphql
+
+                if is_rate_limit:
+                    graphql_kind = "graphql_429"
+                elif is_server_error:
+                    graphql_kind = "graphql_5xx"
+                else:
+                    graphql_kind = "other"
+
+                try:
+                    request_error = RequestError(resp)
+                except Exception:
+                    request_error = None
+
+                if request_error is not None:
+                    last_request_error = request_error
+
+                _record_error(
+                    kind=graphql_kind,
+                    error_text=graphql_message,
+                    status_code=graphql_status or _to_int(resp.status_code),
+                    error_code=graphql_code or "GRAPHQL_ERROR",
+                    attempt=attempt,
+                    retryable=retriable_graphql,
+                    retry_exhausted=retry_exhausted,
+                    session_recreated=session_recreated,
+                )
+
+                if retriable_graphql and attempt < max_attempts:
+                    delay = _retry_delay(attempt, resp.headers.get("Retry-After") if is_rate_limit else None)
+                    self.__logger.warning(
+                        f"⚠️ GraphQL retryable error ({graphql_kind}) "
+                        f"(попытка {attempt}/{max_attempts}), повтор через {delay:.1f} сек..."
+                    )
+                    time.sleep(delay)
+                    continue
+
+                if request_error is not None:
+                    raise request_error
                 raise RequestError(resp)
-        except:
-            pass
-        if resp.status_code != 200:
-           raise RequestFailedError(resp)
-        return resp
+
+            if resp.status_code != 200:
+                status_code = _to_int(resp.status_code) or 0
+                retriable_http = status_code == 429 or 500 <= status_code <= 599
+                retry_exhausted = attempt >= max_attempts or not retriable_http
+                last_failed_response = resp
+
+                if status_code == 429:
+                    http_kind = "http_429"
+                elif 500 <= status_code <= 599:
+                    http_kind = "http_5xx"
+                else:
+                    http_kind = "other"
+
+                _record_error(
+                    kind=http_kind,
+                    error_text=resp.text[:300],
+                    status_code=status_code,
+                    error_code=str(status_code),
+                    attempt=attempt,
+                    retryable=retriable_http,
+                    retry_exhausted=retry_exhausted,
+                    session_recreated=session_recreated,
+                )
+
+                if retriable_http and attempt < max_attempts:
+                    delay = _retry_delay(attempt, resp.headers.get("Retry-After") if status_code == 429 else None)
+                    self.__logger.warning(
+                        f"⚠️ HTTP retryable error ({status_code}) "
+                        f"(попытка {attempt}/{max_attempts}), повтор через {delay:.1f} сек..."
+                    )
+                    time.sleep(delay)
+                    continue
+
+                raise RequestFailedError(resp)
+
+            if attempt > 1:
+                self.__logger.info(
+                    f"✅ Запрос восстановлен после ретраев (recovered=true, attempt={attempt}/{max_attempts}, url={url})"
+                )
+            return resp
+
+        if last_request_error is not None:
+            raise last_request_error
+        if last_failed_response is not None:
+            raise RequestFailedError(last_failed_response)
+        if last_cloudflare_response is not None:
+            raise CloudflareDetectedException(last_cloudflare_response)
+        if last_timeout_exc is not None:
+            raise CurlTimeoutError(url, self.requests_timeout, last_timeout_exc) from last_timeout_exc
+        if last_network_exc is not None:
+            raise last_network_exc
+        raise RuntimeError(f"Request to {url} failed with unknown reason")
     
     def get(self) -> Account:
         """

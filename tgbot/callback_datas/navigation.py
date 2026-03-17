@@ -39,3 +39,7 @@ class LogsNavigation(CallbackData, prefix="lopag"):
 
 class ReviewMonitorNavigation(CallbackData, prefix="rmpag"):
     to: str
+
+
+class ErrorStatsNavigation(CallbackData, prefix="errpag"):
+    to: str

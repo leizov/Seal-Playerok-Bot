@@ -33,7 +33,8 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
                 message=actual_msg,
                 text=templ.do_action_text(
                     f"Отправка сообщения с множественными прикреплёнными изображениями не доступна("),
-                reply_markup=templ.destroy_kb()
+                reply_markup=templ.destroy_kb(),
+                delete_user_message=False
             )
             return
 
@@ -74,6 +75,7 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
                 message=actual_msg,
                 text=templ.do_action_text(
                     f"📲 Начинаю отправку: {file_type}{'+ текст' if message.text else ''}"),
+                delete_user_message=False
             )
 
             from ..telegrambot import get_telegram_bot
@@ -158,7 +160,8 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
                     message=actual_msg,
                     text=templ.do_action_text(
                         f"✅ Пользователю <b>{username}</b> было отправлено сообщение: <blockquote>{text}</blockquote>"),
-                    reply_markup=templ.destroy_kb()
+                    reply_markup=templ.destroy_kb(),
+                    delete_user_message=False
                 )
 
         if not success:
@@ -171,7 +174,8 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
             state=state,
             message=actual_msg,
             text=templ.do_action_text(error_text),
-            reply_markup=templ.destroy_kb()
+            reply_markup=templ.destroy_kb(),
+            delete_user_message=False
         )
     finally:
         try:
