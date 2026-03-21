@@ -5,12 +5,14 @@ import logging
 import random
 from colorama import Fore
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.types import BotCommand, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError, TelegramForbiddenError, TelegramAPIError
 import re
 
 from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY, TELEGRAM_CHANNEL, TELEGRAM_CHAT, TELEGRAM_BOT
 from settings import Settings as sett
+from core.proxy_utils import normalize_proxy, validate_proxy
 from core.plugins import get_plugins
 from core.handlers import call_bot_event
 
@@ -19,6 +21,45 @@ from . import templates as templ
 
 
 logger = logging.getLogger("seal.telegram")
+
+TG_PROXY_HELP_TEXT = (
+    "Если вы из RU региона, Telegram может работать нестабильно без прокси. "
+    "Добавьте прокси не RU региона в bot_settings/config.json (telegram.api.proxy). "
+    "Купить: https://proxylin.net?ref=448587"
+)
+
+
+def _build_tg_proxy_url(raw_proxy: str | None) -> tuple[str | None, str | None]:
+    """
+    Возвращает прокси для aiogram и нормализованное значение для config.
+    """
+    proxy = (raw_proxy or "").strip()
+    if not proxy:
+        return None, None
+
+    validate_proxy(proxy)
+    normalized_proxy = normalize_proxy(proxy)
+
+    if normalized_proxy.startswith(("socks5://", "socks4://", "http://", "https://")):
+        return normalized_proxy, normalized_proxy
+
+    # По умолчанию для TG-прокси без схемы используем HTTP.
+    return f"http://{normalized_proxy}", normalized_proxy
+
+
+class TelegramFetchUpdatesHintHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord):
+        try:
+            message = record.getMessage()
+        except Exception:
+            return
+
+        if "Failed to fetch updates" in message and "TelegramNetworkError" in message:
+            logger.warning(
+                "Если Telegram работает нестабильно, добавьте прокси не RU региона "
+                "в bot_settings/config.json (telegram.api.proxy). "
+                "Купить: https://proxylin.net?ref=448587"
+            )
 
 
 def get_telegram_bot() -> TelegramBot | None:
@@ -40,9 +81,13 @@ class TelegramBot:
     def __init__(self):
         logging.getLogger("aiogram").setLevel(logging.ERROR)
         logging.getLogger("aiogram.event").setLevel(logging.ERROR)
-        
+        dispatcher_logger = logging.getLogger("aiogram.dispatcher")
+        dispatcher_logger.setLevel(logging.ERROR)
+        if not any(isinstance(handler, TelegramFetchUpdatesHintHandler) for handler in dispatcher_logger.handlers):
+            dispatcher_logger.addHandler(TelegramFetchUpdatesHintHandler())
+
         config = sett.get("config")
-        self.bot = Bot(token=config["telegram"]["api"]["token"])
+        self.bot = self._build_bot_from_config(config)
         self.dp = Dispatcher()
 
         # Добавляем middleware для проверки авторизации и статуса плагинов
@@ -70,6 +115,31 @@ class TelegramBot:
                 logger.error(f"✗ Ошибка при регистрации роутеров плагина {plugin.meta.name}: {e}")
                 logger.info(f"Бот продолжит работу без роутеров плагина {plugin.meta.name}")
         self.dp.include_router(main_router)
+
+    def _build_bot_from_config(self, config: dict | None = None) -> Bot:
+        config = config or sett.get("config")
+        token = config["telegram"]["api"]["token"]
+        raw_proxy = (config["telegram"]["api"].get("proxy") or "").strip()
+
+        if not raw_proxy:
+            return Bot(token=token)
+
+        try:
+            proxy_url, normalized_proxy = _build_tg_proxy_url(raw_proxy)
+
+            if normalized_proxy and normalized_proxy != raw_proxy:
+                config["telegram"]["api"]["proxy"] = normalized_proxy
+                sett.set("config", config)
+
+            logger.info("TG-прокси применен ко всем запросам Telegram API.")
+            return Bot(token=token, session=AiohttpSession(proxy=proxy_url))
+        except Exception as proxy_error:
+            logger.warning(
+                f"Некорректный TG-прокси в bot_settings/config.json (telegram.api.proxy): {proxy_error}. "
+                f"Telegram будет запущен без прокси."
+            )
+            logger.warning(TG_PROXY_HELP_TEXT)
+            return Bot(token=token)
 
 
     async def _update_bot_commands(self):
@@ -100,6 +170,7 @@ class TelegramBot:
                 BotCommand(command="error", description="🛑 Показать последнюю ошибку"),
                 BotCommand(command="watermark", description="©️ Водяной знак"),
                 BotCommand(command="fingerprint", description="🧑‍💻 Фингерпринт устройства"),
+                BotCommand(command="config_backup", description="💾 Backup конфига"),
 
             ])
             
@@ -174,17 +245,30 @@ class TelegramBot:
         await self._update_bot_commands()
 
     async def _set_short_description(self):
-        """Устанавливает короткое описание бота (отображается в профиле, лимит 120 символов)"""
+        """Устанавливает короткое описание бота (раздел Bio в Telegram)."""
         try:
-            short_description = "🦭 Канал: t.me/SealPlayerok | Чат: t.me/SealPlayerokChat | Бот: t.me/SealPlayerokBot"
-            await self.bot.set_my_short_description(short_description=short_description)
-        except:
+            short_description = (
+                "📢 Канал: @SealPlayerok\n"
+                "💬 Чат: @SealPlayerokChat\n"
+                "🤖 Бот: @SealPlayerokBot"
+            )
+            # Очищаем и заново выставляем short description для default/ru/en,
+            # чтобы убрать остатки старых значений в разных локалях Telegram-клиента.
+            for lang in (None, "ru", "en"):
+                clear_kwargs = {"short_description": ""}
+                set_kwargs = {"short_description": short_description}
+                if lang:
+                    clear_kwargs["language_code"] = lang
+                    set_kwargs["language_code"] = lang
+                await self.bot.set_my_short_description(**clear_kwargs)
+                await self.bot.set_my_short_description(**set_kwargs)
+        except Exception:
             pass
 
     async def _set_description(self):
-        """Устанавливает полное описание бота с ссылками"""
+        """Устанавливает полное описание бота с короткими ссылками."""
         try:
-            description = textwrap.dedent("""
+            description = textwrap.dedent(f"""
 🦭 SealPlayerokBot v{VERSION}
 
 Бот-помощник для автоматизации работы с маркетплейсом Playerok.com
@@ -199,14 +283,15 @@ class TelegramBot:
 • И многое другое
 
 🔗 Ссылки:
-• Канал: t.me/SealPlayerok
-• Бот: t.me/SealPlayerokBot
+• Канал: @SealPlayerok
+• Чат: @SealPlayerokChat
+• Бот: @SealPlayerokBot
 • GitHub: github.com/leizov/Seal-Playerok-Bot
 
 🦭 Разработчик: {DEVELOPER}
             """).strip()
             await self.bot.set_my_description(description=description)
-        except:
+        except Exception:
             pass
     
 
@@ -252,10 +337,12 @@ class TelegramBot:
                     if attempt == max_retries:
                         raise  # Пробрасываем исключение, если попытки исчерпаны
                     logger.warning(f"Ошибка сети/API при запуске бота: {e}")
+                    logger.warning(TG_PROXY_HELP_TEXT)
                 
             except Exception as e:
                 if attempt == max_retries:
                     logger.error(f"{Fore.RED}Не удалось подключиться к Telegram API после {max_retries} попыток. Завершение работы.")
+                    logger.error(TG_PROXY_HELP_TEXT)
                     raise  # Пробрасываем исключение, если попытки исчерпаны
                 
                 # Вычисляем экспоненциальную задержку с джиттером
@@ -264,13 +351,14 @@ class TelegramBot:
                     f"{Fore.YELLOW}Ошибка подключения к Telegram API (попытка {attempt}/{max_retries}): {e}"
                     f"{Fore.WHITE} Повторная попытка через {delay:.1f} секунд..."
                 )
+                logger.warning(TG_PROXY_HELP_TEXT)
                 await asyncio.sleep(delay)
                 
                 # Обновляем токен бота перед следующей попыткой
                 if attempt % 3 == 0:  # Обновляем токен каждые 3 попытки
                     try:
                         config = sett.get("config")
-                        self.bot = Bot(token=config["telegram"]["api"]["token"])
+                        self.bot = self._build_bot_from_config(config)
                         logger.info("Обновлен токен бота")
                     except Exception as token_error:
                         logger.error(f"Ошибка при обновлении токена бота: {token_error}")

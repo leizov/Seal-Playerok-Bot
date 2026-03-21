@@ -248,10 +248,14 @@ def check_permissions():
     from colorama import Fore
 
     settings_dir = Path("bot_settings").resolve()
-    current_user = pwd.getpwuid(os.getuid()).pw_name
+    try:
+        current_user = pwd.getpwuid(os.getuid()).pw_name
+    except:
+        return True
 
     if not settings_dir.exists():
         settings_dir.mkdir(parents=True, exist_ok=True)
+
         print(f"{Fore.GREEN}[OK] Создана директория настроек: {settings_dir}{Fore.RESET}")
 
     if not os.access(settings_dir, os.W_OK):
@@ -443,13 +447,43 @@ def check_and_configure_config():
 
         return False
 
+    def get_tg_proxy_for_session() -> str | None:
+        """
+        Возвращает прокси для Telegram в формате, который понимает aiogram/aiohttp.
+        Если формат в конфиге некорректный, возвращает None (бот продолжит запуск без прокси).
+        """
+        tg_proxy_raw = (config["telegram"]["api"].get("proxy") or "").strip()
+        if not tg_proxy_raw:
+            return None
+
+        try:
+            validate_proxy(tg_proxy_raw)
+            normalized_proxy = normalize_proxy(tg_proxy_raw)
+
+            if normalized_proxy != tg_proxy_raw:
+                config["telegram"]["api"]["proxy"] = normalized_proxy
+                sett.set("config", config)
+
+            if normalized_proxy.startswith(("socks5://", "socks4://", "http://", "https://")):
+                return normalized_proxy
+
+            # По умолчанию для TG-прокси без схемы используем HTTP.
+            return f"http://{normalized_proxy}"
+        except Exception as e:
+            logger.warning(
+                f"{Fore.YELLOW}Некорректный TG-прокси в bot_settings/config.json "
+                f"(telegram.api.proxy): {e}. Telegram-проверка токена продолжится без прокси."
+            )
+            return None
+
     def is_tg_token_valid(token: str) -> bool:
         pattern = r'^\d{7,12}:[A-Za-z0-9_-]{35}$'
         return bool(re.match(pattern, token))
 
     async def _fetch_tg_bot_data(
             token: str,
-            request_timeout: int
+            request_timeout: int,
+            tg_proxy: str | None = None
     ) -> tuple[bool, str | None, str | None, int | None]:
         """Проверяет токен Telegram через aiogram. Возвращает (ok, username, reason, retry_after)."""
         from aiogram import Bot
@@ -463,8 +497,14 @@ def check_and_configure_config():
             TelegramUnauthorizedError,
         )
 
-        bot = Bot(token=token)
+        bot = None
         try:
+            if tg_proxy:
+                from aiogram.client.session.aiohttp import AiohttpSession
+                bot = Bot(token=token, session=AiohttpSession(proxy=tg_proxy))
+            else:
+                bot = Bot(token=token)
+
             me = await bot.get_me(request_timeout=request_timeout)
             if me and me.is_bot:
                 return True, me.username or "", None, None
@@ -478,10 +518,15 @@ def check_and_configure_config():
             return False, None, "network", None
         except TelegramAPIError:
             return False, None, "api_error", None
+        except RuntimeError as exc:
+            if "aiohttp-socks" in str(exc).lower():
+                return False, None, "proxy_dependency_missing", None
+            return False, None, "api_error", None
         except Exception:
             return False, None, "api_error", None
         finally:
-            await bot.session.close()
+            if bot is not None:
+                await bot.session.close()
 
     def is_tg_bot_exists() -> tuple[bool, str | None, str | None]:
         """Проверяет Telegram бота. Возвращает (успех, username, reason)."""
@@ -490,8 +535,11 @@ def check_and_configure_config():
         backoff = (1, 2)
         last_reason = "api_error"
         max_wait_time = max_attempts * request_timeout + sum(backoff)
+        tg_proxy_for_session = get_tg_proxy_for_session()
 
         print(f"\n{Fore.CYAN}Проверяю токен Telegram: начинаю подключение к API, подождите...")
+        if tg_proxy_for_session:
+            print(f"{Fore.CYAN}Для проверки токена используется TG-прокси из bot_settings/config.json.")
         print(
             f"{Fore.CYAN}Это может занять до {max_wait_time} сек при нестабильной сети."
             f" Если ответ долго не приходит, будет автоматический повтор."
@@ -506,7 +554,8 @@ def check_and_configure_config():
             ok, username, reason, retry_after = asyncio.run(
                 _fetch_tg_bot_data(
                     token=config["telegram"]["api"]["token"],
-                    request_timeout=request_timeout
+                    request_timeout=request_timeout,
+                    tg_proxy=tg_proxy_for_session
                 )
             )
             if ok:
@@ -636,6 +685,29 @@ def check_and_configure_config():
 
     # Проверка Telegram бота только при первичном вводе токена
     tg_token_is_new = not config["telegram"]["api"]["token"]
+    tg_proxy_is_empty = not (config["telegram"]["api"].get("proxy") or "").strip()
+
+    if tg_token_is_new and tg_proxy_is_empty:
+        while True:
+            print(f"\n{Fore.WHITE}Опционально: введите {Fore.CYAN}прокси для Telegram{Fore.WHITE}.")
+            print(f"  {Fore.WHITE}• Этот шаг можно пропустить и добавить прокси позже в:")
+            print(f"    {Fore.LIGHTWHITE_EX}bot_settings/config.json {Fore.WHITE}(поле {Fore.LIGHTWHITE_EX}telegram.api.proxy{Fore.WHITE})")
+            print(f"  {Fore.YELLOW}• В RU регионе Telegram может работать нестабильно без прокси.")
+            print(f"  {Fore.YELLOW}• Используйте прокси не RU региона.")
+            print(f"  {Fore.WHITE}• Где купить: {Fore.LIGHTWHITE_EX}https://proxylin.net?ref=448587")
+            print(f"\n{Fore.WHITE}Форматы: ip:port | user:pass@ip:port | socks5://user:pass@ip:port")
+            print(f"\n  {Fore.YELLOW}Если не хотите указывать TG-прокси сейчас - нажмите Enter.")
+            tg_proxy = input(f"\n  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
+            if not tg_proxy:
+                print(f"\n{Fore.WHITE}Этап TG-прокси пропущен. Можно добавить позже в config.")
+                break
+            if is_proxy_valid(tg_proxy):
+                normalized_tg_proxy = normalize_proxy(tg_proxy)
+                config["telegram"]["api"]["proxy"] = normalized_tg_proxy
+                sett.set("config", config)
+                print(f"\n{Fore.GREEN}TG-прокси сохранен в config.")
+                break
+            print(f"\n{Fore.LIGHTRED_EX}Некорректный формат TG-прокси. Попробуйте еще раз.")
 
     while not config["telegram"]["api"]["token"]:
         print(f"\n{Fore.WHITE}Введите {Fore.CYAN}токен вашего Telegram бота{Fore.WHITE}. Бота нужно создать у @BotFather."
@@ -660,10 +732,24 @@ def check_and_configure_config():
                         f"\n{Fore.LIGHTRED_EX}Не удалось проверить токен из-за сетевой ошибки"
                         f" (доступ к Telegram API нестабилен). Попробуйте снова позже."
                     )
+                    print(
+                        f"{Fore.YELLOW}Если вы из RU региона, Telegram может не работать без прокси."
+                        f" Добавьте прокси не RU региона в {Fore.LIGHTWHITE_EX}bot_settings/config.json"
+                        f"{Fore.YELLOW} (поле {Fore.LIGHTWHITE_EX}telegram.api.proxy{Fore.YELLOW})."
+                        f" Где купить: {Fore.LIGHTWHITE_EX}https://proxylin.net?ref=448587"
+                    )
                 elif tg_error_reason == "rate_limit":
                     print(
                         f"\n{Fore.LIGHTRED_EX}Telegram временно ограничил проверку токена."
                         f" Подождите немного и повторите ввод."
+                    )
+                elif tg_error_reason == "proxy_dependency_missing":
+                    print(
+                        f"\n{Fore.LIGHTRED_EX}Для запуска Telegram через прокси не хватает зависимости"
+                        f" {Fore.LIGHTWHITE_EX}aiohttp-socks{Fore.LIGHTRED_EX}."
+                    )
+                    print(
+                        f"{Fore.YELLOW}Переустановите зависимости и попробуйте снова."
                     )
                 else:
                     print(
@@ -713,7 +799,7 @@ if __name__ == "__main__":
         print(f"""
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～
 {Fore.LIGHTCYAN_EX}   ╔═════════════════════════════════════════════════════════════════════════════╗
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}  ║
+{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}    ║
 {Fore.LIGHTCYAN_EX}   ║                                                                             ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗         {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}████████{Fore.WHITE}╗        {Fore.LIGHTCYAN_EX}     ║
 {Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗╚══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝        {Fore.LIGHTCYAN_EX}     ║
@@ -730,7 +816,7 @@ if __name__ == "__main__":
 {Fore.LIGHTCYAN_EX}   ║  {Fore.WHITE}╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝         {Fore.LIGHTCYAN_EX}║
 {Fore.LIGHTCYAN_EX}   ║                                                                             ║
 {Fore.LIGHTCYAN_EX}   ║              {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}                      ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}  ║
+{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}    ║
 {Fore.LIGHTCYAN_EX}   ╚═════════════════════════════════════════════════════════════════════════════╝
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～{Fore.RESET}
 """)
@@ -755,10 +841,16 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f'Ошибка при получении часового пояса устройства: {e}')
 
-        if not check_permissions():
-            print(f"\n{Fore.RED}Не удалось запустить бот из-за проблем с правами доступа.{Fore.RESET}")
-            print(f"{Fore.YELLOW}Исправьте права и запустите бот снова.{Fore.RESET}\n")
-            sys.exit(1)
+        try:
+            if not check_permissions():
+                logger.warning(
+                    f"\n{Fore.RED}Не удалось запустить бот из-за проблем с правами доступа.{Fore.RESET}"
+                    f"{Fore.YELLOW}Исправьте права и запустите бот снова.{Fore.RESET}\n"
+                )
+
+                sys.exit(1)
+        except Exception as e:
+            logger.info('Пропустил проверку прав доступа записи...')
 
         logger.info('Загружаю конфигурацию...')
         check_and_configure_config()

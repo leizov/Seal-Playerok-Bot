@@ -11,6 +11,7 @@ from .chat_history import router as chat_history_router
 from .review_monitor import router as review_monitor_router
 from .proxy_management import router as proxy_management_router
 from .error_stats import router as error_stats_router
+from .config_backup import router as config_backup_router
 
 router = Router()
 router.include_routers(
@@ -26,4 +27,5 @@ router.include_routers(
     review_monitor_router,
     proxy_management_router,
     error_stats_router,
+    config_backup_router,
 )

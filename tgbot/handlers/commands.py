@@ -107,6 +107,25 @@ async def handler_restart(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Произошла ошибка при перезагрузке: {str(e)}")
 
 
+@router.message(Command("config_backup"))
+async def handler_config_backup(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /config_backup
+    Показывает меню управления backup-конфигом
+    """
+    await state.set_state(None)
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"].get("signed_users", []):
+        return await do_auth(message, state)
+
+    await throw_float_message(
+        state=state,
+        message=message,
+        text=templ.config_backup_text(),
+        reply_markup=templ.config_backup_kb()
+    )
+
+
 @router.message(Command("power_off", "poweroff"))
 async def handler_power_off(message: types.Message, state: FSMContext):
     """

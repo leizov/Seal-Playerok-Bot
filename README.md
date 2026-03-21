@@ -52,7 +52,19 @@
 
 ### 🛒 Где купить VDS?
 
-Рекомендуем: **[FirstByte VDS](https://firstbyte.ru/?from=192586)** — недорогие и надёжные сервера.
+Рекомендуем:
+- **[play2go.cloud](https://play2go.cloud/?ref_id=mUMKLA3vhJg)** — хороший вариант для старта.
+- **[FirstByte VDS](https://firstbyte.ru/?from=192586)** — недорогие и надёжные сервера.
+
+> 🌍 **Важно по региону сервера:** сервер лучше брать **не RU региона** (чтобы избежать проблем с блокировкой тг).  
+> Рекомендуемый регион: **Нидерланды (NL)**.
+>
+> ⚠️ Если берёте RU-хостинг, отдельно докупайте **EU-прокси** для Telegram.  
+> EU-прокси можно указать:
+> 1) на этапе установки, когда установщик спросит TG-прокси;
+> 2) позже вручную в `bot_settings/config.json` (не `config.py`) → `telegram.api.proxy`.
+>
+> Формат прокси: `http://user:pass@ip:port` или `socks5://user:pass@ip:port`.
 
 > ⚠️ **Требования:** Ubuntu 20.04+ но лучше Ubuntu 24.04 - загрузка пройдёт быстрее
 
@@ -63,7 +75,7 @@
 
 #### Шаг 1: Купи VDS сервер
 
-1. Зайди на сайт хостинга (например [FirstByte](https://firstbyte.ru/?from=192586))
+1. Зайди на сайт хостинга (например [play2go.cloud](https://play2go.cloud/?ref_id=mUMKLA3vhJg) или [FirstByte](https://firstbyte.ru/?from=192586))
 2. Выбери тариф (за 75 рублёв там есть или за 200 в месяц)
 3. Выбери ОС: **Ubuntu 22.04** или **Ubuntu 24.04** (рекомендуется)
 4. После оплаты в инструкции к своему сервкру на сайте находишь: **IP, логин (root), пароль**
@@ -95,6 +107,7 @@ wget -qO- https://raw.githubusercontent.com/leizov/Seal-Playerok-Bot/main/instal
 3. **Введи токены** когда бот попросит:
    - Токен Playerok (из настроек аккаунта Playerok)
    - Токен Telegram бота (создай через [@BotFather](https://t.me/BotFather))
+   - Если сервер RU региона: укажи EU-прокси для Telegram на этапе установки (или добавь позже в `bot_settings/config.json` → `telegram.api.proxy`)
 4. **Нажми Ctrl+C** когда увидишь главное меню бота
 5. **Готово!** Бот работает в фоне
 

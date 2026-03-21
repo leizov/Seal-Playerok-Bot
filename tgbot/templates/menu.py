@@ -13,15 +13,18 @@ def menu_text():
 
         🦭 <b>Seal Playerok Bot</b> v{VERSION}
         <b>Милый бот-помощник для Playerok</b>
-        
+
         <b>Ссылки:</b>
         ┣ <b>{DEVELOPER}</b> — разработчик
+        ┣ Канал: @SealPlayerok
+        ┣ Чат: @SealPlayerokChat
         ┗ <a href="{REPOSITORY}">GitHub</a> — репозиторий
+
+        ⭐ <b>Если бот полезен, поставьте звёздочку в репозитории GitHub.</b>
 
         Выберите раздел ниже ↓
     """)
     return txt
-
 
 def menu_kb(page: int = 0):
     """
