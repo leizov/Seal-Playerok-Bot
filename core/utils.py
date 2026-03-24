@@ -370,7 +370,7 @@ def install_requirements(requirements_path: str):
         missing_packages = []
         for line in lines:
             pkg = line.strip()
-            if not pkg or pkg.startswith("#"):
+            if not pkg or pkg.startswith("#") or pkg.startswith("-"):
                 continue
             if not is_package_installed(pkg):
                 missing_packages.append(pkg)

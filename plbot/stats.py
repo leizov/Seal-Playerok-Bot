@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -9,6 +10,7 @@ import paths
 
 
 STATS_FILE = paths.STATS_FILE
+logger = logging.getLogger("seal.stats")
 
 
 @dataclass
@@ -169,7 +171,7 @@ def save_stats():
         with open(STATS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception as e:
-        print(f"Ошибка при сохранении статистики: {e}")
+        logger.error("Ошибка при сохранении статистики: %s", e)
 
 
 def load_stats():
@@ -195,11 +197,11 @@ def load_stats():
 
             _stats = Stats(**data)
             ensure_month_window()
-            print(f"Статистика успешно загружена из файла")
+            logger.info("Статистика успешно загружена из файла")
         else:
-            print(f"Файл статистики не найден, используются значения по умолчанию")
+            logger.warning("Файл статистики не найден, используются значения по умолчанию")
             ensure_month_window()
     except Exception as e:
-        print(f"Ошибка при загрузке статистики: {e}")
-        print(f"Используются значения по умолчанию")
+        logger.error("Ошибка при загрузке статистики: %s", e)
+        logger.warning("Используются значения по умолчанию")
         ensure_month_window()

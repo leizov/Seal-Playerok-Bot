@@ -383,9 +383,6 @@ class Account:
                 try:
                     self._refresh_clients()
                     session_recreated = True
-                    self.__logger.info(
-                        f"🔄 Session recreated (attempt={attempt}/{max_attempts}, reason=scheduled_2_4_7)"
-                    )
                 except Exception as refresh_error:
                     self.__logger.warning(
                         f"⚠️ Не удалось пересоздать curl-сессию перед попыткой {attempt}/{max_attempts}: {refresh_error}"

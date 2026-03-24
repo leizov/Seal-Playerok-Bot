@@ -4,11 +4,11 @@ setlocal EnableDelayedExpansion
 
 echo.
 echo   🦭✨ ═══════════════════════════════════════════════════════════ ✨🦭
-echo   ║                                                                   ║
-echo   ║         🐚  SEAL PLAYEROK BOT - УСТАНОВЩИК  🐚                     ║
-echo   ║                                                                   ║
-echo   ║    Привет! Сейчас я помогу тебе всё настроить                     ║
-echo   ║                                                                   ║
+echo
+echo                 🐚  SEAL PLAYEROK BOT - УСТАНОВЩИК  🐚
+echo
+echo                Привет! Сейчас я помогу тебе всё настроить
+echo
 echo   🦭✨ ═══════════════════════════════════════════════════════════ ✨🦭
 echo.
 
@@ -43,7 +43,7 @@ if %ERRORLEVEL% equ 0 (
     :: Проверяем версию
     for /f "tokens=2" %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
     echo   ⚠️  Найден Python !PY_VER!
-    
+
     :: Проверяем что это 3.12
     echo !PY_VER! | findstr /r "^3\.12" >nul
     if %ERRORLEVEL% equ 0 (

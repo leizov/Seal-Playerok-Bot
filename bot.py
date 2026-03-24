@@ -2,7 +2,7 @@ import datetime
 import sys
 import os
 import subprocess
-
+import shlex
 def _early_install_requirements():
     """Устанавливает зависимости ДО импорта внешних модулей."""
     requirements_path = "requirements.txt"
@@ -22,10 +22,14 @@ def _early_install_requirements():
 
     # Проверяем каждый пакет
     missing = []
+    pip_options = []
     with open(requirements_path, "r", encoding="utf-8") as f:
         for line in f:
             pkg = line.strip()
             if not pkg or pkg.startswith("#"):
+                continue
+            if pkg.startswith("-"):
+                pip_options.extend(shlex.split(pkg))
                 continue
             try:
                 pkg_resources.require(pkg)
@@ -34,17 +38,13 @@ def _early_install_requirements():
 
     if missing:
         print(f"[*] Установка недостающих пакетов: {', '.join(missing)}")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing, "-q"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *pip_options, *missing, "-q"])
         # Перезагружаем pkg_resources после установки
         import importlib
         importlib.reload(pkg_resources)
 
-# Выполняем установку СРАЗУ
-_early_install_requirements()
+# _early_install_requirements()
 
-# ===========================================================================
-# Исправление кодировки консоли Windows для поддержки Unicode
-# ===========================================================================
 
 # Принудительная UTF-8 кодировка на Windows
 if sys.platform == 'win32':
@@ -52,17 +52,6 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-# ===========================================================================
-# СТРОГАЯ ПРОВЕРКА ВЕРСИИ PYTHON
-# ===========================================================================
-#
-# ВАЖНО: Скомпилированные плагины (.pyd/.so) работают ТОЛЬКО на той версии
-# Python, на которой были скомпилированы!
-#
-# Пример: plugin.cpython-312-win_amd64.pyd → только Python 3.12 + Windows
-#
-# Мы компилируем на Python 3.12, поэтому пользователям НУЖЕН Python 3.12!
-# ===========================================================================
 
 # ТОЧНАЯ версия Python для совместимости с плагинами
 REQUIRED_PYTHON_MAJOR = 3
@@ -790,35 +779,36 @@ def check_and_configure_config():
 
 if __name__ == "__main__":
     try:
-        # Зависимости уже установлены в начале файла (_early_install_requirements)
+        logger.info('Проверяю зависимости...')
+        import core.utils as core_utils
+        core_utils.install_requirements('requirements.txt')
         patch_requests()
         setup_logger()
 
         set_title(f"Seal Playerok Bot v{VERSION}")
-        # Красивый объёмный заголовок с морской окантовкой
         print(f"""
-{Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～
+{Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～
 {Fore.LIGHTCYAN_EX}   ╔═════════════════════════════════════════════════════════════════════════════╗
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}    ║
-{Fore.LIGHTCYAN_EX}   ║                                                                             ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗         {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}████████{Fore.WHITE}╗        {Fore.LIGHTCYAN_EX}     ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗╚══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝        {Fore.LIGHTCYAN_EX}     ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║           {Fore.LIGHTCYAN_EX}     ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.WHITE}╚════{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE} ║           {Fore.LIGHTCYAN_EX}    ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}║{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗    {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝╚{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║           {Fore.LIGHTCYAN_EX}     ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.WHITE}╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝    ╚═════╝  ╚═════╝    ╚═╝           {Fore.LIGHTCYAN_EX}     ║
-{Fore.LIGHTCYAN_EX}   ║                                                                             ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗      {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗       {Fore.LIGHTCYAN_EX}  ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗╚{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔╝       {Fore.LIGHTCYAN_EX}  ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}║ ╚{Fore.LIGHTWHITE_EX}████{Fore.WHITE}╔╝ {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╔╝        {Fore.LIGHTCYAN_EX}  ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══╝ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  ╚{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔╝  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗        {Fore.LIGHTCYAN_EX}  ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║╚{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗       {Fore.LIGHTCYAN_EX}  ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.WHITE}╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝         {Fore.LIGHTCYAN_EX}║
-{Fore.LIGHTCYAN_EX}   ║                                                                             ║
-{Fore.LIGHTCYAN_EX}   ║              {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}                      ║
-{Fore.LIGHTCYAN_EX}   ║  {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}    ║
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗         {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}████████{Fore.WHITE}╗        {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗╚══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝        {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║           {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.WHITE}╚════{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║         {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE} ║           {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}║{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗    {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝╚{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║           {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.WHITE}╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝    ╚═════╝  ╚═════╝    ╚═╝           {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗      {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗       {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗╚{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔════╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔╝       {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}║ ╚{Fore.LIGHTWHITE_EX}████{Fore.WHITE}╔╝ {Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╗  {Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}█████{Fore.WHITE}╔╝        {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═══╝ {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  ╚{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔╝  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══╝  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔══{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╔═{Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗        {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║     {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║   {Fore.LIGHTWHITE_EX}███████{Fore.WHITE}╗{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}║╚{Fore.LIGHTWHITE_EX}██████{Fore.WHITE}╔╝{Fore.LIGHTWHITE_EX}██{Fore.WHITE}║  {Fore.LIGHTWHITE_EX}██{Fore.WHITE}╗       {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.WHITE}╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝         {Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}                   {Fore.LIGHTMAGENTA_EX}🐚 {Fore.WHITE}Милый помощник для Playerok {Fore.LIGHTMAGENTA_EX}v{VERSION}  🐚{Fore.LIGHTCYAN_EX}
+{Fore.LIGHTCYAN_EX}       {Fore.LIGHTMAGENTA_EX}🦭{Fore.CYAN}                                                                     {Fore.LIGHTMAGENTA_EX}🦭{Fore.LIGHTCYAN_EX}
 {Fore.LIGHTCYAN_EX}   ╚═════════════════════════════════════════════════════════════════════════════╝
-{Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～{Fore.RESET}
+{Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～{Fore.RESET}
 """)
         # Информация о проекте
         print(f"""
@@ -830,7 +820,8 @@ if __name__ == "__main__":
    │  {Fore.LIGHTWHITE_EX}👨‍💻 Автор:{Fore.WHITE}  @leizov                                                         {Fore.CYAN}
    └──────────────────────────────────────────────────────────────────────────────{Fore.RESET}
 """)
-        logger.info('Проверяю зависимости...')
+        logger.info('Проверяю обновления...')
+
         check_for_updates()
 
         from datetime import datetime as datetime_time
@@ -951,6 +942,13 @@ if __name__ == "__main__":
         raise SystemExit(2)  # Выход с кодом 2 (требуется смена данных)
 
     except Exception as e:
+        try:
+            logger.info(f"{Fore.YELLOW}Проверка обновлений...{Fore.RESET}")
+            check_for_updates()
+        except Exception as update_error:
+            logger.warning(
+                f"{Fore.LIGHTRED_EX}Проверка обновлений не удалась: {update_error}{Fore.RESET}"
+            )
         traceback.print_exc()
         print(
             f"\n{Fore.LIGHTRED_EX}Ваш бот словил непредвиденную ошибку и был выключен."
