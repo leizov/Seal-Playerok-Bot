@@ -24,7 +24,7 @@ _main_loop = None
 
 def init_main_loop(loop):
     """Инициализирует основной loop событий."""
-    global _main_loop 
+    global _main_loop
     _main_loop = loop
 
 
@@ -131,7 +131,7 @@ def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant:
         log_file = paths.LATEST_LOG_FILE
     os.makedirs(paths.LOGS_DIR, exist_ok=True)
     trim_log_file(log_file, max_lines=5000, keep_lines=3000)
-    
+
     # Морская цветовая палитра для логов
     LOG_FORMAT = "%(light_black)s%(asctime)s%(reset)s %(cyan)s•%(reset)s %(log_color)s%(shortLevel)s%(reset)s %(white)s%(message)s"
     formatter = ShortLevelFormatter(
@@ -147,7 +147,7 @@ def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant:
         },
         style='%'
     )
-    
+
     # Выводим ASCII-арт тюленя при запуске
     # if show_seal_art:
     #     _print_seal_art(1)
@@ -163,7 +163,7 @@ def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant:
         def format(self, record):
             message = super().format(record)
             return self.ansi_escape.sub('', message)
-        
+
     file_handler.setFormatter(StripColorFormatter(
         "[%(asctime)s] %(levelname)-1s · %(name)-20s %(message)s",
         datefmt="%d.%m.%Y %H:%M:%S",
@@ -186,7 +186,7 @@ def setup_logger(log_file: str = None, show_seal_art: bool = True, seal_variant:
 def _print_seal_art(variant: int = 1):
     """
     Выводит большую ASCII-иконку тюленя.
-    
+
     :param variant: Номер варианта иконки (1, 2)
     """
     # Вариант 1: Высококачественная детализированная иконка (FunPay Cardinal Style)
@@ -212,7 +212,7 @@ def _print_seal_art(variant: int = 1):
 {Fore.LIGHTCYAN_EX}                          ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 {Fore.CYAN}                    ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈{Fore.RESET}
     """
-    
+
     # Вариант 2: Реалистичный тюлень с текстурой (High Detail)
     seal_icon_2 = f"""
 {Fore.CYAN}                ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～
@@ -236,20 +236,20 @@ def _print_seal_art(variant: int = 1):
 {Fore.CYAN}                ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈{Fore.RESET}
     """
 
-    
+
     # Выбор варианта иконки
     variants = {
         1: seal_icon_1,  # Классический (Cardinal)
         2: seal_icon_2,  # С усиками
     }
-    
+
     selected = variants.get(variant, seal_icon_1)
     print(selected)
 
 def _gradient_text(text: str, start_color: tuple = (0, 191, 255), end_color: tuple = (255, 105, 180)) -> str:
     """
     Создаёт текст с градиентом от одного цвета к другому.
-    
+
     :param text: Текст для применения градиента
     :param start_color: Начальный цвет RGB (по умолчанию синий)
     :param end_color: Конечный цвет RGB (по умолчанию розовый)
@@ -257,20 +257,20 @@ def _gradient_text(text: str, start_color: tuple = (0, 191, 255), end_color: tup
     """
     if not text:
         return text
-    
+
     result = ""
     length = len(text)
-    
+
     for i, char in enumerate(text):
         # Вычисляем текущий цвет на основе позиции
         ratio = i / max(length - 1, 1)
         r = int(start_color[0] + (end_color[0] - start_color[0]) * ratio)
         g = int(start_color[1] + (end_color[1] - start_color[1]) * ratio)
         b = int(start_color[2] + (end_color[2] - start_color[2]) * ratio)
-        
+
         # ANSI 24-bit True Color: \033[38;2;R;G;Bm
         result += f"\033[38;2;{r};{g};{b}m{char}"
-    
+
     result += "\033[0m"  # Сброс цвета
     return result
 
@@ -288,7 +288,7 @@ def setup_gradient_logger(log_file: str = "logs/latest.log", show_seal_art: bool
             # Формируем префикс (время + уровень)
             timestamp = self.formatTime(record, "%H:%M:%S")
             levelname = record.levelname[0]  # Первая буква уровня
-            
+
             # Применяем градиент к префиксу
             prefix = f"{timestamp} • {levelname}:"
             gradient_prefix = _gradient_text(
@@ -296,23 +296,23 @@ def setup_gradient_logger(log_file: str = "logs/latest.log", show_seal_art: bool
                 start_color=(0, 191, 255),    # Светло-голубой
                 end_color=(255, 105, 180)      # Розовый
             )
-            
+
             # Сообщение остаётся белым
             message = f"{Fore.WHITE}{record.getMessage()}{Fore.RESET}"
-            
+
             return f"{gradient_prefix} {message}"
 
     os.makedirs(paths.LOGS_DIR, exist_ok=True)
     trim_log_file(log_file, max_lines=5000, keep_lines=3000)
-    
+
     # Выводим ASCII-арт тюленя при запуске
     if show_seal_art:
         _print_seal_art(seal_variant)
-        
+
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(GradientFormatter())
     console_handler.setLevel(logging.INFO)
-    
+
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
 
@@ -321,7 +321,7 @@ def setup_gradient_logger(log_file: str = "logs/latest.log", show_seal_art: bool
         def format(self, record):
             message = super().format(record)
             return self.ansi_escape.sub('', message)
-        
+
     file_handler.setFormatter(StripColorFormatter(
         "[%(asctime)s] %(levelname)-1s · %(name)-20s %(message)s",
         datefmt="%d.%m.%Y %H:%M:%S",
@@ -376,8 +376,8 @@ def install_requirements(requirements_path: str):
                 missing_packages.append(pkg)
         if missing_packages:
             subprocess.check_call([sys.executable, "-m", "pip", "install", *missing_packages])
-    except:
-        logger.error(f"{Fore.LIGHTRED_EX}Не удалось установить зависимости из файла \"{requirements_path}\"{Fore.RESET}")
+    except Exception as e:
+        logger.error(f"{Fore.LIGHTRED_EX}Не удалось установить зависимости из файла \"{requirements_path}\"{Fore.RESET}\n{e}")
 
 
 def patch_requests():
@@ -399,7 +399,7 @@ def patch_requests():
                 for status in statuses.values():
                     if status in text_head:
                         break
-                else: 
+                else:
                     return resp
             retry_hdr = resp.headers.get("Retry-After")
             try:
@@ -413,7 +413,7 @@ def patch_requests():
 
 
 def run_async_in_thread(func: callable, args: list = [], kwargs: dict = {}):
-    """ 
+    """
     Запускает функцию асинхронно в новом потоке и в новом лупе.
 
     :param func: Функция.
@@ -437,7 +437,7 @@ def run_async_in_thread(func: callable, args: list = [], kwargs: dict = {}):
 
 
 def run_forever_in_thread(func: callable, args: list = [], kwargs: dict = {}):
-    """ 
+    """
     Запускает функцию в бесконечном лупе в новом потоке.
 
     :param func: Функция.

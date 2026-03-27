@@ -1,13 +1,14 @@
 from aiogram import Router
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
-from datetime import datetime
+from datetime import datetime, timezone
 import html
 
 from .. import callback_datas as calls
 from ..helpful import get_playerok_bot
 from ..utils.message_formatter import format_system_message
-from playerokapi.types import ChatMessage
+from playerokapi.enums import ItemDealStatuses
+from playerokapi.types import ChatMessage, ItemDeal
 
 router = Router()
 
@@ -30,7 +31,43 @@ def _resolve_recipient_username(messages: list[ChatMessage], seller_id: str | No
     return None
 
 
-def _chat_history_kb(chat_id: str, username: str | None = None) -> InlineKeyboardMarkup:
+def _parse_dt(value: str | None) -> datetime:
+    if not value:
+        return datetime.min
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return datetime.min
+
+
+def _select_chat_deal(message_deals: list[ItemDeal], chat_deals: list[ItemDeal]) -> ItemDeal | None:
+    candidates: dict[str, ItemDeal] = {}
+    for deal in [*(message_deals or []), *(chat_deals or [])]:
+        deal_id = getattr(deal, "id", None)
+        if not deal_id:
+            continue
+        prev = candidates.get(deal_id)
+        if prev is None or _parse_dt(getattr(deal, "created_at", None)) >= _parse_dt(getattr(prev, "created_at", None)):
+            candidates[deal_id] = deal
+
+    if not candidates:
+        return None
+
+    ordered = sorted(
+        candidates.values(),
+        key=lambda d: _parse_dt(getattr(d, "created_at", None)),
+        reverse=True
+    )
+    for deal in ordered:
+        if getattr(deal, "status", None) in (ItemDealStatuses.PAID, ItemDealStatuses.PENDING, ItemDealStatuses.SENT):
+            return deal
+    return ordered[0]
+
+
+def _chat_history_kb(chat_id: str, username: str | None = None, deal_id: str | None = None) -> InlineKeyboardMarkup:
     rows = []
     if username:
         rows.append(
@@ -38,6 +75,15 @@ def _chat_history_kb(chat_id: str, username: str | None = None) -> InlineKeyboar
                 InlineKeyboardButton(
                     text="💬 Написать",
                     callback_data=calls.RememberUsername(name=username, do="send_mess").pack(),
+                )
+            ]
+        )
+    if deal_id:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🧾 Просмотр сделки",
+                    callback_data=calls.DealView(de_id=deal_id).pack(),
                 )
             ]
         )
@@ -57,6 +103,29 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
         if not msg_list or not msg_list.messages:
             await callback.answer("❌ Не удалось загрузить историю чата", show_alert=True)
             return
+
+        chat_obj = None
+        chat_deals = []
+        try:
+            chat_obj = playerok_bot.account.get_chat(callback_data.chat_id)
+            chat_deals = list(getattr(chat_obj, "deals", []) or [])
+        except Exception:
+            pass
+
+        message_deals = [msg.deal for msg in msg_list.messages if getattr(msg, "deal", None)]
+        selected_deal = _select_chat_deal(message_deals, chat_deals)
+        if selected_deal is None:
+            try:
+                deals_page = playerok_bot.account.get_deals(count=24)
+                deals_for_chat = []
+                for deal in getattr(deals_page, "deals", []) or []:
+                    deal_chat_id = getattr(getattr(deal, "chat", None), "id", None)
+                    if deal_chat_id == callback_data.chat_id:
+                        deals_for_chat.append(deal)
+                selected_deal = _select_chat_deal(deals_for_chat, [])
+            except Exception:
+                pass
+        selected_deal_id = getattr(selected_deal, "id", None)
         
         # Берем последние 10 сообщений (список отсортирован по убыванию)
         messages = list(msg_list.messages)[:10]
@@ -158,7 +227,8 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
         recipient_username = _resolve_recipient_username(list(msg_list.messages), playerok_bot.account.id)
         if not recipient_username:
             try:
-                chat_obj = playerok_bot.account.get_chat(callback_data.chat_id)
+                if chat_obj is None:
+                    chat_obj = playerok_bot.account.get_chat(callback_data.chat_id)
                 seller_id_str = str(playerok_bot.account.id) if playerok_bot.account.id is not None else None
                 for user in chat_obj.users:
                     username = getattr(user, "username", None)
@@ -176,7 +246,7 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
         
         await callback.message.edit_text(
             history_text,
-            reply_markup=_chat_history_kb(callback_data.chat_id, recipient_username),
+            reply_markup=_chat_history_kb(callback_data.chat_id, recipient_username, selected_deal_id),
             disable_web_page_preview=True,
             parse_mode="HTML"
         )

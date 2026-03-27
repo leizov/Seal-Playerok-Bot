@@ -1,6 +1,7 @@
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramAPIError
 
 from playerokapi.enums import ItemDealStatuses
 from settings import Settings as sett
@@ -9,6 +10,7 @@ from .. import templates as templ
 from .. import callback_datas as calls
 from .. import states
 from ..helpful import throw_float_message
+from ..utils.deal_formatter import format_deal_card_text
 from .navigation import *
 from .pagination import (
     callback_included_restore_items_pagination, 
@@ -123,6 +125,56 @@ async def callback_remember_deal_id(callback: CallbackQuery, callback_data: call
             send=True
         )
         
+
+@router.callback_query(calls.DealView.filter())
+async def callback_deal_view(callback: CallbackQuery, callback_data: calls.DealView, state: FSMContext):
+    from plbot.playerokbot import get_playerok_bot
+
+    await state.set_state(None)
+    plbot = get_playerok_bot()
+    if not plbot or not plbot.playerok_account:
+        await callback.answer("❌ Нет подключения к Playerok", show_alert=True)
+        return
+
+    deal_id = callback_data.de_id
+    try:
+        full_deal = plbot.playerok_account.get_deal(deal_id)
+        username = getattr(getattr(full_deal, "user", None), "username", None)
+        chat_id = getattr(getattr(full_deal, "chat", None), "id", None)
+        chat_id = str(chat_id) if chat_id is not None else None
+        text = format_deal_card_text(full_deal)
+        reply_markup = templ.deal_view_kb(
+            username=username,
+            deal_id=deal_id,
+            deal_status=getattr(full_deal, "status", None),
+            chat_id=chat_id,
+        )
+
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except TelegramAPIError as e:
+            err_msg = str(e).lower()
+            if "message is too long" in err_msg:
+                trimmed_text = text[:3900] + "\n\n<i>⚠️ Карточка сокращена из-за лимита Telegram.</i>"
+                await callback.message.edit_text(
+                    trimmed_text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+            elif "message is not modified" in err_msg:
+                pass
+            else:
+                raise
+        await callback.answer()
+    except Exception as e:
+        await callback.answer(f"❌ Не удалось открыть сделку: {e}", show_alert=True)
+
 
 @router.callback_query(F.data == "refund_deal")
 async def callback_refund_deal(callback: CallbackQuery, state: FSMContext):

@@ -2,6 +2,7 @@
 # 🦭 SealPlayerok Bot - Быстрый установщик
 # Использование: curl -sSL URL | bash
 
+
 set -e
 SERVICE="seal-playerok-bot"
 INSTALL_DIR="$HOME/SealPlayerokBot"

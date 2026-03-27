@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# legacy
 
 set -euo pipefail
 

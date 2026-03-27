@@ -11,6 +11,15 @@ class RememberDealId(CallbackData, prefix="rede"):
     do: str
 
 
+class DealView(CallbackData, prefix="dealv"):
+    de_id: str
+
+
+class DealsAction(CallbackData, prefix="dact"):
+    action: str
+    value: str | None = None
+
+
 class DeleteIncludedRestoreItem(CallbackData, prefix="delinre"):
     index: int
 

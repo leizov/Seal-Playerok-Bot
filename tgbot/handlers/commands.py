@@ -82,6 +82,22 @@ async def handler_profile(message: types.Message, state: FSMContext):
     )
 
 
+@router.message(Command("deals"))
+async def handler_deals(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /deals
+    Открывает меню поиска и фильтрации сделок.
+    """
+    await state.set_state(None)
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    from ..callback_handlers.deals import show_deals_menu
+
+    await show_deals_menu(message, state, reset=True, force_reload=True)
+
+
 @router.message(Command("restart"))
 async def handler_restart(message: types.Message, state: FSMContext):
     """

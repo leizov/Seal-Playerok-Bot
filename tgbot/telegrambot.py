@@ -163,6 +163,7 @@ class TelegramBot:
             # Команды администратора (добавляются только если пользователь авторизован)
             commands.extend([
                 BotCommand(command="profile", description="🏠 Профиль Playerok"),
+                BotCommand(command="deals", description="🧾 Поиск сделок"),
                 BotCommand(command="restart", description="🔄 Перезагрузить бота"),
                 BotCommand(command="playerok_status", description="🔰 Проверить авторизацию в аккаунте"),
                 # BotCommand(command="power_off", description="⚡ Выключить бота"), #todo продумать логику при автозапуске, пока спряу

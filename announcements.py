@@ -20,7 +20,7 @@ logger = getLogger("seal.announcements")
 
 REQUESTS_DELAY = 600  # 10 минут
 
-GIST_ID = "37681cb21e62d15b501f23fa4c9d29f2" 
+GIST_ID = "37681cb21e62d15b501f23fa4c9d29f2"
 
 
 def get_cache_path() -> str:
@@ -32,7 +32,7 @@ def get_cache_path() -> str:
 def get_last_tag() -> str | None:
     """
     Загружает тег последнего объявления из кэша.
-    
+
     :return: тег последнего объявления или None
     """
     cache_path = get_cache_path()
@@ -48,7 +48,7 @@ def get_last_tag() -> str | None:
 def save_last_tag(tag: str):
     """
     Сохраняет тег последнего объявления в кэш.
-    
+
     :param tag: тег объявления
     """
     cache_path = get_cache_path()
@@ -65,45 +65,46 @@ LAST_TAG = get_last_tag()
 def get_announcement(ignore_last_tag: bool = False) -> dict | None:
     """
     Получает информацию об объявлении с GitHub Gist.
-    
+
     :param ignore_last_tag: игнорировать сохранённый тег
     :return: словарь с данными объявления или None
     """
     global LAST_TAG, GIST_ID
-    
+
     if not GIST_ID:
         return None
-    
+
     headers = {
         'X-GitHub-Api-Version': '2022-11-28',
         'accept': 'application/vnd.github+json'
     }
-    
+
     try:
         response = requests.get(
-            f"https://api.github.com/gists/{GIST_ID}", 
+            f"https://api.github.com/gists/{GIST_ID}",
             headers=headers,
             timeout=10
         )
+
         if response.status_code != 200:
             return None
-        
+
         gist_data = response.json()
         files = gist_data.get("files", {})
-        
+
         # Берём первый файл из Gist (любое имя)
         if not files:
             return None
-        
+
         first_file = list(files.values())[0]
         content = json.loads(first_file.get("content", "{}"))
-        
+
         # Проверяем тег
         if content.get("tag") == LAST_TAG and not ignore_last_tag:
             return None
-        
+
         return content
-        
+
     except Exception as e:
         logger.error(f"Ошибка получения объявления: {e}")
         return None
@@ -112,7 +113,7 @@ def get_announcement(ignore_last_tag: bool = False) -> dict | None:
 def download_photo(url: str) -> bytes | None:
     """
     Загружает фото по URL.
-    
+
     :param url: URL фотографии
     :return: фотографию в байтах или None
     """
@@ -154,21 +155,21 @@ def get_buttons(data: dict) -> list | None:
 async def send_announcement_to_users(tg_bot: TelegramBot, data: dict):
     """
     Отправляет объявление всем авторизованным пользователям.
-    
+
     :param tg_bot: экземпляр Telegram бота
     :param data: данные объявления
     """
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     from settings import Settings as sett
-    
+
     text = get_text(data)
     photo = get_photo_bytes(data)
     pin = get_pin(data)
     buttons_data = get_buttons(data)
-    
+
     if not text and not photo:
         return
-    
+
     # Формируем клавиатуру
     keyboard = None
     if buttons_data:
@@ -176,18 +177,18 @@ async def send_announcement_to_users(tg_bot: TelegramBot, data: dict):
         for btn in buttons_data:
             if btn.get("text") and btn.get("url"):
                 rows.append([InlineKeyboardButton(
-                    text=btn["text"], 
+                    text=btn["text"],
                     url=btn["url"]
                 )])
         if rows:
             keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
-    
+
     # Получаем список пользователей
     config = sett.get("config")
     users = config["telegram"]["bot"].get("signed_users", [])
-    
+
     logger.info(f"📢 Отправка объявления {len(users)} пользователям...")
-    
+
     for user_id in users:
         try:
             if photo:
@@ -205,7 +206,7 @@ async def send_announcement_to_users(tg_bot: TelegramBot, data: dict):
                     reply_markup=keyboard,
                     parse_mode="HTML"
                 )
-            
+
             # Закрепляем если нужно
             if pin and msg:
                 try:
@@ -216,12 +217,12 @@ async def send_announcement_to_users(tg_bot: TelegramBot, data: dict):
                     )
                 except:
                     pass
-                    
+
             logger.info(f"✅ Объявление отправлено пользователю {user_id}")
-            
+
         except Exception as e:
             logger.warning(f"❌ Не удалось отправить объявление пользователю {user_id}: {e}")
-        
+
         # Небольшая задержка между отправками
         await asyncio.sleep(0.1)
 
@@ -229,27 +230,27 @@ async def send_announcement_to_users(tg_bot: TelegramBot, data: dict):
 async def check_and_send_announcement(tg_bot: TelegramBot, ignore_last_tag: bool = False):
     """
     Проверяет наличие нового объявления и отправляет его.
-    
+
     :param tg_bot: экземпляр Telegram бота
     :param ignore_last_tag: игнорировать сохранённый тег
     """
     global LAST_TAG
-    
+
     data = get_announcement(ignore_last_tag=ignore_last_tag)
     if not data:
         return
-    
+
     # Если это первый запуск - просто сохраняем тег
     if not LAST_TAG and not ignore_last_tag:
         LAST_TAG = data.get("tag", "")
         save_last_tag(LAST_TAG)
         return
-    
+
     # Сохраняем новый тег
     if not ignore_last_tag:
         LAST_TAG = data.get("tag", "")
         save_last_tag(LAST_TAG)
-    
+
     # Отправляем объявление
     await send_announcement_to_users(tg_bot, data)
 
@@ -259,30 +260,30 @@ import asyncio
 async def announcements_loop(tg_bot: TelegramBot):
     """
     Бесконечный цикл проверки объявлений.
-    
+
     :param tg_bot: экземпляр Telegram бота
     """
     global GIST_ID
-    
+
     if not GIST_ID:
         logger.info("📢 Система объявлений отключена (GIST_ID не задан)")
         return
-    
+
     # logger.info("📢 Система объявлений запущена")
-    
+
     while True:
         try:
             await check_and_send_announcement(tg_bot)
         except Exception as e:
             logger.error(f"Ошибка в цикле объявлений: {e}")
-        
+
         await asyncio.sleep(REQUESTS_DELAY)
 
 
 async def start_announcements_loop(tg_bot: TelegramBot):
     """
     Запускает цикл проверки объявлений как asyncio task в текущем event loop.
-    
+
     :param tg_bot: экземпляр Telegram бота
     """
     asyncio.create_task(announcements_loop(tg_bot))

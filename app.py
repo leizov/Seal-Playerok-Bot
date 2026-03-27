@@ -1,5 +1,6 @@
 import os
 import runpy
+# для bhost
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BOT_FILE = os.path.join(ROOT, "bot.py")
