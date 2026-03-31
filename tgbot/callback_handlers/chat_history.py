@@ -206,7 +206,7 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
                     continue
 
                 if msg_text:
-                    line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n{final_text}\n"
+                    line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n<code>{final_text}</code>\n"
                 else:
                     line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n"
                 if image_row:

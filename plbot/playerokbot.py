@@ -5,6 +5,7 @@ import time
 import asyncio
 
 from datetime import datetime
+from html import escape
 
 from threading import Thread
 import textwrap
@@ -19,6 +20,7 @@ from playerokapi.listener.listener import EventListener
 from playerokapi.types import Chat, Item
 
 from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY, SECONDARY_COLOR, HIGHLIGHT_COLOR, SUCCESS_COLOR
+from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, match_auto_delivery_keyphrase, normalize_auto_deliveries
 from core.utils import set_title, shutdown, run_async_in_thread
 from core.handlers import add_bot_event_handler, add_playerok_event_handler, call_bot_event, call_playerok_event
 from settings import DATA, Settings as sett
@@ -49,7 +51,7 @@ class PlayerokBot:
         self.config = sett.get("config")
         self.messages = sett.get("messages")
         self.custom_commands = sett.get("custom_commands")
-        self.auto_deliveries = sett.get("auto_deliveries")
+        self.auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
         self.auto_restore_items = sett.get("auto_restore_items")
         self.auto_raise_items = sett.get("auto_raise_items")
 
@@ -880,8 +882,9 @@ class PlayerokBot:
                     self.messages = sett.get("messages")
                 if sett.get("custom_commands") != self.custom_commands:
                     self.custom_commands = sett.get("custom_commands")
-                if sett.get("auto_deliveries") != self.auto_deliveries:
-                    self.auto_deliveries = sett.get("auto_deliveries")
+                new_auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
+                if new_auto_deliveries != self.auto_deliveries:
+                    self.auto_deliveries = new_auto_deliveries
                 if sett.get("auto_restore_items") != self.auto_restore_items:
                     self.auto_restore_items = sett.get("auto_restore_items")
                 if sett.get("auto_raise_items") != self.auto_raise_items:
@@ -1133,26 +1136,124 @@ class PlayerokBot:
                 self.logger.info(f'Отправил приветственное сообщение для {event.deal.user}')
 
         if self.config["playerok"]["auto_deliveries"]["enabled"]:
-            for auto_delivery in self.auto_deliveries:
-                for phrase in auto_delivery["keyphrases"]:
-                    if phrase.lower() in event.deal.item.name.lower() or event.deal.item.name.lower() == phrase.lower():
-                        self.send_message(event.chat.id, "\n".join(auto_delivery["message"]))
-                        self.logger.info(f'Выдал товар из автовыдачи для {event.deal.id}')
-                        # Отправка уведомления об автовыдаче
+            auto_deliveries = normalize_auto_deliveries(self.auto_deliveries)
+            matched_delivery_index = None
+            matched_phrase = None
+
+            for idx, auto_delivery in enumerate(auto_deliveries):
+                if not auto_delivery.get("enabled", True):
+                    continue
+                phrase = match_auto_delivery_keyphrase(event.deal.item.name, auto_delivery.get("keyphrases", []))
+                if phrase:
+                    matched_delivery_index = idx
+                    matched_phrase = phrase
+                    break
+
+            if matched_delivery_index is not None:
+                matched_delivery = auto_deliveries[matched_delivery_index]
+
+                if matched_delivery.get("kind") == AUTO_DELIVERY_KIND_MULTI:
+                    items = matched_delivery.get("items", [])
+
+                    if items:
+                        issued_item = items.pop(0)
+                        matched_delivery["issued_total"] = int(matched_delivery.get("issued_total", 0)) + 1
+                        matched_delivery["issued_current_batch"] = int(matched_delivery.get("issued_current_batch", 0)) + 1
+                        remaining = len(items)
+
+                        self.auto_deliveries = auto_deliveries
+                        sett.set("auto_deliveries", auto_deliveries)
+
+                        self.send_message(event.chat.id, issued_item)
+                        self.logger.info(f'Выдал товар из мультивыдачи для {event.deal.id}')
+
                         if (
                             self.config["playerok"]["tg_logging"]["enabled"]
-                            and self.config["playerok"]["tg_logging"]["events"].get("auto_delivery", True)
+                            and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
                         ):
+                            safe_issued_item = escape(issued_item)
                             asyncio.run_coroutine_threadsafe(
                                 get_telegram_bot().log_event(
                                     text=log_text(
-                                        title=f'🚀📦 Выдан товар из автовыдачи в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
-                                        text=f"<b>Товар:</b> {event.deal.item.name}\n<b>Покупатель:</b> {event.deal.user.username}\n<b>Сумма:</b> {event.deal.item.price or '?'}₽\n<b>Ключевая фраза:</b> {phrase}"
+                                        title=f'🚀📦 Выдан товар из мультивыдачи в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                        text=(
+                                            f"<b>Товар:</b> {event.deal.item.name}\n"
+                                            f"<b>Покупатель:</b> {event.deal.user.username}\n"
+                                            f"<b>Сумма:</b> {event.deal.item.price or '?'}₽\n"
+                                            f"<b>Ключевая фраза:</b> {matched_phrase}\n"
+                                            f"<b>Выданная строка:</b> <tg-spoiler>{safe_issued_item}</tg-spoiler>\n"
+                                            f"<b>Осталось:</b> {remaining}"
+                                        )
                                     )
                                 ),
                                 get_telegram_bot_loop()
                             )
-                        break
+
+                        if (
+                            remaining == 0
+                            and self.config["playerok"]["tg_logging"]["enabled"]
+                            and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
+                        ):
+                            asyncio.run_coroutine_threadsafe(
+                                get_telegram_bot().log_event(
+                                    text=log_text(
+                                        title=f'⚠️ Последний товар мультивыдачи выдан в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                        text=(
+                                            f"<b>Товар:</b> {event.deal.item.name}\n"
+                                            f"<b>Покупатель:</b> {event.deal.user.username}\n"
+                                            f"<b>Ключевая фраза:</b> {matched_phrase}\n"
+                                            f"<b>Остаток:</b> 0"
+                                        )
+                                    )
+                                ),
+                                get_telegram_bot_loop()
+                            )
+                    else:
+                        out_of_stock_message = "❌ Товар закончился. Напишите продавцу в чат."
+                        self.send_message(event.chat.id, out_of_stock_message)
+                        self.logger.warning(f'Мультивыдача пуста для сделки {event.deal.id}')
+
+                        if (
+                            self.config["playerok"]["tg_logging"]["enabled"]
+                            and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
+                        ):
+                            asyncio.run_coroutine_threadsafe(
+                                get_telegram_bot().log_event(
+                                    text=log_text(
+                                        title=f'⚠️ Остаток мультивыдачи пуст в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                        text=(
+                                            f"<b>Товар:</b> {event.deal.item.name}\n"
+                                            f"<b>Покупатель:</b> {event.deal.user.username}\n"
+                                            f"<b>Ключевая фраза:</b> {matched_phrase}"
+                                        )
+                                    )
+                                ),
+                                get_telegram_bot_loop()
+                            )
+                else:
+                    static_message = "\n".join(matched_delivery.get("message", []))
+                    if static_message:
+                        self.send_message(event.chat.id, static_message)
+                    self.logger.info(f'Выдал товар из автовыдачи для {event.deal.id}')
+
+                    if (
+                        self.config["playerok"]["tg_logging"]["enabled"]
+                        and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
+                    ):
+                        asyncio.run_coroutine_threadsafe(
+                            get_telegram_bot().log_event(
+                                text=log_text(
+                                    title=f'🚀📦 Выдан товар из автовыдачи в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                    text=(
+                                        f"<b>Товар:</b> {event.deal.item.name}\n"
+                                        f"<b>Покупатель:</b> {event.deal.user.username}\n"
+                                        f"<b>Сумма:</b> {event.deal.item.price or '?'}₽\n"
+                                        f"<b>Ключевая фраза:</b> {matched_phrase}"
+                                    )
+                                )
+                            ),
+                            get_telegram_bot_loop()
+                        )
         if self.config["playerok"]["auto_complete_deals"]["enabled"]:
             success = False
             attempts = 3

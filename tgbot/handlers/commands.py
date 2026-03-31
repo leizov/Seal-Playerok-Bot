@@ -1,17 +1,52 @@
 import asyncio
+import html
+import logging
 import os
 from aiogram import types, Router, Bot, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.types import FSInputFile
 
+from __init__ import SKIP_UPDATES
+from core.config_backup import create_backup_payload, format_backup_summary, save_backup_payload_to_file
 from settings import Settings as sett
 from core.utils import restart as app_restart
+from updater import get_update_status, install_release_update
 
 from .. import templates as templ
 from ..helpful import throw_float_message, do_auth
 
 
 router = Router()
+logger = logging.getLogger("seal.telegram.commands")
+
+
+def _split_long_text(text: str, limit: int = 3500) -> list[str]:
+    """
+    Делит длинный текст на части для отправки в Telegram.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    chunks: list[str] = []
+    remaining = text
+
+    while remaining:
+        if len(remaining) <= limit:
+            chunks.append(remaining)
+            break
+
+        split_at = remaining.rfind("\n", 0, limit)
+        if split_at < 1:
+            split_at = remaining.rfind(" ", 0, limit)
+        if split_at < 1:
+            split_at = limit
+
+        chunks.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+
+    return chunks
 
 
 @router.message(Command("start"))
@@ -121,6 +156,217 @@ async def handler_restart(message: types.Message, state: FSMContext):
         
     except Exception as e:
         await message.answer(f"❌ Произошла ошибка при перезагрузке: {str(e)}")
+
+
+@router.message(Command("update"))
+async def handler_update(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /update
+    Проверяет наличие новой версии и обновляет бота вручную.
+    """
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"].get("signed_users", []):
+        return await do_auth(message, state)
+
+    await state.set_state(None)
+    await throw_float_message(
+        state=state,
+        message=message,
+        text=templ.do_action_text("🔎 Проверяю наличие обновлений..."),
+        reply_markup=templ.destroy_kb(),
+    )
+
+    loop = asyncio.get_running_loop()
+    update_status = await loop.run_in_executor(None, get_update_status)
+    status = update_status.get("status")
+    current_version = update_status.get("current_version") or "unknown"
+    latest_version = update_status.get("latest_version") or "unknown"
+
+    if status == "error":
+        error_message = html.escape(str(update_status.get("error") or "Неизвестная ошибка"))
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(
+                f"❌ Не удалось проверить обновления: <code>{error_message}</code>"
+            ),
+            reply_markup=templ.destroy_kb(),
+        )
+        return
+
+    if status == "no_releases":
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text("ℹ️ В репозитории пока нет релизов."),
+            reply_markup=templ.destroy_kb(),
+        )
+        return
+
+    if status == "version_not_found":
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(
+                f"ℹ️ Текущая версия <code>{current_version}</code> не найдена среди релизов.\n"
+                f"Последняя версия: <code>{latest_version}</code>"
+            ),
+            reply_markup=templ.destroy_kb(),
+        )
+        return
+
+    if status == "up_to_date":
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(
+                f"✅ У вас уже установлена последняя версия: <code>{current_version}</code>"
+            ),
+            reply_markup=templ.destroy_kb(),
+        )
+        return
+
+    if status != "update_available":
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text("ℹ️ Обновление не требуется."),
+            reply_markup=templ.destroy_kb(),
+        )
+        return
+
+    if SKIP_UPDATES:
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(
+                "⏭ Установка обновления пропущена, потому что "
+                "<code>SKIP_UPDATES=True</code> в <code>__init__.py</code>."
+            ),
+            reply_markup=templ.destroy_kb(),
+        )
+        return
+
+    backup_path = None
+    try:
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text("📦 Формирую backup перед обновлением..."),
+            reply_markup=templ.destroy_kb(),
+        )
+
+        backup_payload = await loop.run_in_executor(None, create_backup_payload)
+        backup_path = await loop.run_in_executor(
+            None,
+            save_backup_payload_to_file,
+            backup_payload,
+            "seal_config_backup",
+        )
+        backup_summary = format_backup_summary(backup_payload)
+
+        await message.answer(
+            text=templ.config_backup_warning_block(),
+            parse_mode="HTML",
+        )
+        await message.answer_document(
+            document=FSInputFile(backup_path, filename=os.path.basename(backup_path)),
+            caption=templ.config_backup_export_caption(backup_summary),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.exception("Ошибка при формировании backup перед обновлением: %s", e)
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(
+                f"❌ Не удалось отправить backup перед обновлением: "
+                f"<code>{html.escape(str(e))}</code>\n"
+                "Обновление отменено."
+            ),
+            reply_markup=templ.destroy_kb(),
+        )
+        return
+    finally:
+        if backup_path and os.path.exists(backup_path):
+            try:
+                os.remove(backup_path)
+            except OSError:
+                pass
+
+    try:
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(
+                f"⬇️ Устанавливаю обновление до версии <code>{latest_version}</code>..."
+            ),
+            reply_markup=templ.destroy_kb(),
+        )
+
+        install_status = await loop.run_in_executor(
+            None,
+            install_release_update,
+            update_status["latest_release"],
+            False,
+        )
+        install_result = install_status.get("status")
+
+        if install_result == "updated":
+            await throw_float_message(
+                state=state,
+                message=message,
+                text=templ.do_action_text(
+                    f"✅ Обновление <code>{latest_version}</code> установлено. Перезапускаю бота..."
+                ),
+                reply_markup=templ.destroy_kb(),
+            )
+
+            release_info = update_status.get("latest_release") or {}
+            release_body = str(release_info.get("body") or "").strip()
+            if release_body:
+                release_chunks = _split_long_text(release_body)
+                total_chunks = len(release_chunks)
+                for index, chunk in enumerate(release_chunks, start=1):
+                    suffix = f" ({index}/{total_chunks})" if total_chunks > 1 else ""
+                    await message.answer(
+                        f"📝 Описание релиза {latest_version}{suffix}:\n\n{chunk}"
+                    )
+            else:
+                await message.answer(
+                    f"📝 Описание релиза {latest_version} отсутствует на GitHub."
+                )
+
+            await asyncio.sleep(0.5)
+            app_restart()
+            return
+
+        if install_result == "download_failed":
+            fail_text = "❌ Не удалось скачать файлы обновления."
+        elif install_result == "install_failed":
+            fail_text = "❌ Обновление скачано, но установить его не удалось."
+        else:
+            fail_text = (
+                "❌ Не удалось установить обновление: "
+                f"<code>{html.escape(str(install_status.get('error') or 'Неизвестная ошибка'))}</code>"
+            )
+
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(fail_text),
+            reply_markup=templ.destroy_kb(),
+        )
+    except Exception as e:
+        logger.exception("Ошибка при ручном обновлении: %s", e)
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.do_action_text(
+                f"❌ Ошибка при установке обновления: <code>{html.escape(str(e))}</code>"
+            ),
+            reply_markup=templ.destroy_kb(),
+        )
 
 
 @router.message(Command("config_backup"))

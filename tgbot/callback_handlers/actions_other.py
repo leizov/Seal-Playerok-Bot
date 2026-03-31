@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramAPIError
 
+from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, AUTO_DELIVERY_KIND_STATIC, normalize_auto_deliveries
 from playerokapi.enums import ItemDealStatuses
 from settings import Settings as sett
 
@@ -355,21 +356,47 @@ async def callback_add_new_auto_delivery(callback: CallbackQuery, state: FSMCont
         await state.set_state(None)
         data = await state.get_data()
         last_page = data.get("last_page", 0)
-        auto_deliveries = sett.get("auto_deliveries")
+        auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
         new_auto_delivery_keyphrases = data.get("new_auto_delivery_keyphrases")
+        new_auto_delivery_kind = data.get("new_auto_delivery_kind") or AUTO_DELIVERY_KIND_STATIC
         new_auto_delivery_message = data.get("new_auto_delivery_message")
+        new_auto_delivery_items = data.get("new_auto_delivery_items") or []
         if not new_auto_delivery_keyphrases:
             raise Exception("❌ Ключевые фразы авто-выдачи не были найдены, повторите процесс с самого начала")
-        if not new_auto_delivery_message:
-            raise Exception("❌ Сообщение авто-выдачи не было найдено, повторите процесс с самого начала")
-        
-        auto_deliveries.append({"keyphrases": new_auto_delivery_keyphrases, "message": new_auto_delivery_message.splitlines()})
+
+        if new_auto_delivery_kind == AUTO_DELIVERY_KIND_MULTI:
+            if not new_auto_delivery_items:
+                raise Exception("❌ Товары для мультивыдачи не были найдены, повторите процесс с самого начала")
+            auto_deliveries.append(
+                {
+                    "kind": AUTO_DELIVERY_KIND_MULTI,
+                    "enabled": True,
+                    "keyphrases": list(new_auto_delivery_keyphrases),
+                    "items": list(new_auto_delivery_items),
+                    "issued_total": 0,
+                    "issued_current_batch": 0,
+                }
+            )
+            success_text = "✅ <b>Мультивыдача</b> была добавлена"
+        else:
+            if not new_auto_delivery_message:
+                raise Exception("❌ Сообщение авто-выдачи не было найдено, повторите процесс с самого начала")
+            auto_deliveries.append(
+                {
+                    "kind": AUTO_DELIVERY_KIND_STATIC,
+                    "enabled": True,
+                    "keyphrases": list(new_auto_delivery_keyphrases),
+                    "message": str(new_auto_delivery_message).splitlines(),
+                }
+            )
+            success_text = "✅ <b>Обычная авто-выдача</b> была добавлена"
+
         sett.set("auto_deliveries", auto_deliveries)
         
         await throw_float_message(
             state=state, 
             message=callback.message, 
-            text=templ.settings_new_deliv_float_text(f"✅ <b>Авто-выдача</b> была добавлена"), 
+            text=templ.settings_new_deliv_float_text(success_text), 
             reply_markup=templ.back_kb(calls.AutoDeliveriesPagination(page=last_page).pack())
         )
     except Exception as e:
@@ -383,6 +410,41 @@ async def callback_add_new_auto_delivery(callback: CallbackQuery, state: FSMCont
         )
 
 
+@router.callback_query(F.data == "switch_auto_delivery_enabled")
+async def callback_switch_auto_delivery_enabled(callback: CallbackQuery, state: FSMContext):
+    try:
+        data = await state.get_data()
+        auto_delivery_index = data.get("auto_delivery_index")
+        if auto_delivery_index is None:
+            raise Exception("❌ Авто-выдача не была найдена")
+
+        auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
+        if auto_delivery_index < 0 or auto_delivery_index >= len(auto_deliveries):
+            raise Exception("❌ Авто-выдача не была найдена")
+
+        auto_delivery = auto_deliveries[auto_delivery_index]
+        auto_delivery["enabled"] = not auto_delivery.get("enabled", True)
+        sett.set("auto_deliveries", auto_deliveries)
+
+        last_page = data.get("last_page", 0)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.settings_deliv_page_text(auto_delivery_index),
+            reply_markup=templ.settings_deliv_page_kb(auto_delivery_index, last_page),
+            callback=callback,
+        )
+    except Exception as e:
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.settings_deliv_page_float_text(e),
+            reply_markup=templ.back_kb(calls.AutoDeliveriesPagination(page=last_page).pack())
+        )
+
+
 
 @router.callback_query(F.data == "confirm_deleting_auto_delivery")
 async def callback_confirm_deleting_auto_delivery(callback: CallbackQuery, state: FSMContext):
@@ -392,10 +454,11 @@ async def callback_confirm_deleting_auto_delivery(callback: CallbackQuery, state
         auto_delivery_index = data.get("auto_delivery_index")
         if auto_delivery_index is None:
             raise Exception("❌ Авто-выдача не была найдена, повторите процесс с самого начала")
-        
 
-        auto_deliveries = sett.get("auto_deliveries")
-        auto_delivery_keyphrases = "</code>, <code>".join(auto_deliveries[auto_delivery_index]["keyphrases"]) or "❌ Не задано"
+        auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
+        if auto_delivery_index < 0 or auto_delivery_index >= len(auto_deliveries):
+            raise Exception("❌ Авто-выдача не была найдена")
+        auto_delivery_keyphrases = "</code>, <code>".join(auto_deliveries[auto_delivery_index].get("keyphrases", [])) or "❌ Не задано"
        
         await throw_float_message(
             state=state, 
@@ -423,7 +486,9 @@ async def callback_delete_auto_delivery(callback: CallbackQuery, state: FSMConte
         if auto_delivery_index is None:
             raise Exception("❌ Авто-выдача не была найдена, повторите процесс с самого начала")
         
-        auto_deliveries = sett.get("auto_deliveries")
+        auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
+        if auto_delivery_index < 0 or auto_delivery_index >= len(auto_deliveries):
+            raise Exception("❌ Авто-выдача не была найдена")
         del auto_deliveries[auto_delivery_index]
         sett.set("auto_deliveries", auto_deliveries)
         last_page = data.get("last_page", 0)

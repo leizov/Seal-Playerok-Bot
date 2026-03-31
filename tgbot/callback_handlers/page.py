@@ -2,6 +2,9 @@ from aiogram import Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
+from core.auto_deliveries import normalize_auto_deliveries
+from settings import Settings as sett
+
 from .. import templates as templ
 from .. import callback_datas as calls
 from ..helpful import throw_float_message
@@ -25,8 +28,19 @@ async def callback_custom_command_page(callback: CallbackQuery, callback_data: c
     await state.set_state(None)
     index = callback_data.index
     data = await state.get_data()
-    await state.update_data(auto_delivery_index=index)
     last_page = data.get("last_page", 0)
+    auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
+    if index < 0 or index >= len(auto_deliveries):
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.settings_delivs_float_text("❌ Авто-выдача не найдена"),
+            reply_markup=templ.back_kb(calls.AutoDeliveriesPagination(page=last_page).pack()),
+            callback=callback,
+        )
+        return
+
+    await state.update_data(auto_delivery_index=index)
     await throw_float_message(state, callback.message, templ.settings_deliv_page_text(index), templ.settings_deliv_page_kb(index, last_page), callback)
 
 
