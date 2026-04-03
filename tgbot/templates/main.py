@@ -75,13 +75,16 @@ def log_new_deal_kb(username: str, deal_id: str, chat_id: str = None):
 def deal_view_kb(username: str | None, deal_id: str, deal_status, chat_id: str | None = None) -> InlineKeyboardMarkup:
     status_name = getattr(deal_status, "name", str(deal_status) if deal_status is not None else "")
     allow_complete = status_name in ("PAID", "PENDING")
+    allow_refund = status_name != "ROLLED_BACK"
 
-    first_row = [
-        InlineKeyboardButton(
-            text="↩️ Оформить возврат",
-            callback_data=calls.RememberDealId(de_id=deal_id, do="refund").pack(),
+    first_row = []
+    if allow_refund:
+        first_row.append(
+            InlineKeyboardButton(
+                text="↩️ Оформить возврат",
+                callback_data=calls.RememberDealId(de_id=deal_id, do="refund").pack(),
+            )
         )
-    ]
     if allow_complete:
         first_row.append(
             InlineKeyboardButton(
@@ -90,7 +93,9 @@ def deal_view_kb(username: str | None, deal_id: str, deal_status, chat_id: str |
             )
         )
 
-    rows = [first_row]
+    rows = []
+    if first_row:
+        rows.append(first_row)
     if username:
         rows.append(
             [

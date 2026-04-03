@@ -51,6 +51,7 @@ STATS_FILE = os.path.join(BOT_DATA_DIR, "stats.json")
 DEALS_MONITOR_FILE = os.path.join(BOT_DATA_DIR, "deals_to_monitor.json")
 INITIALIZED_USERS_FILE = os.path.join(BOT_DATA_DIR, "initialized_users.json")
 AUTO_RAISE_ITEMS_TIMES_FILE = os.path.join(BOT_DATA_DIR, "auto_raise_items_times.json")
+AUTO_REMINDER_DEALS_FILE = os.path.join(BOT_DATA_DIR, "auto_reminder_deals.json")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ФАЙЛЫ ЛОГОВ (logs/)

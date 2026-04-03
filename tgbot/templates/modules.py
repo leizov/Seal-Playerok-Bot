@@ -6,15 +6,17 @@ from core.plugins import get_plugins
 
 from .. import callback_datas as calls
 
-                    
+
 def plugins_text():
     plugins = get_plugins()
     txt = textwrap.dedent(f"""
         🔌 <b>Плагины</b>
         Всего <b>{len(plugins)}</b> загруженных плагинов
-        Для добавления плагина перенесите плагин в папку plugins/ и пропищите команду /restart  
+        Для добавления плагина перенесите плагин в папку plugins/ и пропищите команду /restart
         Перемещайтесь по разделам ниже. Нажмите на название плагина, чтобы перейти в его управление ↓
-        
+
+        <b>Купить/заказать плагин - @leizov</b>
+
         💡 <i>Для обновления кода плагинов используйте команду /restart</i>
     """)
     return txt

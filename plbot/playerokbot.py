@@ -32,6 +32,11 @@ from tgbot.utils.message_formatter import format_system_message
 
 from .stats import get_stats, load_stats, record_new_deal, record_raise, record_refund, set_stats
 from .raise_times import get_raise_times, set_raise_times, load_raise_times, should_raise_item, set_last_raise_time
+from .auto_reminder import (
+    add_deal_to_monitor as add_deal_to_auto_reminder,
+    remove_deal_from_monitor as remove_deal_from_auto_reminder,
+    check_auto_reminders_task,
+)
 
 
 def get_playerok_bot() -> PlayerokBot | None:
@@ -68,6 +73,7 @@ class PlayerokBot:
         self._listener_task = None
         self._review_monitor_task = None
         self._auto_raise_items_task = None
+        self._auto_reminder_task = None
 
         self._try_connect()
 
@@ -172,6 +178,12 @@ class PlayerokBot:
             except:
                 pass
 
+        if self._auto_reminder_task:
+            try:
+                self._auto_reminder_task.cancel()
+            except:
+                pass
+
         success = self._try_connect()
 
         if success:
@@ -270,10 +282,18 @@ class PlayerokBot:
                     self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка в цикле автоподнятия товаров: {Fore.WHITE}{e}", exc_info=True)
                     await asyncio.sleep(60)
 
+        async def auto_reminder_loop():
+            await check_auto_reminders_task(
+                account=self.account,
+                send_message_callback=self.send_message,
+                get_config_callback=lambda: self.config
+            )
+
         run_async_in_thread(self.playerok_bot_start)
         self._listener_task = run_async_in_thread(listener_loop)
         self._review_monitor_task = run_async_in_thread(review_monitor_loop)
         self._auto_raise_items_task = run_async_in_thread(auto_raise_items_loop)
+        self._auto_reminder_task = run_async_in_thread(auto_reminder_loop)
 
     def _should_send_greeting(self, chat_id: str, current_message_id: str = None) -> bool:
         """
@@ -1326,23 +1346,30 @@ class PlayerokBot:
                           self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
             self.logger.info('Отправил сообщение после нашего подтверждения')
+        # возьми телефон детка я знаю ты хочешь позвонить
+        # if (
+        #     self.config["playerok"]["tg_logging"]["enabled"]
+        #     and self.config["playerok"]["tg_logging"].get("events", {}).get("deal_status_changed", True)
+        # ):
+        #     asyncio.run_coroutine_threadsafe(
+        #         get_telegram_bot().log_event(
+        #             text=log_text(
+        #                 title=f'✅ Мы подтвердили заказ <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a>',
+        #                 text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
+        #                      f"<b>📦 Товар:</b> {event.deal.item.name}\n"
+        #                      f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
+        #             ),
+        #             kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
+        #         ),
+        #         get_telegram_bot_loop()
+        #     )
 
-        if (
-            self.config["playerok"]["tg_logging"]["enabled"]
-            and self.config["playerok"]["tg_logging"].get("events", {}).get("deal_status_changed", True)
-        ):
-            asyncio.run_coroutine_threadsafe(
-                get_telegram_bot().log_event(
-                    text=log_text(
-                        title=f'✅ Мы подтвердили заказ <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a>',
-                        text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
-                             f"<b>📦 Товар:</b> {event.deal.item.name}\n"
-                             f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
-                    ),
-                    kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
-                ),
-                get_telegram_bot_loop()
-            )
+        try:
+            auto_reminder_config = self.config.get("playerok", {}).get("auto_reminder", {})
+            if auto_reminder_config.get("enabled", False):
+                add_deal_to_auto_reminder(event.deal, event.chat.id)
+        except Exception as e:
+            self.logger.error(f"Не удалось добавить сделку {event.deal.id} в авто-напоминания: {e}")
 
 
     async def _on_deal_confirmed(self, event: DealConfirmedEvent):
@@ -1350,6 +1377,8 @@ class PlayerokBot:
             return
         if event.deal.user.id == self.account.id:
             return
+
+        remove_deal_from_auto_reminder(event.deal.id)
 
         self.log_deal_confirm(event.deal)
         if (
@@ -1386,6 +1415,8 @@ class PlayerokBot:
         if event.deal.user.id == self.account.id:
             return
 
+        remove_deal_from_auto_reminder(event.deal.id)
+
         self.log_deal_rolled_back(event.deal)
         if (
                 self.config["playerok"]["tg_logging"]["enabled"]
@@ -1415,6 +1446,8 @@ class PlayerokBot:
             return
         if event.deal.user.id == self.account.id:
             return
+
+        remove_deal_from_auto_reminder(event.deal.id)
 
         self.log_deal_confirm(event.deal)
         if (
@@ -1498,11 +1531,18 @@ class PlayerokBot:
                 if tg_bot:
                     asyncio.run_coroutine_threadsafe(
                         tg_bot.log_event(
-                            text=log_text(
-                                title="⚠️ Бот запущен, но Playerok недоступен",
-                                text="Не удалось подключиться к Playerok аккаунту.\n\nИзмените токен/прокси/user-agent через:\n⚙️ Настройки → 🔑 Аккаунт"
-                            )
-                        ),
+                                text=log_text(
+                                    title="⚠️ Бот запущен, но Playerok недоступен",
+                                    text=(
+                                        "Не удалось подключиться к Playerok аккаунту.\n"
+                                        "Возможно, временно недоступен сам Playerok.\n\n"
+                                        "Статус подключения можно проверить командой:\n"
+                                        "/playerok_status\n\n"
+                                        "Измените токен/прокси/user-agent через:\n"
+                                        "⚙️ Настройки → 🔑 Аккаунт"
+                                    )
+                                )
+                            ),
                         get_telegram_bot_loop()
                     )
             except:

@@ -29,6 +29,7 @@ from .settings_notifications import *
 from .settings_users import *
 from .settings_developer import *
 from .settings_global_switches import *
+from .settings_auto_reminder import *
 from .settings_watermark import *
 from .quick_replies import *
 from .config_backup import *

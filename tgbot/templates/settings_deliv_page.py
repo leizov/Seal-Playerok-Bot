@@ -49,7 +49,7 @@ def settings_deliv_page_text(index: int):
         return txt
 
     message_lines = delivery.get("message", [])
-    message = "<br>".join(escape(line) for line in message_lines) or "❌ Не задано"
+    message = "\n".join(escape(line) for line in message_lines) or "❌ Не задано"
     txt = textwrap.dedent(
         f"""
         ✏️ <b>Редактирование авто-выдачи</b>

@@ -56,6 +56,12 @@ CONFIG = SettingsFile(
             "auto_complete_deals": {
                 "enabled": False
             },
+            "auto_reminder": {
+                "enabled": False,
+                "interval_hours": 24.0,
+                "max_reminders": 3,
+                "message_text": "⏰ Пожалуйста, подтвердите сделку, вы уже получили свой товар!\n🔗 {deal_link}"
+            },
             "review_monitoring": {
                 "enabled": True,
                 "wait_minutes": 10,

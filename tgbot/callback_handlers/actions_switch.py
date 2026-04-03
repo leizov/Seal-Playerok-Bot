@@ -1,8 +1,11 @@
+import html
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from core.plugins import get_plugin_by_uuid, activate_plugin, deactivate_plugin
+from plbot.auto_reminder import DEFAULT_MESSAGE_TEXT, LEGACY_DEFAULT_MESSAGE_TEXT
 from settings import Settings as sett
 
 from .. import templates as templ
@@ -14,6 +17,20 @@ from ..callback_handlers.page import callback_plugin_page
 
 
 router = Router()
+
+
+def _ensure_auto_reminder_config(config: dict) -> dict:
+    playerok = config.setdefault("playerok", {})
+    auto_reminder = playerok.setdefault("auto_reminder", {})
+
+    auto_reminder.setdefault("enabled", False)
+    auto_reminder.setdefault("interval_hours", 24.0)
+    auto_reminder.setdefault("max_reminders", 3)
+    current_message = str(auto_reminder.get("message_text") or "").strip()
+    if not current_message or current_message == LEGACY_DEFAULT_MESSAGE_TEXT:
+        auto_reminder["message_text"] = DEFAULT_MESSAGE_TEXT
+
+    return auto_reminder
 
 
 @router.callback_query(F.data == "switch_auto_response_enabled")
@@ -80,6 +97,82 @@ async def callback_set_auto_raise_items_interval(callback: CallbackQuery, state:
              f"💡 <i>Товары будут подниматься автоматически\n"
              f"через указанное количество часов после последнего поднятия.</i>",
         reply_markup=templ.back_kb(calls.SettingsNavigation(to="raise").pack())
+    )
+
+
+@router.callback_query(F.data == "switch_auto_reminder_enabled")
+async def callback_switch_auto_reminder_enabled(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_reminder = _ensure_auto_reminder_config(config)
+    auto_reminder["enabled"] = not bool(auto_reminder.get("enabled", False))
+    sett.set("config", config)
+    return await callback_settings_navigation(callback, calls.SettingsNavigation(to="auto_reminder"), state)
+
+
+@router.callback_query(F.data == "set_auto_reminder_interval")
+async def callback_set_auto_reminder_interval(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_reminder = _ensure_auto_reminder_config(config)
+    current_interval = auto_reminder.get("interval_hours", 24.0)
+
+    await state.set_state(states.AutoReminderStates.waiting_for_interval_hours)
+
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=(
+            "⏱ <b>Изменение интервала авто-напоминаний</b>\n\n"
+            f"Текущий интервал: <b>{float(current_interval):g}</b> ч.\n\n"
+            "Введите новый интервал в часах ↓\n\n"
+            "<i>Напоминание будет отправляться не чаще указанного интервала.</i>"
+        ),
+        reply_markup=templ.back_kb(calls.SettingsNavigation(to="auto_reminder").pack()),
+    )
+
+
+@router.callback_query(F.data == "set_auto_reminder_max_reminders")
+async def callback_set_auto_reminder_max_reminders(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_reminder = _ensure_auto_reminder_config(config)
+    current_max = int(auto_reminder.get("max_reminders", 3))
+    current_text = "♾ Без лимита" if current_max == 0 else str(current_max)
+
+    await state.set_state(states.AutoReminderStates.waiting_for_max_reminders)
+
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=(
+            "🔢 <b>Изменение лимита напоминаний</b>\n\n"
+            f"Текущий лимит: <b>{current_text}</b>\n\n"
+            "Введите новое значение:\n"
+            "• <code>0</code> — без лимита\n"
+            "• <code>1, 2, 3...</code> — ограничение по количеству напоминаний"
+        ),
+        reply_markup=templ.back_kb(calls.SettingsNavigation(to="auto_reminder").pack()),
+    )
+
+
+@router.callback_query(F.data == "set_auto_reminder_message_text")
+async def callback_set_auto_reminder_message_text(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_reminder = _ensure_auto_reminder_config(config)
+    current_text = html.escape(str(auto_reminder.get("message_text") or ""))
+
+    await state.set_state(states.AutoReminderStates.waiting_for_message_text)
+
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=(
+            "✏️ <b>Изменение текста напоминания</b>\n\n"
+            f"<b>Текущий текст:</b>\n<blockquote>{current_text or 'Не задан'}</blockquote>\n\n"
+            "Доступные теги:\n"
+            "• <code>{deal_link}</code>\n"
+            "• <code>{buyer_name}</code>\n"
+            "Введите новый текст напоминания ↓"
+        ),
+        reply_markup=templ.back_kb(calls.SettingsNavigation(to="auto_reminder").pack()),
     )
 
 

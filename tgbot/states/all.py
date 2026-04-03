@@ -67,6 +67,12 @@ class ReviewMonitorStates(StatesGroup):
     waiting_for_days = State()
 
 
+class AutoReminderStates(StatesGroup):
+    waiting_for_interval_hours = State()
+    waiting_for_max_reminders = State()
+    waiting_for_message_text = State()
+
+
 class RaiseItemsStates(StatesGroup):
     waiting_for_new_included_raise_item_keyphrases = State()
     waiting_for_new_included_raise_items_keyphrases_file = State()
