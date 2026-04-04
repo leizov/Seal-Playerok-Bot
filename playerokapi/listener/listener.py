@@ -331,9 +331,25 @@ class EventListener:
 
                 # Если это новый чат (нет сохраненного ID)
                 if not last_known_id:
-                    # Получаем всю историю сообщений для нового чата
 
-                    msg_list = self.account.get_chat_messages(new_chat.id, 24)
+                    # фаст чек: если последнее сообщение чата - сделка, и оно прилетело позже старта слушателя,
+                    # то дальше не идём йоу
+                    if (
+                        self.__startup_time and last_msg.created_at > self.__startup_time
+                        and last_msg.text == "{{ITEM_PAID}}" and last_msg.deal
+                    ):
+                        events.extend(self.parse_message_event(last_msg, new_chat))
+
+                        # Сохраняем ID и время для будущих проверок
+                        self._set_last_message_checkpoint(
+                            new_chat.id,
+                            new_chat.last_message.id,
+                            new_chat.last_message.created_at
+                        )
+                        continue
+
+                    # Получаем всю историю сообщений для нового чата
+                    msg_list = self.account.get_chat_messages(new_chat.id, 16)
                     new_msgs = []
 
                     is_old_chat = False
@@ -351,7 +367,7 @@ class EventListener:
                         new_msgs.append(msg)
 
                     if not is_old_chat and not has_new_deal:
-                        # Переносим ретраи в фон, чтобы не блокировать основной polling-цикл.
+                        # Переносим ретраи в фон, чтобы не блокировать основной, бом бом цикл.
                         if self._enqueue_new_chat_search(new_chat):
                             self.__logger.info(
                                 f'Поймал абсолютно новый чат без сделки, отправляю в фоновый ретрай: {new_chat.id}'
@@ -377,7 +393,7 @@ class EventListener:
 
                 # Получаем историю сообщений для существующего чата
                 try:
-                    msg_list = self.account.get_chat_messages(new_chat.id, 24)
+                    msg_list = self.account.get_chat_messages(new_chat.id, 16)
                 except Exception as e:
                     self.__logger.warning(f"Ошибка при получении чата: {e}\n(чат будет обработан при следующем запросе)")
                     last_traceback = traceback.format_exc()
@@ -409,7 +425,7 @@ class EventListener:
 
                     events.extend(self.parse_message_event(msg, new_chat))
 
-                # Обновляем ID и время последнего обработанного сообщения
+                # Обновляем id и время последнего обработанного сообщения
                 if new_msgs:
                     latest_msg = new_msgs[0]
                     self._set_last_message_checkpoint(new_chat.id, latest_msg.id, latest_msg.created_at)
@@ -487,7 +503,7 @@ class EventListener:
                         self.__logger.warning(error_log)
                         time.sleep(error_delay)
 
-                    next_chats = self.account.get_chats(24)
+                    next_chats = self.account.get_chats(10)
                     if not init_chats:
                         # Первый запуск - инициализируем чаты
                         events = self.initialize_chats(next_chats)

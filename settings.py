@@ -356,9 +356,10 @@ def set_json(path: str, new: dict):
             json.dump(new, f, indent=4, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-
+        try:
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        except:
+            pass
         logger.debug(f"[set_json] Запись завершена, файл синхронизирован")
 
         with open(path, 'r', encoding='utf-8') as f:
