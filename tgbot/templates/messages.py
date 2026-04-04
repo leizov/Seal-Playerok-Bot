@@ -61,7 +61,7 @@ def messages_greeting_kb():
     msg_data = messages.get("first_message", {})
     enabled = msg_data.get("enabled", False)
 
-    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+    toggle_text = "🟢 Включено" if enabled else "🔴 Выключено"
 
     rows = [
         [InlineKeyboardButton(text=toggle_text, callback_data=calls.AutoResponseToggle(message_type="greeting").pack())],
@@ -104,7 +104,7 @@ def messages_confirmation_seller_kb():
     msg_data = messages.get("deal_sent", {})
     enabled = msg_data.get("enabled", False)
 
-    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+    toggle_text = "🟢 Включено" if enabled else "🔴 Выключено"
 
     rows = [
         [InlineKeyboardButton(text=toggle_text, callback_data=calls.AutoResponseToggle(message_type="confirmation_seller").pack())],
@@ -146,7 +146,7 @@ def messages_confirmation_buyer_kb():
     msg_data = messages.get("deal_confirmed", {})
     enabled = msg_data.get("enabled", False)
 
-    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+    toggle_text = "🟢 Включено" if enabled else "🔴 Выключено"
 
     rows = [
         [InlineKeyboardButton(text=toggle_text, callback_data=calls.AutoResponseToggle(message_type="confirmation_buyer").pack())],
@@ -188,7 +188,7 @@ def messages_deal_has_problem_kb():
     msg_data = messages.get("deal_has_problem", {})
     enabled = msg_data.get("enabled", False)
 
-    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+    toggle_text = "🟢 Включено" if enabled else "🔴 Выключено"
 
     rows = [
         [InlineKeyboardButton(text=toggle_text, callback_data=calls.AutoResponseToggle(message_type="deal_has_problem").pack())],
@@ -230,7 +230,7 @@ def messages_deal_problem_resolved_kb():
     msg_data = messages.get("deal_problem_resolved", {})
     enabled = msg_data.get("enabled", False)
 
-    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+    toggle_text = "🟢 Включено" if enabled else "🔴 Выключено"
 
     rows = [
         [InlineKeyboardButton(text=toggle_text, callback_data=calls.AutoResponseToggle(message_type="deal_problem_resolved").pack())],
@@ -255,7 +255,6 @@ def messages_review_text():
         ⭐ <b>Сообщение при получении отзыва</b>
 
         Это сообщение отправляется покупателю после того, как он оставит отзыв.
-        !!! СУПЕР ВАЖНО: для того чтобы эти сообщения отправлялись, должна быть включена опция Мониторинг отзывов !!!
 
         <b>Статус:</b> {status}
 
@@ -273,7 +272,7 @@ def messages_review_kb():
     msg_data = messages.get("new_review_response", {})
     enabled = msg_data.get("enabled", False)
 
-    toggle_text = "🔴 Выключить" if enabled else "🟢 Включить"
+    toggle_text = "🟢 Включено" if enabled else "🔴 Выключено"
 
     rows = [
         [InlineKeyboardButton(text=toggle_text, callback_data=calls.AutoResponseToggle(message_type="review").pack())],

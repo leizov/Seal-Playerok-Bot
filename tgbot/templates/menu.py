@@ -44,7 +44,6 @@ def menu_kb(page: int = 0):
             [InlineKeyboardButton(text="🔌 Плагины", callback_data=calls.PluginsPagination(page=0).pack())],
             [InlineKeyboardButton(text="🚀 Авто-выдача", callback_data=calls.AutoDeliveriesPagination(page=0).pack())],
             [InlineKeyboardButton(text="🤖 Автоответ", callback_data=calls.MessagesNavigation(to="main").pack())],
-            [InlineKeyboardButton(text="⭐ Мониторинг отзывов", callback_data=calls.ReviewMonitorNavigation(to="main").pack())],
         ]
     else:
         # Страница 2: Дополнительные разделы

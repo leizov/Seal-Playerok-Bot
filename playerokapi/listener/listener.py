@@ -6,10 +6,13 @@ import time
 import traceback
 import threading
 import queue
+import json
+import os
 
 from ..account import Account
 from ..types import ChatList, ChatMessage, Chat
 from .events import *
+import paths
 
 
 class EventListener:
@@ -33,7 +36,15 @@ class EventListener:
         self.__deal_search_queue: queue.Queue[Chat] = queue.Queue()
         self.__async_events_queue: queue.Queue[list] = queue.Queue()
         self.__deal_search_worker: threading.Thread | None = None
+        self.__review_monitor_worker: threading.Thread | None = None
         self.__stop_worker = threading.Event()
+        self.__review_monitor_lock = threading.Lock()
+        self.__review_monitor_file = paths.DEALS_MONITOR_FILE
+        self.__review_poll_interval_seconds = 30
+        self.__review_primary_check_delay_seconds = 10
+        self.__review_wait_timeout_seconds = 5 * 60
+        self.__pending_review_checks: list[dict[str, str]] = []
+        self._load_pending_reviews_from_storage()
 
     def _get_last_message_id(self, chat_id: str) -> str | None:
         with self.__state_lock:
@@ -67,15 +78,22 @@ class EventListener:
             self.__pending_new_deal_chats.discard(chat_id)
 
     def _start_workers(self):
-        if self.__deal_search_worker and self.__deal_search_worker.is_alive():
-            return
         self.__stop_worker.clear()
-        self.__deal_search_worker = threading.Thread(
-            target=self._deal_search_worker_loop,
-            daemon=True,
-            name="playerok-deal-search-worker",
-        )
-        self.__deal_search_worker.start()
+        if not self.__deal_search_worker or not self.__deal_search_worker.is_alive():
+            self.__deal_search_worker = threading.Thread(
+                target=self._deal_search_worker_loop,
+                daemon=True,
+                name="playerok-deal-search-worker",
+            )
+            self.__deal_search_worker.start()
+
+        if not self.__review_monitor_worker or not self.__review_monitor_worker.is_alive():
+            self.__review_monitor_worker = threading.Thread(
+                target=self._review_monitor_worker_loop,
+                daemon=True,
+                name="playerok-review-monitor-worker",
+            )
+            self.__review_monitor_worker.start()
 
     def _stop_workers(self):
         self.__stop_worker.set()
@@ -151,6 +169,183 @@ class EventListener:
             except queue.Empty:
                 break
         return events
+
+    def _load_pending_reviews_from_storage(self):
+        if not self.__review_monitor_file:
+            return
+
+        if not os.path.exists(self.__review_monitor_file):
+            return
+
+        try:
+            with open(self.__review_monitor_file, "r", encoding="utf-8") as f:
+                raw_data = json.load(f)
+        except Exception as e:
+            self.__logger.warning(f"Не удалось загрузить файл мониторинга отзывов: {e}")
+            return
+
+        loaded_records: list[dict[str, str]] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if isinstance(raw_data, dict):
+            # старый формат {chat_id, started_at, ...}}
+            for deal_id, value in raw_data.items():
+                if not isinstance(value, dict):
+                    continue
+                chat_id = str(value.get("chat_id") or "")
+                queued_at = str(value.get("started_at") or value.get("queued_at") or now_iso)
+                loaded_records.append(
+                    {
+                        "deal_id": str(deal_id),
+                        "chat_id": chat_id,
+                        "queued_at": queued_at,
+                    }
+                )
+        elif isinstance(raw_data, list):
+            for record in raw_data:
+                if not isinstance(record, dict):
+                    continue
+                deal_id = str(record.get("deal_id") or "")
+                chat_id = str(record.get("chat_id") or "")
+                queued_at = str(record.get("queued_at") or record.get("started_at") or now_iso)
+                if not deal_id:
+                    continue
+                loaded_records.append(
+                    {
+                        "deal_id": deal_id,
+                        "chat_id": chat_id,
+                        "queued_at": queued_at,
+                    }
+                )
+
+        with self.__review_monitor_lock:
+            self.__pending_review_checks = loaded_records
+
+    def _save_pending_reviews_to_storage(self):
+        if not self.__review_monitor_file:
+            return
+
+        os.makedirs(os.path.dirname(self.__review_monitor_file), exist_ok=True)
+        with self.__review_monitor_lock:
+            data_to_save = list(self.__pending_review_checks)
+
+        try:
+            with open(self.__review_monitor_file, "w", encoding="utf-8") as f:
+                json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.__logger.warning(f"Не удалось сохранить файл мониторинга отзывов: {e}")
+
+    @staticmethod
+    def _iso_to_timestamp(iso_value: str | None) -> float:
+        if not iso_value:
+            return time.time()
+        try:
+            normalized = str(iso_value).replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized).timestamp()
+        except Exception:
+            return time.time()
+
+    def _emit_new_review_event(self, deal, chat: Chat):
+        self.__async_events_queue.put([NewReviewEvent(deal, chat)])
+
+    def _append_pending_review(self, deal_id: str, chat_id: str):
+        if not deal_id or not chat_id:
+            return
+        record = {
+            "deal_id": str(deal_id),
+            "chat_id": str(chat_id),
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with self.__review_monitor_lock:
+            self.__pending_review_checks.append(record)
+        self._save_pending_reviews_to_storage()
+
+    def _spawn_primary_review_check(self, deal_id: str, chat: Chat):
+        chat_id = str(getattr(chat, "id", "") or "")
+        if not deal_id or not chat_id:
+            return
+
+        def _worker():
+            try:
+                time.sleep(self.__review_primary_check_delay_seconds)
+                if self.__stop_worker.is_set():
+                    return
+                try:
+                    deal = self.account.get_deal(deal_id)
+                except Exception as e:
+                    self.__logger.warning(f"Ошибка первичной проверки отзыва для сделки {deal_id}: {e}")
+                    self._append_pending_review(deal_id, chat_id)
+                    return
+
+                if getattr(deal, "review", None) is not None:
+                    self._emit_new_review_event(deal, chat)
+                    return
+
+                self._append_pending_review(deal_id, chat_id)
+            except Exception as e:
+                self.__logger.warning(f"Ошибка потока первичной проверки отзыва для сделки {deal_id}: {e}")
+
+        threading.Thread(
+            target=_worker,
+            daemon=True,
+            name=f"playerok-review-primary-{deal_id}",
+        ).start()
+
+    def _review_monitor_worker_loop(self):
+        while not self.__stop_worker.is_set():
+            interrupted = self.__stop_worker.wait(self.__review_poll_interval_seconds)
+            if interrupted:
+                break
+
+            with self.__review_monitor_lock:
+                records_snapshot = list(self.__pending_review_checks)
+
+            if not records_snapshot:
+                continue
+
+            now_ts = time.time()
+            updated_records: list[dict[str, str]] = []
+            changed = False
+
+            for record in records_snapshot:
+                deal_id = str(record.get("deal_id") or "")
+                chat_id = str(record.get("chat_id") or "")
+                queued_at = record.get("queued_at")
+
+                if not deal_id or not chat_id:
+                    changed = True
+                    continue
+
+                queued_ts = self._iso_to_timestamp(queued_at)
+                if now_ts - queued_ts > self.__review_wait_timeout_seconds:
+                    changed = True
+                    continue
+
+                try:
+                    deal = self.account.get_deal(deal_id)
+                except Exception as e:
+                    self.__logger.warning(f"Ошибка фоновой проверки отзыва для сделки {deal_id}: {e}")
+                    updated_records.append(record)
+                    continue
+
+                if getattr(deal, "review", None) is None:
+                    updated_records.append(record)
+                    continue
+
+                try:
+                    chat = self.account.get_chat(chat_id)
+                    self._emit_new_review_event(deal, chat)
+                except Exception as e:
+                    self.__logger.warning(
+                        f"Не удалось сформировать событие отзыва для сделки {deal_id}: {e}"
+                    )
+                    updated_records.append(record)
+                changed = True
+
+            if changed:
+                with self.__review_monitor_lock:
+                    self.__pending_review_checks = updated_records
+                self._save_pending_reviews_to_storage()
 
 
     def parse_chat_event(
@@ -250,6 +445,7 @@ class EventListener:
         elif message.text == "{{ITEM_SENT}}" and message.deal is not None:
             return [ItemSentEvent(message.deal, chat)]
         elif message.text == "{{DEAL_CONFIRMED}}" and message.deal is not None:
+            self._spawn_primary_review_check(str(message.deal.id), chat)
             return [
                 DealConfirmedEvent(message.deal, chat),
                 # DealStatusChangedEvent(message.deal, chat),
@@ -448,6 +644,7 @@ class EventListener:
         ChatInitializedEvent
         | NewMessageEvent
         | NewDealEvent
+        | NewReviewEvent
         | ItemPaidEvent
         | ItemSentEvent
         | DealConfirmedEvent
@@ -471,6 +668,7 @@ class EventListener:
         `playerokapi.listener.events.ChatInitializedEvent` \
         _or_ `playerokapi.listener.events.NewMessageEvent` \
         _or_ `playerokapi.listener.events.NewDealEvent` \
+        _or_ `playerokapi.listener.events.NewReviewEvent` \
         _or_ `playerokapi.listener.events.ItemPaidEvent` \
         _or_ `playerokapi.listener.events.ItemSentEvent` \
         _or_ `playerokapi.listener.events.DealConfirmedEvent` \

@@ -63,10 +63,6 @@ class AutoResponseStates(StatesGroup):
     waiting_for_review_text = State()
 
 
-class ReviewMonitorStates(StatesGroup):
-    waiting_for_days = State()
-
-
 class AutoReminderStates(StatesGroup):
     waiting_for_interval_hours = State()
     waiting_for_max_reminders = State()

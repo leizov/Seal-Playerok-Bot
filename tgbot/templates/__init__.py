@@ -7,7 +7,6 @@ from .profile import *
 from .stats import *
 from .logs import *
 from .messages import *
-from .review_monitor import *
 from .error_stats import *
 
 from .settings import *

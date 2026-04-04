@@ -270,22 +270,3 @@ async def callback_logs_navigation(callback: CallbackQuery, callback_data: calls
         await callback.answer("❌ Произошла ошибка при загрузке логов.", show_alert=True)
 
 
-@router.callback_query(calls.ReviewMonitorNavigation.filter())
-async def callback_review_monitor_navigation(callback: CallbackQuery, callback_data: calls.ReviewMonitorNavigation, state: FSMContext):
-    try:
-        await state.set_state(None)
-        to = callback_data.to
-        
-        if to in ["default", "main"]:
-            await throw_float_message(
-                state=state,
-                message=callback.message,
-                text=templ.review_monitor_text(),
-                reply_markup=templ.review_monitor_kb(),
-                callback=callback
-            )
-        else:
-            await callback.answer("❌ Неизвестный раздел мониторинга отзывов.", show_alert=True)
-            
-    except Exception as e:
-        await callback.answer("❌ Произошла ошибка при загрузке мониторинга отзывов.", show_alert=True)

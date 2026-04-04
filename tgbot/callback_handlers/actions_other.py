@@ -139,6 +139,15 @@ async def callback_deal_view(callback: CallbackQuery, callback_data: calls.DealV
 
     deal_id = callback_data.de_id
     try:
+        try:
+            await callback.message.edit_text(
+                "🧾 <b>Загружаю сделку...</b>",
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except TelegramAPIError:
+            pass
+
         full_deal = plbot.playerok_account.get_deal(deal_id)
         username = getattr(getattr(full_deal, "user", None), "username", None)
         chat_id = getattr(getattr(full_deal, "chat", None), "id", None)

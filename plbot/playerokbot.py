@@ -30,7 +30,7 @@ from tgbot.telegrambot import get_telegram_bot, get_telegram_bot_loop
 from tgbot.templates import log_text, log_new_mess_kb, log_new_deal_kb
 from tgbot.utils.message_formatter import format_system_message
 
-from .stats import get_stats, load_stats, record_new_deal, record_raise, record_refund, set_stats
+from .stats import get_stats, load_stats, record_new_deal, record_raise, record_refund, record_review, set_stats
 from .raise_times import get_raise_times, set_raise_times, load_raise_times, should_raise_item, set_last_raise_time
 from .auto_reminder import (
     add_deal_to_monitor as add_deal_to_auto_reminder,
@@ -71,7 +71,6 @@ class PlayerokBot:
         self.account = None
         self.playerok_account = None
         self._listener_task = None
-        self._review_monitor_task = None
         self._auto_raise_items_task = None
         self._auto_reminder_task = None
 
@@ -166,12 +165,6 @@ class PlayerokBot:
             except:
                 pass
 
-        if self._review_monitor_task:
-            try:
-                self._review_monitor_task.cancel()
-            except:
-                pass
-
         if self._auto_raise_items_task:
             try:
                 self._auto_raise_items_task.cancel()
@@ -200,16 +193,6 @@ class PlayerokBot:
             listener = EventListener(self.account)
             for event in listener.listen(requests_delay=self.config["playerok"]["api"]["listener_requests_delay"]):
                 await call_playerok_event(event.type, [self, event])
-
-        async def review_monitor_loop():
-            from plbot.review_monitor import check_reviews_task
-            await check_reviews_task(
-                account=self.account,
-                send_message_callback=self.send_message,
-                msg_callback=self.msg,
-                config=self.config,
-                log_new_review_callback=self.send_new_review_notification
-            )
 
         async def auto_raise_items_loop():
             """Цикл автоподнятия товаров."""
@@ -291,7 +274,6 @@ class PlayerokBot:
 
         run_async_in_thread(self.playerok_bot_start)
         self._listener_task = run_async_in_thread(listener_loop)
-        self._review_monitor_task = run_async_in_thread(review_monitor_loop)
         self._auto_raise_items_task = run_async_in_thread(auto_raise_items_loop)
         self._auto_reminder_task = run_async_in_thread(auto_reminder_loop)
 
@@ -1402,13 +1384,6 @@ class PlayerokBot:
                           self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
 
-        # Добавляем сделку в мониторинг отзывов, если функция включена
-        review_config = self.config.get("playerok", {}).get("review_monitoring", {})
-        if review_config.get("enabled", False):
-            from plbot.review_monitor import add_deal_to_monitor
-            add_deal_to_monitor(event.deal, event.chat.id)
-            self.logger.info(f"Сделка {event.deal.id} добавлена в мониторинг отзывов")
-
     async def _on_deal_rolled_back(self, event: DealConfirmedEvent):
         if not self.is_connected or self.account is None:
             return
@@ -1471,6 +1446,26 @@ class PlayerokBot:
                           self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
 
+    async def _on_new_review(self, event: NewReviewEvent):
+        if not self.is_connected or self.account is None:
+            return
+        if event.deal.user.id == self.account.id:
+            return
+
+        await self.send_new_review_notification(event.deal, event.chat.id)
+
+        response_text = self.msg(
+            "new_review_response",
+            username=event.deal.user.username,
+            deal_id=event.deal.id,
+            deal_item_name=event.deal.item.name,
+            deal_item_price=event.deal.item.price,
+        )
+        if response_text:
+            self.send_message(event.chat.id, response_text)
+
+        record_review()
+
 
     #old handler
     async def _on_deal_status_changed(self, event: DealStatusChangedEvent):
@@ -1508,13 +1503,6 @@ class PlayerokBot:
         #     self.send_message(event.chat.id, self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         if event.deal.status is ItemDealStatuses.CONFIRMED:
             self.send_message(event.chat.id, self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
-
-            # Добавляем сделку в мониторинг отзывов, если функция включена
-            review_config = self.config.get("playerok", {}).get("review_monitoring", {})
-            if review_config.get("enabled", False):
-                from plbot.review_monitor import add_deal_to_monitor
-                add_deal_to_monitor(event.deal, event.chat.id)
-                self.logger.info(f"Сделка {event.deal.id} добавлена в мониторинг отзывов")
         elif event.deal.status is ItemDealStatuses.ROLLED_BACK:
             self.send_message(event.chat.id, self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
 
@@ -1613,6 +1601,7 @@ class PlayerokBot:
         add_playerok_event_handler(EventTypes.NEW_MESSAGE, PlayerokBot._on_new_message, 0)
         add_playerok_event_handler(EventTypes.DEAL_HAS_PROBLEM, PlayerokBot._on_new_problem, 0)
         add_playerok_event_handler(EventTypes.NEW_DEAL, PlayerokBot._on_new_deal, 0)
+        add_playerok_event_handler(EventTypes.NEW_REVIEW, PlayerokBot._on_new_review, 0)
         add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_paid, 0)
         # add_playerok_event_handler(EventTypes.DEAL_STATUS_CHANGED, PlayerokBot._on_deal_status_changed, 0)
         add_playerok_event_handler(EventTypes.DEAL_CONFIRMED, PlayerokBot._on_deal_confirmed, 0)
@@ -1623,4 +1612,4 @@ class PlayerokBot:
 
         self._start_listener()
 
-        self.logger.info(f"{SUCCESS_COLOR}✅ Фоновые задачи запущены: listener, review_monitor")
+        self.logger.info(f"{SUCCESS_COLOR}✅ Фоновые задачи запущены: listener")

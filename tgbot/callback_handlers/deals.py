@@ -100,8 +100,6 @@ def _time_sort_key(deal: dict) -> tuple[int, float]:
     if dt is not None:
         return 1, dt.timestamp()
 
-    # Fallback when API does not return created_at:
-    # preserve stable order based on loading sequence.
     seq = deal.get("_seq", 0)
     try:
         seq = int(seq)

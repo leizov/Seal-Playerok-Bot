@@ -8,7 +8,6 @@ from .actions_other import router as actions_other_router
 from .page import router as page_router
 from .quick_replies import router as quick_replies_router
 from .chat_history import router as chat_history_router
-from .review_monitor import router as review_monitor_router
 from .proxy_management import router as proxy_management_router
 from .error_stats import router as error_stats_router
 from .config_backup import router as config_backup_router
@@ -25,7 +24,6 @@ router.include_routers(
     actions_other_router,
     quick_replies_router,
     chat_history_router,
-    review_monitor_router,
     proxy_management_router,
     error_stats_router,
     config_backup_router,
