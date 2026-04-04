@@ -64,7 +64,7 @@
 Рекомендуем:
 - **[play2go.cloud](https://play2go.cloud/?ref_id=mUMKLA3vhJg)** 
 - **[FirstByte VDS](https://firstbyte.ru/?from=192586)** 
-- **[Bhost.fun](https://bhost.fun/register?ref=seal)** — от **40 ₽/месяц**
+- **[Bhost.fun](https://bhost.fun/register?ref=seal)**
 
 > 💡 На **Bhost.fun** установка ещё проще: не нужно вводить никакие команды.  
 > При покупке сервера в меню **«Настройки сервера»** в графе **«Програмное обеспечение»** просто выберите **Playerok**.
