@@ -39,3 +39,11 @@ class IncludedRaiseItemsPagination(CallbackData, prefix="inrapag"):
 
 class ExcludedRaiseItemsPagination(CallbackData, prefix="exrapag"):
     page: int
+
+
+class IncludedAutoCompleteItemsPagination(CallbackData, prefix="inacpag"):
+    page: int
+
+
+class ExcludedAutoCompleteItemsPagination(CallbackData, prefix="exacpag"):
+    page: int

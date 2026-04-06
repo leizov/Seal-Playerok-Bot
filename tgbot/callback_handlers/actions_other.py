@@ -17,7 +17,9 @@ from .pagination import (
     callback_included_restore_items_pagination, 
     callback_excluded_restore_items_pagination,
     callback_included_raise_items_pagination,
-    callback_excluded_raise_items_pagination
+    callback_excluded_raise_items_pagination,
+    callback_included_auto_complete_items_pagination,
+    callback_excluded_auto_complete_items_pagination,
 )
 from .page import callback_plugin_page
 
@@ -658,3 +660,135 @@ async def callback_add_excluded_raise_item(callback: CallbackQuery, state: FSMCo
 @router.callback_query(F.data == "add_excluded_raise_items_from_file")
 async def callback_add_excluded_raise_items_from_file(callback: CallbackQuery, state: FSMContext):
     return await callback_send_new_excluded_raise_items_keyphrases_file(callback, state)
+
+
+@router.callback_query(calls.DeleteIncludedAutoCompleteItem.filter())
+async def callback_delete_included_auto_complete_item(callback: CallbackQuery, callback_data: calls.DeleteIncludedAutoCompleteItem, state: FSMContext):
+    try:
+        await state.set_state(None)
+        index = callback_data.index
+        if index is None:
+            raise Exception("❌ Включённый лот не был найден, повторите процесс с самого начала")
+
+        auto_complete_items = sett.get("auto_complete_items")
+        auto_complete_items.setdefault("included", [])
+        auto_complete_items["included"].pop(index)
+        sett.set("auto_complete_items", auto_complete_items)
+
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        return await callback_included_auto_complete_items_pagination(
+            callback,
+            calls.IncludedAutoCompleteItemsPagination(page=last_page),
+            state,
+        )
+    except Exception as e:
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.settings_auto_complete_included_float_text(e),
+            reply_markup=templ.back_kb(calls.IncludedAutoCompleteItemsPagination(page=last_page).pack()),
+        )
+
+
+@router.callback_query(calls.DeleteExcludedAutoCompleteItem.filter())
+async def callback_delete_excluded_auto_complete_item(callback: CallbackQuery, callback_data: calls.DeleteExcludedAutoCompleteItem, state: FSMContext):
+    try:
+        await state.set_state(None)
+        index = callback_data.index
+        if index is None:
+            raise Exception("❌ Исключённый лот не был найден, повторите процесс с самого начала")
+
+        auto_complete_items = sett.get("auto_complete_items")
+        auto_complete_items.setdefault("excluded", [])
+        auto_complete_items["excluded"].pop(index)
+        sett.set("auto_complete_items", auto_complete_items)
+
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        return await callback_excluded_auto_complete_items_pagination(
+            callback,
+            calls.ExcludedAutoCompleteItemsPagination(page=last_page),
+            state,
+        )
+    except Exception as e:
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.settings_auto_complete_excluded_float_text(e),
+            reply_markup=templ.back_kb(calls.ExcludedAutoCompleteItemsPagination(page=last_page).pack()),
+        )
+
+
+@router.callback_query(F.data == "send_new_included_auto_complete_items_keyphrases_file")
+async def callback_send_new_included_auto_complete_items_keyphrases_file(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.AutoCompleteDealsStates.waiting_for_new_included_auto_complete_items_keyphrases_file)
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=templ.settings_new_auto_complete_included_float_text(
+            "📄 Отправьте <b>.txt</b> файл с <b>ключевыми фразами</b>, по одной записи в строке (например: samp аккаунт, со всеми данными)"
+        ),
+        reply_markup=templ.back_kb(calls.IncludedAutoCompleteItemsPagination(page=last_page).pack()),
+    )
+
+
+@router.callback_query(F.data == "add_included_auto_complete_item")
+async def callback_add_included_auto_complete_item(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.AutoCompleteDealsStates.waiting_for_new_included_auto_complete_item_keyphrases)
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=templ.settings_new_auto_complete_included_float_text(
+            "✏️ Введите <b>ключевые фразы</b> для лота через запятую (например: samp аккаунт, со всеми данными) ↓"
+        ),
+        reply_markup=templ.back_kb(calls.IncludedAutoCompleteItemsPagination(page=last_page).pack()),
+    )
+
+
+@router.callback_query(F.data == "add_included_auto_complete_items_from_file")
+async def callback_add_included_auto_complete_items_from_file(callback: CallbackQuery, state: FSMContext):
+    return await callback_send_new_included_auto_complete_items_keyphrases_file(callback, state)
+
+
+@router.callback_query(F.data == "send_new_excluded_auto_complete_items_keyphrases_file")
+async def callback_send_new_excluded_auto_complete_items_keyphrases_file(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.AutoCompleteDealsStates.waiting_for_new_excluded_auto_complete_items_keyphrases_file)
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=templ.settings_new_auto_complete_excluded_float_text(
+            "📄 Отправьте <b>.txt</b> файл с <b>ключевыми фразами</b>, по одной записи в строке (например: samp аккаунт, со всеми данными)"
+        ),
+        reply_markup=templ.back_kb(calls.ExcludedAutoCompleteItemsPagination(page=last_page).pack()),
+    )
+
+
+@router.callback_query(F.data == "add_excluded_auto_complete_item")
+async def callback_add_excluded_auto_complete_item(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    last_page = data.get("last_page", 0)
+    await state.set_state(states.AutoCompleteDealsStates.waiting_for_new_excluded_auto_complete_item_keyphrases)
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=templ.settings_new_auto_complete_excluded_float_text(
+            "✏️ Введите <b>ключевые фразы</b> для лота через запятую (например: samp аккаунт, со всеми данными) ↓"
+        ),
+        reply_markup=templ.back_kb(calls.ExcludedAutoCompleteItemsPagination(page=last_page).pack()),
+    )
+
+
+@router.callback_query(F.data == "add_excluded_auto_complete_items_from_file")
+async def callback_add_excluded_auto_complete_items_from_file(callback: CallbackQuery, state: FSMContext):
+    return await callback_send_new_excluded_auto_complete_items_keyphrases_file(callback, state)

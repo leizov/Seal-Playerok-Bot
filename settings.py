@@ -50,11 +50,14 @@ CONFIG = SettingsFile(
             },
             "auto_raise_items": {
                 "enabled": False,
+                "mode": "interval",
                 "interval_hours": 24.0,
+                "timings": [],
                 "all": True
             },
             "auto_complete_deals": {
-                "enabled": False
+                "enabled": False,
+                "all": True
             },
             "auto_reminder": {
                 "enabled": False,
@@ -207,6 +210,15 @@ AUTO_RAISE_ITEMS = SettingsFile(
         "excluded": []
     }
 )
+AUTO_COMPLETE_ITEMS = SettingsFile(
+    name="auto_complete_items",
+    path=paths.AUTO_COMPLETE_ITEMS_FILE,
+    need_restore=False,
+    default={
+        "included": [],
+        "excluded": []
+    }
+)
 QUICK_REPLIES = SettingsFile(
     name="quick_replies",
     path=paths.QUICK_REPLIES_FILE,
@@ -222,7 +234,17 @@ PROXY_LIST = SettingsFile(
     need_restore=False,
     default={}  # {id: proxy_string}
 )
-DATA = [CONFIG, MESSAGES, CUSTOM_COMMANDS, AUTO_DELIVERIES, AUTO_RESTORE_ITEMS, AUTO_RAISE_ITEMS, QUICK_REPLIES, PROXY_LIST]
+DATA = [
+    CONFIG,
+    MESSAGES,
+    CUSTOM_COMMANDS,
+    AUTO_DELIVERIES,
+    AUTO_RESTORE_ITEMS,
+    AUTO_RAISE_ITEMS,
+    AUTO_COMPLETE_ITEMS,
+    QUICK_REPLIES,
+    PROXY_LIST,
+]
 
 
 def validate_config(config, default):

@@ -80,3 +80,11 @@ class DeleteExcludedRaiseItem(CallbackData, prefix="delexra"):
 
 class ErrorStatsDay(CallbackData, prefix="errday"):
     day: str
+
+
+class DeleteIncludedAutoCompleteItem(CallbackData, prefix="delinac"):
+    index: int
+
+
+class DeleteExcludedAutoCompleteItem(CallbackData, prefix="delexac"):
+    index: int

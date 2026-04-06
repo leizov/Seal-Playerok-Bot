@@ -75,6 +75,14 @@ class RaiseItemsStates(StatesGroup):
     waiting_for_new_excluded_raise_item_keyphrases = State()
     waiting_for_new_excluded_raise_items_keyphrases_file = State()
     waiting_for_raise_interval = State()
+    waiting_for_raise_timings = State()
+
+
+class AutoCompleteDealsStates(StatesGroup):
+    waiting_for_new_included_auto_complete_item_keyphrases = State()
+    waiting_for_new_included_auto_complete_items_keyphrases_file = State()
+    waiting_for_new_excluded_auto_complete_item_keyphrases = State()
+    waiting_for_new_excluded_auto_complete_items_keyphrases_file = State()
 
 
 class ConfigBackupStates(StatesGroup):

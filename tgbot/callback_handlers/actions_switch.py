@@ -19,6 +19,16 @@ from ..callback_handlers.page import callback_plugin_page
 router = Router()
 
 
+def _normalize_auto_raise_mode(auto_raise_config: dict) -> str:
+    mode = str(auto_raise_config.get("mode") or "interval").strip().lower()
+    if mode not in {"interval", "timing"}:
+        mode = "interval"
+    auto_raise_config["mode"] = mode
+    if not isinstance(auto_raise_config.get("timings"), list):
+        auto_raise_config["timings"] = []
+    return mode
+
+
 def _ensure_auto_reminder_config(config: dict) -> dict:
     playerok = config.setdefault("playerok", {})
     auto_reminder = playerok.setdefault("auto_reminder", {})
@@ -81,6 +91,16 @@ async def callback_switch_auto_raise_items_all(callback: CallbackQuery, state: F
     return await callback_settings_navigation(callback, calls.SettingsNavigation(to="raise"), state)
 
 
+@router.callback_query(F.data == "switch_auto_raise_items_mode")
+async def callback_switch_auto_raise_items_mode(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_raise_config = config["playerok"]["auto_raise_items"]
+    current_mode = _normalize_auto_raise_mode(auto_raise_config)
+    auto_raise_config["mode"] = "timing" if current_mode == "interval" else "interval"
+    sett.set("config", config)
+    return await callback_settings_navigation(callback, calls.SettingsNavigation(to="raise"), state)
+
+
 @router.callback_query(F.data == "set_auto_raise_items_interval")
 async def callback_set_auto_raise_items_interval(callback: CallbackQuery, state: FSMContext):
     config = sett.get("config")
@@ -97,6 +117,29 @@ async def callback_set_auto_raise_items_interval(callback: CallbackQuery, state:
              f"💡 <i>Товары будут подниматься автоматически\n"
              f"через указанное количество часов после последнего поднятия.</i>",
         reply_markup=templ.back_kb(calls.SettingsNavigation(to="raise").pack())
+    )
+
+
+@router.callback_query(F.data == "set_auto_raise_items_timing")
+async def callback_set_auto_raise_items_timing(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_raise_config = config["playerok"]["auto_raise_items"]
+    timings_raw = auto_raise_config.get("timings", [])
+    timings = timings_raw if isinstance(timings_raw, list) else []
+    current_timings = " ".join([str(t).strip() for t in timings if str(t).strip()]) or "не задано"
+
+    await state.set_state(states.RaiseItemsStates.waiting_for_raise_timings)
+
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        text=(
+            "🕒 <b>Изменение таймингов автоподнятия</b>\n\n"
+            f"Текущие тайминги: <b>{current_timings}</b>\n\n"
+            "Введите тайминги через пробел в формате <code>16</code> или <code>16:00</code> ↓\n\n"
+            "<i>Все тайминги применяются по МСК.</i>"
+        ),
+        reply_markup=templ.back_kb(calls.SettingsNavigation(to="raise").pack()),
     )
 
 
@@ -196,6 +239,15 @@ async def callback_switch_auto_complete_deals_enabled(callback: CallbackQuery, s
     data = await state.get_data()
     from_menu = data.get("from_menu", "other")
     return await callback_settings_navigation(callback, calls.SettingsNavigation(to=from_menu), state)
+
+
+@router.callback_query(F.data == "switch_auto_complete_deals_all")
+async def callback_switch_auto_complete_deals_all(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_complete_config = config["playerok"]["auto_complete_deals"]
+    auto_complete_config["all"] = not bool(auto_complete_config.get("all", True))
+    sett.set("config", config)
+    return await callback_settings_navigation(callback, calls.SettingsNavigation(to="auto_complete"), state)
 
 
 @router.callback_query(F.data == "switch_custom_commands_enabled")

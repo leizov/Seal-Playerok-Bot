@@ -39,6 +39,7 @@ CUSTOM_COMMANDS_FILE = os.path.join(BOT_SETTINGS_DIR, "custom_commands.json")
 AUTO_DELIVERIES_FILE = os.path.join(BOT_SETTINGS_DIR, "auto_deliveries.json")
 AUTO_RESTORE_ITEMS_FILE = os.path.join(BOT_SETTINGS_DIR, "auto_restore_items.json")
 AUTO_RAISE_ITEMS_FILE = os.path.join(BOT_SETTINGS_DIR, "auto_raise_items.json")
+AUTO_COMPLETE_ITEMS_FILE = os.path.join(BOT_SETTINGS_DIR, "auto_complete_items.json")
 QUICK_REPLIES_FILE = os.path.join(BOT_SETTINGS_DIR, "quick_replies.json")
 PROXY_LIST_FILE = os.path.join(BOT_SETTINGS_DIR, "proxy_list.json")
 

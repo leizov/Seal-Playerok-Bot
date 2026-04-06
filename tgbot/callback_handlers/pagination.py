@@ -87,3 +87,31 @@ async def callback_excluded_raise_items_pagination(callback: CallbackQuery, call
     page = callback_data.page
     await state.update_data(last_page=page)
     await throw_float_message(state, callback.message, templ.settings_raise_excluded_text(), templ.settings_raise_excluded_kb(page), callback)
+
+
+@router.callback_query(calls.IncludedAutoCompleteItemsPagination.filter())
+async def callback_included_auto_complete_items_pagination(callback: CallbackQuery, callback_data: calls.IncludedAutoCompleteItemsPagination, state: FSMContext):
+    await state.set_state(None)
+    page = callback_data.page
+    await state.update_data(last_page=page)
+    await throw_float_message(
+        state,
+        callback.message,
+        templ.settings_auto_complete_included_text(),
+        templ.settings_auto_complete_included_kb(page),
+        callback,
+    )
+
+
+@router.callback_query(calls.ExcludedAutoCompleteItemsPagination.filter())
+async def callback_excluded_auto_complete_items_pagination(callback: CallbackQuery, callback_data: calls.ExcludedAutoCompleteItemsPagination, state: FSMContext):
+    await state.set_state(None)
+    page = callback_data.page
+    await state.update_data(last_page=page)
+    await throw_float_message(
+        state,
+        callback.message,
+        templ.settings_auto_complete_excluded_text(),
+        templ.settings_auto_complete_excluded_kb(page),
+        callback,
+    )

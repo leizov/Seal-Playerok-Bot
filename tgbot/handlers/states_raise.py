@@ -12,6 +12,53 @@ from ..helpful import throw_float_message
 router = Router()
 
 
+def _parse_single_timing(raw_value: str) -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        raise ValueError("пустое значение")
+
+    if ":" in value:
+        parts = value.split(":")
+        if len(parts) != 2:
+            raise ValueError("ожидается формат HH:MM")
+        hour_str, minute_str = parts[0].strip(), parts[1].strip()
+        if not hour_str.isdigit() or not minute_str.isdigit():
+            raise ValueError("часы и минуты должны быть числами")
+        hour = int(hour_str)
+        minute = int(minute_str)
+    else:
+        if not value.isdigit():
+            raise ValueError("часы должны быть числом")
+        hour = int(value)
+        minute = 0
+
+    if hour < 0 or hour > 23:
+        raise ValueError("часы должны быть в диапазоне 0-23")
+    if minute < 0 or minute > 59:
+        raise ValueError("минуты должны быть в диапазоне 0-59")
+
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _parse_timings_text(raw_text: str) -> list[str]:
+    tokens = [token.strip() for token in str(raw_text or "").split() if token.strip()]
+    if not tokens:
+        raise Exception("❌ Введите хотя бы один тайминг, например: <code>16</code> или <code>16:00</code>")
+
+    parsed = []
+    for token in tokens:
+        try:
+            parsed.append(_parse_single_timing(token))
+        except ValueError:
+            raise Exception(
+                f"❌ Некорректный тайминг: <code>{token}</code>\n"
+                "Используйте формат <code>16</code> или <code>16:00</code>"
+            )
+
+    unique_sorted = sorted(set(parsed), key=lambda item: (int(item[:2]), int(item[3:])))
+    return unique_sorted
+
+
 @router.message(states.RaiseItemsStates.waiting_for_new_included_raise_item_keyphrases, F.text)
 async def handler_waiting_for_new_included_raise_item_keyphrases(message: types.Message, state: FSMContext):
     try: 
@@ -171,7 +218,7 @@ async def handler_waiting_for_raise_interval(message: types.Message, state: FSMC
         msg_text = message.text.strip()
 
         if ',' in msg_text:
-            msg_text.replace(',', '.')
+            msg_text = msg_text.replace(',', '.')
         interval_hours = float(msg_text)
         
         if interval_hours <= 0:
@@ -203,4 +250,31 @@ async def handler_waiting_for_raise_interval(message: types.Message, state: FSMC
             message=message,
             text=templ.settings_raise_float_text(e),
             reply_markup=templ.back_kb(calls.SettingsNavigation(to="raise").pack())
+        )
+
+
+@router.message(states.RaiseItemsStates.waiting_for_raise_timings, F.text)
+async def handler_waiting_for_raise_timings(message: types.Message, state: FSMContext):
+    try:
+        await state.set_state(None)
+        timings = _parse_timings_text(message.text.strip())
+
+        config = sett.get("config")
+        config["playerok"]["auto_raise_items"]["timings"] = timings
+        sett.set("config", config)
+
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.settings_raise_float_text(
+                f"✅ Тайминги автоподнятия сохранены: <code>{'</code> <code>'.join(timings)}</code>"
+            ),
+            reply_markup=templ.back_kb(calls.SettingsNavigation(to="raise").pack()),
+        )
+    except Exception as e:
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.settings_raise_float_text(e),
+            reply_markup=templ.back_kb(calls.SettingsNavigation(to="raise").pack()),
         )

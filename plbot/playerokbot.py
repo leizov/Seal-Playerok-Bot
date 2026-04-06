@@ -31,7 +31,17 @@ from tgbot.templates import log_text, log_new_mess_kb, log_new_deal_kb
 from tgbot.utils.message_formatter import format_system_message
 
 from .stats import get_stats, load_stats, record_new_deal, record_raise, record_refund, record_review, set_stats
-from .raise_times import get_raise_times, set_raise_times, load_raise_times, should_raise_item, set_last_raise_time
+from .raise_times import (
+    cleanup_completed_timings,
+    get_msk_now,
+    get_raise_times,
+    is_timing_completed,
+    load_raise_times,
+    mark_timing_completed,
+    set_last_raise_time,
+    set_raise_times,
+    should_raise_item,
+)
 from .auto_reminder import (
     add_deal_to_monitor as add_deal_to_auto_reminder,
     remove_deal_from_monitor as remove_deal_from_auto_reminder,
@@ -59,6 +69,7 @@ class PlayerokBot:
         self.auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
         self.auto_restore_items = sett.get("auto_restore_items")
         self.auto_raise_items = sett.get("auto_raise_items")
+        self.auto_complete_items = sett.get("auto_complete_items")
 
         load_stats()
         self.stats = get_stats()
@@ -196,16 +207,73 @@ class PlayerokBot:
 
         async def auto_raise_items_loop():
             """Цикл автоподнятия товаров."""
+
+            def _normalize_mode(raw_mode: str | None) -> str:
+                mode_value = str(raw_mode or "interval").strip().lower()
+                if mode_value not in {"interval", "timing"}:
+                    return "interval"
+                return mode_value
+
+            def _parse_timing_slots(raw_timings: list[str] | None) -> list[tuple[str, int]]:
+                if not isinstance(raw_timings, list):
+                    return []
+                unique_slots: dict[str, int] = {}
+                for raw_timing in raw_timings or []:
+                    timing = str(raw_timing or "").strip()
+                    parts = timing.split(":")
+                    if len(parts) != 2:
+                        continue
+                    if not parts[0].isdigit() or not parts[1].isdigit():
+                        continue
+                    hour = int(parts[0])
+                    minute = int(parts[1])
+                    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                        continue
+                    normalized = f"{hour:02d}:{minute:02d}"
+                    unique_slots[normalized] = hour * 60 + minute
+                return sorted(unique_slots.items(), key=lambda item: item[1])
+
             while True:
                 try:
+                    auto_raise_config = self.config["playerok"]["auto_raise_items"]
+
                     # Проверяем включено ли автоподнятие
-                    if not self.config["playerok"]["auto_raise_items"]["enabled"]:
+                    if not auto_raise_config["enabled"]:
                         await asyncio.sleep(60)
                         continue
 
                     # Получаем настройки
-                    interval_hours = self.config["playerok"]["auto_raise_items"].get("interval_hours", 24.0)
-                    raise_all = self.config["playerok"]["auto_raise_items"].get("all", True)
+                    mode = _normalize_mode(auto_raise_config.get("mode"))
+                    interval_hours = auto_raise_config.get("interval_hours", 24.0)
+                    raise_all = auto_raise_config.get("all", True)
+                    current_msk_date = None
+                    active_timing_slot = None
+
+                    if mode == "timing":
+                        timing_slots = _parse_timing_slots(auto_raise_config.get("timings", []))
+                        if not timing_slots:
+                            await asyncio.sleep(60)
+                            continue
+
+                        now_msk = get_msk_now()
+                        current_msk_date = now_msk.strftime("%Y-%m-%d")
+                        cleanup_completed_timings(current_msk_date)
+
+                        now_minutes = now_msk.hour * 60 + now_msk.minute
+                        active_timing_slot, active_timing_minutes = min(
+                            timing_slots,
+                            key=lambda slot: abs(now_minutes - slot[1]),
+                        )
+
+                        # Проверяем окно +-5 минут относительно ближайшего тайминга.
+                        if abs(now_minutes - active_timing_minutes) > 5:
+                            await asyncio.sleep(60)
+                            continue
+
+                        # Если этот слот уже выполнен сегодня (по МСК), пропускаем.
+                        if is_timing_completed(current_msk_date, active_timing_slot):
+                            await asyncio.sleep(60)
+                            continue
 
                     # Получаем все активные товары с премиум статусом
                     my_items = self.get_my_items(statuses=[ItemStatuses.APPROVED])
@@ -247,8 +315,10 @@ class PlayerokBot:
                                 if not is_included:
                                     continue
 
-                            # Проверяем нужно ли поднимать (прошёл ли интервал)
-                            if should_raise_item(item.id, interval_hours):
+                            should_raise = mode == "timing" or should_raise_item(item.id, interval_hours)
+
+                            # Проверяем нужно ли поднимать.
+                            if should_raise:
                                 self.logger.info(f"{Fore.CYAN}🔄 Поднимаю товар «{item.name}»...")
                                 self.raise_item(item)
 
@@ -257,6 +327,9 @@ class PlayerokBot:
 
                         except Exception as e:
                             self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при обработке товара «{item.name}»: {Fore.WHITE}{e}", exc_info=True)
+
+                    if mode == "timing" and active_timing_slot and current_msk_date:
+                        mark_timing_completed(current_msk_date, active_timing_slot)
 
                     # Ждём минуту перед следующей проверкой
                     await asyncio.sleep(60)
@@ -891,6 +964,8 @@ class PlayerokBot:
                     self.auto_restore_items = sett.get("auto_restore_items")
                 if sett.get("auto_raise_items") != self.auto_raise_items:
                     self.auto_raise_items = sett.get("auto_raise_items")
+                if sett.get("auto_complete_items") != self.auto_complete_items:
+                    self.auto_complete_items = sett.get("auto_complete_items")
 
                 time.sleep(5)
 
@@ -1256,24 +1331,58 @@ class PlayerokBot:
                             ),
                             get_telegram_bot_loop()
                         )
-        if self.config["playerok"]["auto_complete_deals"]["enabled"]:
-            success = False
-            attempts = 3
-            delay = 3
+        auto_complete_config = self.config["playerok"].get("auto_complete_deals", {})
+        if auto_complete_config.get("enabled"):
+            auto_complete_items = self.auto_complete_items or {}
+            should_complete_deal = bool(auto_complete_config.get("all", True))
+            item_name_lower = str(getattr(event.deal.item, "name", "") or "").lower()
 
-            for attempt in range(attempts):
-                try:
-                    self.account.update_deal(event.deal.id, ItemDealStatuses.SENT)
-                    success = True
+            is_excluded = False
+            for excluded_keyphrases in auto_complete_items.get("excluded", []):
+                if not isinstance(excluded_keyphrases, list):
+                    continue
+                if any(
+                    str(phrase).strip().lower() in item_name_lower
+                    or item_name_lower == str(phrase).strip().lower()
+                    for phrase in excluded_keyphrases
+                    if str(phrase).strip()
+                ):
+                    is_excluded = True
                     break
-                except Exception as e:
-                    self.logger.warning(f'Неудачная попытка ({attempt+1}/{attempts}) подтвердить сделку {event.deal.id}:\n{e}')
-                    time.sleep(delay)
 
-            if success:
-                self.logger.info(f'Автоматически подтвердил сделку {event.deal.id}')
-            else:
-                self.logger.error(f'Автоматически подтверждение не сработало {event.deal.id}\nПричина: сайт хуйни')
+            if is_excluded:
+                should_complete_deal = False
+            elif not should_complete_deal:
+                for included_keyphrases in auto_complete_items.get("included", []):
+                    if not isinstance(included_keyphrases, list):
+                        continue
+                    if any(
+                        str(phrase).strip().lower() in item_name_lower
+                        or item_name_lower == str(phrase).strip().lower()
+                        for phrase in included_keyphrases
+                        if str(phrase).strip()
+                    ):
+                        should_complete_deal = True
+                        break
+
+            if should_complete_deal:
+                success = False
+                attempts = 3
+                delay = 3
+
+                for attempt in range(attempts):
+                    try:
+                        self.account.update_deal(event.deal.id, ItemDealStatuses.SENT)
+                        success = True
+                        break
+                    except Exception as e:
+                        self.logger.warning(f'Неудачная попытка ({attempt+1}/{attempts}) подтвердить сделку {event.deal.id}:\n{e}')
+                        time.sleep(delay)
+
+                if success:
+                    self.logger.info(f'Автоматически подтвердил сделку {event.deal.id}')
+                else:
+                    self.logger.error(f'Автоматически подтверждение не сработало {event.deal.id}\nПричина: сайт хуйни')
 
     async def _on_item_paid(self, event: ItemPaidEvent):
         if not self.is_connected or self.account is None:

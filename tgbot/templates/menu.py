@@ -38,7 +38,8 @@ def menu_kb(page: int = 0):
             [InlineKeyboardButton(text="👤 Аккаунт", callback_data=calls.SettingsNavigation(to="account").pack())],
             [InlineKeyboardButton(text="🎛 Глобальные Переключатели", callback_data=calls.SettingsNavigation(to="global_switches").pack())],
             [InlineKeyboardButton(text="♻️ Восстановление", callback_data=calls.SettingsNavigation(to="restore").pack())],
-            [InlineKeyboardButton(text="📈 Автоподнятие", callback_data=calls.SettingsNavigation(to="raise").pack())],
+            [InlineKeyboardButton(text="📈 Авто-поднятие", callback_data=calls.SettingsNavigation(to="raise").pack())],
+            [InlineKeyboardButton(text="✅ Авто-подтверждение", callback_data=calls.SettingsNavigation(to="auto_complete").pack())],
             [InlineKeyboardButton(text="🔔 Настройки Уведомлений", callback_data=calls.SettingsNavigation(to="notifications").pack())],
             [InlineKeyboardButton(text="📋 Заготовки ответов", callback_data=calls.SettingsNavigation(to="quick_replies").pack())],
             [InlineKeyboardButton(text="🔌 Плагины", callback_data=calls.PluginsPagination(page=0).pack())],
@@ -56,24 +57,24 @@ def menu_kb(page: int = 0):
             [InlineKeyboardButton(text="🚨 Ошибки API", callback_data=calls.ErrorStatsNavigation(to="main").pack())],
             # [InlineKeyboardButton(text="👨‍💻 Настройки разработчика", callback_data=calls.SettingsNavigation(to="developer").pack())],
         ]
-    
+
     # Навигация между страницами
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.MenuPagination(page=page-1).pack()))
-    
+
     nav_row.append(InlineKeyboardButton(text=f"📑 {page + 1}/2", callback_data="page_info"))
-    
+
     if page < 1:
         nav_row.append(InlineKeyboardButton(text="➡️ Далее", callback_data=calls.MenuPagination(page=page+1).pack()))
-    
+
     rows.append(nav_row)
-    
+
     # Ссылки
     rows.append([
         InlineKeyboardButton(text="👨‍💻 Разработчик", url="https://t.me/leizov"),
         InlineKeyboardButton(text="📦 GitHub", url=REPOSITORY)
     ])
-    
+
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     return kb
