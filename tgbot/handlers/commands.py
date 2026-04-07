@@ -2,12 +2,20 @@ import asyncio
 import html
 import logging
 import os
+import platform
+import shutil
+import socket
+import sys
+import threading
+import time
+from datetime import datetime
 from aiogram import types, Router, Bot, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile
 
 from __init__ import SKIP_UPDATES
+import paths
 from core.config_backup import create_backup_payload, format_backup_summary, save_backup_payload_to_file
 from settings import Settings as sett
 from core.utils import restart as app_restart
@@ -19,6 +27,12 @@ from ..helpful import throw_float_message, do_auth
 
 router = Router()
 logger = logging.getLogger("seal.telegram.commands")
+_PROCESS_START_TS = time.time()
+
+try:
+    import psutil  # type: ignore
+except Exception:
+    psutil = None
 
 
 def _split_long_text(text: str, limit: int = 3500) -> list[str]:
@@ -63,6 +77,310 @@ def _probe_playerok_account(config: dict):
         requests_timeout=api_cfg.get("requests_timeout", 10),
         proxy=api_cfg.get("proxy") or None,
     ).get()
+
+
+def _format_bytes(size_bytes: int | float | None) -> str:
+    if size_bytes is None:
+        return "н/д"
+    try:
+        value = float(size_bytes)
+    except Exception:
+        return "н/д"
+
+    if value < 0:
+        return "н/д"
+
+    units = ["Б", "КБ", "МБ", "ГБ", "ТБ", "ПБ"]
+    unit_idx = 0
+    while value >= 1024 and unit_idx < len(units) - 1:
+        value /= 1024
+        unit_idx += 1
+    return f"{value:.2f} {units[unit_idx]}"
+
+
+def _safe_percent(used: float | int, total: float | int) -> str:
+    try:
+        used_f = float(used)
+        total_f = float(total)
+        if total_f <= 0:
+            return "н/д"
+        return f"{(used_f / total_f) * 100:.2f}%"
+    except Exception:
+        return "н/д"
+
+
+def _get_dir_size(path: str) -> int:
+    total = 0
+    stack = [path]
+
+    while stack:
+        current = stack.pop()
+        with os.scandir(current) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                    elif entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                except OSError:
+                    continue
+    return total
+
+
+def _try_get_system_memory_without_psutil() -> tuple[int, int, int, float] | None:
+    if os.name != "nt":
+        return None
+
+    try:
+        import ctypes
+    except Exception:
+        return None
+
+    class MEMORYSTATUSEX(ctypes.Structure):
+        _fields_ = [
+            ("dwLength", ctypes.c_ulong),
+            ("dwMemoryLoad", ctypes.c_ulong),
+            ("ullTotalPhys", ctypes.c_ulonglong),
+            ("ullAvailPhys", ctypes.c_ulonglong),
+            ("ullTotalPageFile", ctypes.c_ulonglong),
+            ("ullAvailPageFile", ctypes.c_ulonglong),
+            ("ullTotalVirtual", ctypes.c_ulonglong),
+            ("ullAvailVirtual", ctypes.c_ulonglong),
+            ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+        ]
+
+    status = MEMORYSTATUSEX()
+    status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+    ok = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+    if not ok:
+        return None
+
+    total = int(status.ullTotalPhys)
+    available = int(status.ullAvailPhys)
+    used = max(0, total - available)
+    percent = float(status.dwMemoryLoad)
+    return total, used, available, percent
+
+
+def _build_sys_report() -> str:
+    warnings: list[str] = []
+
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    hostname = socket.gethostname()
+    try:
+        local_ip = socket.gethostbyname(hostname)
+    except Exception:
+        local_ip = "н/д"
+        warnings.append("Не удалось определить локальный IP по hostname.")
+
+    os_text = platform.platform(aliased=True)
+    process_id = os.getpid()
+
+    ram_used_line = "н/д"
+    ram_available_line = "н/д"
+    swap_line = "н/д"
+    bot_rss = "н/д"
+    bot_vms = "н/д"
+    bot_mem_percent = "н/д"
+
+    net_sent = "н/д"
+    net_recv = "н/д"
+    net_packets = "н/д"
+
+    process_threads = "н/д"
+    process_files = "н/д"
+    process_start_text = datetime.fromtimestamp(_PROCESS_START_TS).strftime("%Y-%m-%d %H:%M:%S")
+
+    if psutil is not None:
+        proc = None
+        try:
+            proc = psutil.Process(process_id)
+        except Exception as e:
+            warnings.append(f"Не удалось получить объект процесса через psutil: {e}")
+
+        if proc is not None:
+            try:
+                mem_info = proc.memory_info()
+                bot_rss = _format_bytes(mem_info.rss)
+                bot_vms = _format_bytes(mem_info.vms)
+            except Exception as e:
+                warnings.append(f"Не удалось получить память процесса: {e}")
+
+            try:
+                bot_mem_percent = f"{proc.memory_percent():.4f}%"
+            except Exception as e:
+                warnings.append(f"Не удалось получить % памяти процесса: {e}")
+
+            try:
+                process_threads = str(proc.num_threads())
+            except Exception as e:
+                warnings.append(f"Не удалось получить число потоков процесса: {e}")
+
+            try:
+                process_files = str(len(proc.open_files()))
+            except Exception as e:
+                warnings.append(f"Не удалось получить число открытых файлов процесса: {e}")
+
+            try:
+                process_start_ts = float(proc.create_time())
+                process_start_text = datetime.fromtimestamp(process_start_ts).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+        try:
+            vm = psutil.virtual_memory()
+            ram_used_line = f"{_format_bytes(vm.used)} / {_format_bytes(vm.total)} ({vm.percent:.2f}%)"
+            ram_available_line = _format_bytes(vm.available)
+        except Exception as e:
+            warnings.append(f"Не удалось получить данные RAM: {e}")
+
+        try:
+            sm = psutil.swap_memory()
+            swap_line = f"{_format_bytes(sm.used)} / {_format_bytes(sm.total)} ({sm.percent:.2f}%)"
+        except Exception as e:
+            warnings.append(f"Не удалось получить данные swap: {e}")
+
+        try:
+            net = psutil.net_io_counters()
+            net_sent = _format_bytes(net.bytes_sent)
+            net_recv = _format_bytes(net.bytes_recv)
+            net_packets = f"{net.packets_sent} / {net.packets_recv}"
+        except Exception as e:
+            warnings.append(f"Не удалось получить сетевые счётчики: {e}")
+    else:
+        warnings.append("Модуль psutil не установлен, часть метрик недоступна.")
+
+        fallback_mem = _try_get_system_memory_without_psutil()
+        if fallback_mem is not None:
+            total, used, available, percent = fallback_mem
+            ram_used_line = f"{_format_bytes(used)} / {_format_bytes(total)} ({percent:.2f}%)"
+            ram_available_line = _format_bytes(available)
+        else:
+            warnings.append("Не удалось получить RAM fallback-методом.")
+    if process_threads == "н/д":
+        process_threads = str(threading.active_count())
+
+    disk_total = None
+    disk_used = None
+    disk_free = None
+    disk_percent = "н/д"
+    try:
+        usage = shutil.disk_usage(paths.ROOT_DIR)
+        disk_total = int(usage.total)
+        disk_used = int(usage.used)
+        disk_free = int(usage.free)
+        disk_percent = _safe_percent(disk_used, disk_total)
+    except Exception as e:
+        warnings.append(f"Не удалось получить использование диска: {e}")
+
+    bot_dirs = [
+        ("bot_settings", paths.BOT_SETTINGS_DIR),
+        ("bot_data", paths.BOT_DATA_DIR),
+        ("logs", paths.LOGS_DIR),
+        ("storage", paths.STORAGE_DIR),
+    ]
+    bot_dir_sizes: list[tuple[str, str]] = []
+    bot_total_size = 0
+    for label, path in bot_dirs:
+        try:
+            size = _get_dir_size(path)
+            bot_total_size += size
+            bot_dir_sizes.append((label, _format_bytes(size)))
+        except Exception as e:
+            bot_dir_sizes.append((label, "н/д"))
+            warnings.append(f"Не удалось посчитать размер директории {label}: {e}")
+
+    playerok_status = "н/д"
+    try:
+        from plbot.playerokbot import get_playerok_bot
+        plbot = get_playerok_bot()
+        if plbot is None:
+            playerok_status = "⚪️ Не инициализирован"
+        elif getattr(plbot, "is_connected", False):
+            playerok_status = "🟢 Подключен"
+        else:
+            playerok_status = "🔴 Не подключен"
+    except Exception as e:
+        warnings.append(f"Не удалось получить статус Playerok в памяти: {e}")
+
+    warning_block = ""
+    if warnings:
+        unique_warnings = []
+        for item in warnings:
+            text = str(item).strip()
+            if not text:
+                continue
+            if text not in unique_warnings:
+                unique_warnings.append(text)
+
+        warning_lines = []
+        for warn in unique_warnings[:8]:
+            escaped = html.escape(warn)
+            if len(escaped) > 120:
+                escaped = escaped[:117] + "..."
+            warning_lines.append(f"• {escaped}")
+
+        warning_block = (
+            "\n⚠️ <b>Ограничения диагностики</b>\n"
+            + "\n".join(warning_lines)
+        )
+    else:
+        warning_block = "\n✅ <i>Все ключевые метрики успешно собраны.</i>"
+
+    report_lines: list[str] = [
+        "🧪 <b>Подробная диагностика системы</b>",
+        f"🕒 <b>Время:</b> <code>{html.escape(now_text)}</code>",
+        "",
+        "🖥️ <b>Общая информация</b>",
+        f"• Хост: <code>{html.escape(hostname)}</code>",
+        f"• Локальный IP: <code>{html.escape(local_ip)}</code>",
+        f"• ОС: <code>{html.escape(os_text)}</code>",
+        f"• PID процесса: <code>{process_id}</code>",
+        f"• Platform: <code>{html.escape(sys.platform)}</code>",
+    ]
+
+    memory_lines: list[str] = []
+    if ram_used_line != "н/д":
+        memory_lines.append(f"• RAM (система): <b>{html.escape(ram_used_line)}</b>")
+    if ram_available_line != "н/д":
+        memory_lines.append(f"• RAM доступно: <b>{html.escape(ram_available_line)}</b>")
+    if bot_mem_percent != "н/д":
+        memory_lines.append(f"• Доля RAM бота: <b>{html.escape(bot_mem_percent)}</b>")
+
+    if memory_lines:
+        report_lines.extend(["", "🧠 <b>Память</b>", *memory_lines])
+
+    report_lines.extend([
+        "",
+        "💾 <b>Диск и хранилище</b>",
+        f"• Диск проекта: <b>{_format_bytes(disk_used)}</b> / <b>{_format_bytes(disk_total)}</b> ({disk_percent})",
+        f"• Свободно на диске: <b>{_format_bytes(disk_free)}</b>",
+        f"• Размер данных бота: <b>{_format_bytes(bot_total_size)}</b>",
+    ])
+    report_lines.extend([f"• {html.escape(name)}: <b>{html.escape(size)}</b>" for name, size in bot_dir_sizes])
+
+    network_lines: list[str] = []
+    if net_sent != "н/д":
+        network_lines.append(f"• Отправлено (система): <b>{html.escape(net_sent)}</b>")
+    if net_recv != "н/д":
+        network_lines.append(f"• Получено (система): <b>{html.escape(net_recv)}</b>")
+    if network_lines:
+        report_lines.extend(["", "🌐 <b>Сеть</b>", *network_lines])
+
+    process_lines = [
+        f"• Старт процесса: <code>{html.escape(process_start_text)}</code>",
+        f"• Потоки процесса: <b>{html.escape(process_threads)}</b>",
+        f"• Открытые файлы: <b>{html.escape(process_files)}</b>",
+        f"• Playerok (в памяти): <b>{playerok_status}</b>",
+        f"• Диагностический backend: <b>{'psutil' if psutil is not None else 'fallback'}</b>",
+    ]
+    report_lines.extend(["", "🤖 <b>Процесс бота</b>", *process_lines, warning_block])
+
+    report = "\n".join(report_lines)
+
+    return report
 
 
 @router.message(Command("start"))
@@ -477,6 +795,38 @@ async def handler_fingerprint(message: types.Message, state: FSMContext, bot: Bo
         
     except Exception as e:
         await message.answer(f"❌ Ошибка при генерации fingerprint: {str(e)}")
+
+
+@router.message(Command("sys"))
+async def handler_sys(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /sys
+    Показывает подробную диагностику системы и процесса бота.
+    """
+    config = sett.get("config")
+
+    if message.from_user.id not in config["telegram"]["bot"].get("signed_users", []):
+        return await do_auth(message, state)
+
+    await state.set_state(None)
+    checking_msg = await message.answer(
+        "🧪 <b>Собираю подробную диагностику системы...</b>",
+        parse_mode="HTML",
+    )
+
+    try:
+        loop = asyncio.get_running_loop()
+        report_text = await loop.run_in_executor(None, _build_sys_report)
+        await checking_msg.edit_text(report_text, parse_mode="HTML")
+    except Exception as e:
+        logger.exception("Ошибка при выполнении команды /sys: %s", e)
+        err = html.escape(str(e))
+        await checking_msg.edit_text(
+            "❌ <b>Не удалось собрать системную диагностику</b>\n\n"
+            f"<code>{err[:250]}</code>\n\n"
+            "<i>Проверьте доступность системных методов и повторите команду.</i>",
+            parse_mode="HTML",
+        )
 
 
 @router.message(Command("playerok_status"))

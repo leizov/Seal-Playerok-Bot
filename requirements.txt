@@ -19,3 +19,4 @@ beautifulsoup4==4.12.3
 setuptools==75.8.0
 tqdm==4.67.1
 PySocks==1.7.1
+psutil==7.0.0

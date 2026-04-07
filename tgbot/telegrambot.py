@@ -170,6 +170,7 @@ class TelegramBot:
                 # BotCommand(command="power_off", description="⚡ Выключить бота"), #todo продумать логику при автозапуске, пока спряу
                 BotCommand(command="logs", description="📜 Показать логи"),
                 BotCommand(command="error", description="🛑 Показать последнюю ошибку"),
+                BotCommand(command="sys", description="🧪 Диагностика системы"),
                 BotCommand(command="watermark", description="©️ Водяной знак"),
                 BotCommand(command="fingerprint", description="🧑‍💻 Фингерпринт устройства"),
                 BotCommand(command="config_backup", description="💾 Backup конфига"),
