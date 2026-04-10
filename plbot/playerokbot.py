@@ -1095,7 +1095,7 @@ class PlayerokBot:
                 self.check_banned()
                 time.sleep(900)
 
-        Thread(target=refresh_loop(), daemon=True).start()
+        Thread(target=refresh_loop, daemon=True).start()
         Thread(target=refresh_account_loop, daemon=True).start()
         Thread(target=check_banned_loop, daemon=True).start()
 

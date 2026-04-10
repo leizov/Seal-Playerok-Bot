@@ -1068,7 +1068,7 @@ async def callback_reconnect_playerok(callback: types.CallbackQuery):
         from .. import callback_datas as calls
         
         playerok_bot = PlayerokBot()
-        success = await playerok_bot.reconnect()
+        success, reconnect_msg = playerok_bot.reconnect()
         
         config = sett.get("config")
         
@@ -1098,7 +1098,7 @@ async def callback_reconnect_playerok(callback: types.CallbackQuery):
             await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
         else:
             # Не удалось переподключиться
-            error_msg = str(playerok_bot.connection_error) if playerok_bot.connection_error else "Неизвестная ошибка"
+            error_msg = str(reconnect_msg or playerok_bot.connection_error or "Неизвестная ошибка")
             error_msg = error_msg.replace("<", "&lt;").replace(">", "&gt;").replace("&", "&amp;")
             
             text = (

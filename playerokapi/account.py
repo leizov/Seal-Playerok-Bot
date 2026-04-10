@@ -67,11 +67,58 @@ class Account:
             request_max_retries: int = 7,
             auid: str = None
         ):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
+            # Singleton Account может остаться в полусозданном состоянии
+            # (например, если инициализация оборвалась до создания curl-сессии).
+            # Повторный вызов __init__ должен уметь восстановить рабочее состояние.
+            self.token = token
+            self.user_agent = user_agent
+            self.auid = auid
+            self.requests_timeout = requests_timeout
+            self.proxy = proxy
+            self.base_url = "https://playerok.com"
+
+            if self.proxy:
+                if self.proxy.startswith("socks5://") or self.proxy.startswith("socks4://"):
+                    self.__proxy_string = self.proxy
+                else:
+                    clean_proxy = self.proxy.replace("https://", "").replace("http://", "")
+                    self.__proxy_string = f"http://{clean_proxy}"
+            else:
+                self.__proxy_string = None
+
+            self.request_max_retries = request_max_retries
+            if not hasattr(self, "id"):
+                self.id = None
+            if not hasattr(self, "username"):
+                self.username = None
+            if not hasattr(self, "profile"):
+                self.profile = None
+            if not hasattr(self, "interlocutor_ids"):
+                self.interlocutor_ids = {}
+            if not hasattr(self, "_Account__curl_session"):
+                self.__curl_session = None
+
+            if not hasattr(self, "_cert_path"):
+                self._cert_path = os.path.join(os.path.dirname(__file__), "cacert.pem")
+            if not hasattr(self, "_tmp_cert_path"):
+                self._tmp_cert_path = os.path.join(tempfile.gettempdir(), "cacert.pem")
+            shutil.copyfile(self._cert_path, self._tmp_cert_path)
+
+            if not hasattr(self, "_Account__logger"):
+                self.__logger = getLogger("playerokapi")
+
+            try:
+                self._refresh_clients()
+            except Exception:
+                try:
+                    delattr(self, "_initialized")
+                except Exception:
+                    pass
+                raise
             return
-            
+
         self.token = token
-        self._initialized = True
         """ Токен сессии аккаунта. """
         self.user_agent = user_agent
         """ Юзер-агент браузера. """
@@ -135,9 +182,11 @@ class Account:
         self._cert_path = os.path.join(os.path.dirname(__file__), "cacert.pem")
         self._tmp_cert_path = os.path.join(tempfile.gettempdir(), "cacert.pem")
         shutil.copyfile(self._cert_path, self._tmp_cert_path)
+        self.__curl_session = None
 
         self._refresh_clients()
         self.__logger = getLogger("playerokapi")
+        self._initialized = True
 
     def _refresh_clients(self):
         """Cоздаёт/пересоздаёт curl-cffi сессию с актуальными настройками."""
@@ -253,10 +302,13 @@ class Account:
         headers = {**_headers, **headers}
 
         def make_req():
+            if not hasattr(self, "_Account__curl_session") or self.__curl_session is None:
+                self._refresh_clients()
+
             if method == "get":
                 r = self.__curl_session.get(
-                    url=url, 
-                    params=payload, 
+                    url=url,
+                    params=payload,
                     headers=headers
                 )
             elif method == "post":
