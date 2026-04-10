@@ -79,6 +79,56 @@ def _probe_playerok_account(config: dict):
     ).get()
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _health_circles(level: int) -> str:
+    normalized = max(1, min(5, _safe_int(level, 5)))
+    return ("\U0001F7E2" * normalized) + ("\u26AA" * (5 - normalized))
+
+
+def _get_playerok_health_snapshot() -> dict:
+    try:
+        from core.error_stats import get_playerok_connection_health
+
+        health = get_playerok_connection_health()
+        if isinstance(health, dict):
+            return health
+    except Exception as e:
+        logger.debug("Не удалось получить health snapshot Playerok: %s", e)
+
+    return {
+        "window_minutes": 10,
+        "errors_10m": 0,
+        "fatal_streak": 0,
+        "incident_active": False,
+        "level": 5,
+        "circles": _health_circles(5),
+    }
+
+
+def _format_playerok_stability_block() -> str:
+    health = _get_playerok_health_snapshot()
+    window_minutes = max(1, _safe_int(health.get("window_minutes"), 10))
+    errors_10m = max(0, _safe_int(health.get("errors_10m"), 0))
+    fatal_streak = max(0, _safe_int(health.get("fatal_streak"), 0))
+    level = max(1, min(5, _safe_int(health.get("level"), 5)))
+    circles = str(health.get("circles") or _health_circles(level))
+    incident_text = "Да" if bool(health.get("incident_active")) else "Нет"
+
+    return (
+        f"\n\n<b>Стабильность за {window_minutes} минут:</b>\n"
+        f"{circles} <b>{level}/5</b>\n"
+        f"• Ошибки: <b>{errors_10m}</b>\n"
+        f"• Фатальный стрик: <b>{fatal_streak}</b>\n"
+        f"• Инцидент: <b>{incident_text}</b>"
+    )
+
+
 def _format_bytes(size_bytes: int | float | None) -> str:
     if size_bytes is None:
         return "н/д"
@@ -867,6 +917,8 @@ async def handler_playerok_status(message: types.Message, state: FSMContext):
                     )
                     await asyncio.sleep(0.4)
 
+        stability_block = _format_playerok_stability_block()
+
         if probe_account:
             # Подключено
             try:
@@ -884,6 +936,7 @@ async def handler_playerok_status(message: types.Message, state: FSMContext):
                 f"<b>ID:</b> <code>{user_id}</code>\n"
                 f"<b>Прокси:</b> {proxy_status}\n\n"
                 f"<i>✅ Бот работает нормально</i>"
+                f"{stability_block}"
             )
 
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -898,6 +951,7 @@ async def handler_playerok_status(message: types.Message, state: FSMContext):
                 f"🔴 <b>Playerok не подключен</b>\n\n"
                 f"<b>Ошибка:</b>\n<code>{error_msg[:200]}</code>\n\n"
                 f"<i>⚠️ Проверьте настройки токена и прокси</i>"
+                f"{stability_block}"
             )
 
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -909,9 +963,11 @@ async def handler_playerok_status(message: types.Message, state: FSMContext):
             
     except Exception as e:
         error_text = html.escape(str(e))
+        stability_block = _format_playerok_stability_block()
         await checking_msg.edit_text(
             f"❌ <b>Ошибка при проверке статуса</b>\n\n"
-            f"<code>{error_text[:200]}</code>",
+            f"<code>{error_text[:200]}</code>"
+            f"{stability_block}",
             parse_mode="HTML"
         )
 
@@ -948,6 +1004,8 @@ async def callback_refresh_playerok_status(callback: types.CallbackQuery):
                     )
                     await asyncio.sleep(0.4)
 
+        stability_block = _format_playerok_stability_block()
+
         if probe_account:
             try:
                 username = probe_account.profile.username
@@ -964,6 +1022,7 @@ async def callback_refresh_playerok_status(callback: types.CallbackQuery):
                 f"<b>ID:</b> <code>{user_id}</code>\n"
                 f"<b>Прокси:</b> {proxy_status}\n\n"
                 f"<i>✅ Бот работает нормально</i>"
+                f"{stability_block}"
             )
 
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -977,6 +1036,7 @@ async def callback_refresh_playerok_status(callback: types.CallbackQuery):
                 f"🔴 <b>Playerok не подключен</b>\n\n"
                 f"<b>Ошибка:</b>\n<code>{error_msg[:200]}</code>\n\n"
                 f"<i>⚠️ Проверьте настройки токена и прокси</i>"
+                f"{stability_block}"
             )
 
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -988,8 +1048,9 @@ async def callback_refresh_playerok_status(callback: types.CallbackQuery):
 
     except Exception as e:
         error_text = html.escape(str(e))
+        stability_block = _format_playerok_stability_block()
         await callback.message.edit_text(
-            f"❌ <b>Ошибка при проверке</b>\n\n<code>{error_text[:200]}</code>",
+            f"❌ <b>Ошибка при проверке</b>\n\n<code>{error_text[:200]}</code>{stability_block}",
             parse_mode="HTML"
         )
 

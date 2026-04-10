@@ -19,9 +19,13 @@ from .parser import *
 from .enums import *
 
 try:
-    from core.error_stats import record_playerok_request_error as _record_playerok_request_error
+    from core.error_stats import (
+        record_playerok_request_error as _record_playerok_request_error,
+        record_playerok_request_success as _record_playerok_request_success,
+    )
 except Exception:
     _record_playerok_request_error = None
+    _record_playerok_request_success = None
 
 
 def get_account() -> Account | None:
@@ -371,6 +375,11 @@ class Account:
                 session_recreated=session_recreated,
             )
 
+        def _record_success() -> None:
+            if _record_playerok_request_success is None:
+                return
+            _record_playerok_request_success()
+
         last_timeout_exc: Exception | None = None
         last_network_exc: Exception | None = None
         last_request_error: RequestError | None = None
@@ -485,7 +494,14 @@ class Account:
                     or "too many" in graphql_message_l
                     or "слишком много попыток" in graphql_message_l
                 )
-                is_server_error = graphql_status is not None and 500 <= graphql_status <= 599
+                is_internal_server_error = (
+                    graphql_code_u == "INTERNAL_SERVER_ERROR"
+                    or "internal server error" in graphql_message_l
+                )
+                is_server_error = (
+                    (graphql_status is not None and 500 <= graphql_status <= 599)
+                    or is_internal_server_error
+                )
                 retriable_graphql = is_rate_limit or is_server_error
                 retry_exhausted = attempt >= max_attempts or not retriable_graphql
 
@@ -567,6 +583,7 @@ class Account:
                 self.__logger.info(
                     f"✅ Запрос восстановлен после ретраев (recovered=true, attempt={attempt}/{max_attempts}, url={url})"
                 )
+            _record_success()
             return resp
 
         if last_request_error is not None:

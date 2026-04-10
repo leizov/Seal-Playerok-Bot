@@ -23,6 +23,7 @@ from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY, SECONDARY_COL
 from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, match_auto_delivery_keyphrase, normalize_auto_deliveries
 from core.utils import set_title, shutdown, run_async_in_thread
 from core.handlers import add_bot_event_handler, add_playerok_event_handler, call_bot_event, call_playerok_event
+from core.error_stats import get_playerok_connection_health, mark_playerok_startup_fatal_incident
 from settings import DATA, Settings as sett
 from logging import getLogger
 from data import Data as data
@@ -197,13 +198,34 @@ class PlayerokBot:
             return False, f"❌ Не удалось переподключиться: {self.connection_error}"
 
     def _start_listener(self):
-        if not self.is_connected or not self.account:
-            return
-
         async def listener_loop():
-            listener = EventListener(self.account)
-            for event in listener.listen(requests_delay=self.config["playerok"]["api"]["listener_requests_delay"]):
-                await call_playerok_event(event.type, [self, event])
+            listener = None
+            while True:
+                try:
+                    if not self.is_connected or self.account is None:
+                        restored = self._try_connect()
+                        if not restored or self.account is None:
+                            await asyncio.sleep(5)
+                            continue
+                        self.logger.info("✅ Слушатель восстановил подключение к Playerok и продолжает работу")
+                        listener = None
+
+                    current_account = self.account
+                    if current_account is None:
+                        await asyncio.sleep(3)
+                        continue
+
+                    if listener is None or listener.account is not current_account:
+                        listener = EventListener(current_account)
+
+                    for event in listener.listen(
+                        requests_delay=self.config["playerok"]["api"]["listener_requests_delay"]
+                    ):
+                        await call_playerok_event(event.type, [self, event])
+                except Exception as e:
+                    self.logger.warning(f"Слушатель событий перезапускается после ошибки: {e}")
+                    await asyncio.sleep(3)
+                    listener = None
 
         async def auto_raise_items_loop():
             """Цикл автоподнятия товаров."""
@@ -908,8 +930,64 @@ class PlayerokBot:
             last_token = self.config["playerok"]["api"]["token"]
             last_proxy = self.config["playerok"]["api"]["proxy"]
             last_ua = self.config["playerok"]["api"]["user_agent"]
+            last_incident_active = None
 
             self.logger.info(f'Реврешер запущен!')
+
+            def _safe_int(value, default=0):
+                try:
+                    return int(value)
+                except Exception:
+                    return default
+
+            def _health_circles(level: int) -> str:
+                normalized = max(1, min(5, _safe_int(level, 5)))
+                return ("\U0001F7E2" * normalized) + ("\u26AA" * (5 - normalized))
+
+            def _read_health_snapshot() -> dict:
+                try:
+                    health = get_playerok_connection_health()
+                    if isinstance(health, dict):
+                        return health
+                except Exception as e:
+                    self.logger.debug(f"Не удалось прочитать health-снимок Playerok: {e}")
+                return {
+                    "window_minutes": 10,
+                    "errors_10m": 0,
+                    "fatal_streak": 0,
+                    "incident_active": False,
+                    "level": 5,
+                    "circles": _health_circles(5),
+                }
+
+            async def _notify_signed_users(text: str) -> None:
+                tg_bot = get_telegram_bot()
+                if tg_bot is None or not getattr(tg_bot, "bot", None):
+                    return
+
+                signed_users = self.config.get("telegram", {}).get("bot", {}).get("signed_users", [])
+                if not isinstance(signed_users, list):
+                    return
+
+                for user_id in signed_users:
+                    try:
+                        await tg_bot.bot.send_message(
+                            chat_id=user_id,
+                            text=text,
+                            parse_mode="HTML",
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Не удалось отправить health-уведомление пользователю {user_id}: {e}")
+
+            def _schedule_signed_users_notification(text: str) -> None:
+                loop_obj = get_telegram_bot_loop()
+                if loop_obj is None:
+                    self.logger.debug("Telegram loop недоступен: пропускаю health-уведомление")
+                    return
+                try:
+                    asyncio.run_coroutine_threadsafe(_notify_signed_users(text), loop_obj)
+                except Exception as e:
+                    self.logger.error(f"Ошибка при постановке health-уведомления: {e}")
 
             while True:
                 if self.account and self.account.profile.balance:
@@ -966,6 +1044,44 @@ class PlayerokBot:
                     self.auto_raise_items = sett.get("auto_raise_items")
                 if sett.get("auto_complete_items") != self.auto_complete_items:
                     self.auto_complete_items = sett.get("auto_complete_items")
+
+                health = _read_health_snapshot()
+                incident_active = bool(health.get("incident_active"))
+                if last_incident_active is None:
+                    last_incident_active = incident_active
+                elif not last_incident_active and incident_active:
+                    level = max(1, min(5, _safe_int(health.get("level"), 1)))
+                    circles = str(health.get("circles") or _health_circles(level))
+                    errors_10m = max(0, _safe_int(health.get("errors_10m"), 0))
+                    fatal_streak = max(0, _safe_int(health.get("fatal_streak"), 0))
+                    window_minutes = max(1, _safe_int(health.get("window_minutes"), 10))
+
+                    alert_text = (
+                        "⚠️ <b>Проблемы с подключением к Playerok</b>\n\n"
+                        "Бот фиксирует серию фатальных ошибок запросов.\n"
+                        "Возможны проблемы на стороне Playerok или с вашим токеном/прокси.\n\n"
+                        f"<b>Стабильность за {window_minutes} минут:</b> {escape(circles)} <b>{level}/5</b>\n"
+                        f"<b>Ошибки:</b> {errors_10m}\n"
+                        f"<b>Фатальный стрик:</b> {fatal_streak}"
+                    )
+                    _schedule_signed_users_notification(alert_text)
+                    last_incident_active = True
+                elif last_incident_active and not incident_active:
+                    level = max(1, min(5, _safe_int(health.get("level"), 5)))
+                    circles = str(health.get("circles") or _health_circles(level))
+                    errors_10m = max(0, _safe_int(health.get("errors_10m"), 0))
+                    fatal_streak = max(0, _safe_int(health.get("fatal_streak"), 0))
+                    window_minutes = max(1, _safe_int(health.get("window_minutes"), 10))
+
+                    alert_text = (
+                        "✅ <b>Подключение к Playerok восстановилось</b>\n\n"
+                        "Серия фатальных ошибок прервалась, запросы снова проходят.\n\n"
+                        f"<b>Стабильность за {window_minutes} минут:</b> {escape(circles)} <b>{level}/5</b>\n"
+                        f"<b>Ошибки:</b> {errors_10m}\n"
+                        f"<b>Фатальный стрик:</b> {fatal_streak}"
+                    )
+                    _schedule_signed_users_notification(alert_text)
+                    last_incident_active = False
 
                 time.sleep(5)
 
@@ -1618,94 +1734,108 @@ class PlayerokBot:
 
 
     async def run_bot(self):
-        if not self.is_connected:
-            self.logger.warning(f"{Fore.YELLOW}⚠️ Не удалось подключиться к Playerok аккаунту")
-            self.logger.warning(f"{Fore.YELLOW}⚠️ Функционал Playerok недоступен")
-            self.logger.warning(f"{Fore.YELLOW}⚠️ Измените настройки через Telegram бота")
+        started_in_recovery_mode = False
+
+        if not self.is_connected or self.account is None or self.playerok_account is None:
+            started_in_recovery_mode = True
+            self.logger.warning(f"{Fore.YELLOW}⚠️ Не удалось подключиться к Playerok аккаунту при запуске")
+            self.logger.warning(f"{Fore.YELLOW}⚠️ Запускаю слушатель в режиме восстановления")
+            self.logger.warning(f"{Fore.YELLOW}⚠️ После восстановления доступа события начнут обрабатываться автоматически")
+
+            try:
+                mark_playerok_startup_fatal_incident()
+            except Exception as e:
+                self.logger.debug(f"Не удалось установить стартовый фатальный маркер health: {e}")
 
             try:
                 tg_bot = get_telegram_bot()
                 if tg_bot:
                     asyncio.run_coroutine_threadsafe(
                         tg_bot.log_event(
-                                text=log_text(
-                                    title="⚠️ Бот запущен, но Playerok недоступен",
-                                    text=(
-                                        "Не удалось подключиться к Playerok аккаунту.\n"
-                                        "Возможно, временно недоступен сам Playerok.\n\n"
-                                        "Статус подключения можно проверить командой:\n"
-                                        "/playerok_status\n\n"
-                                        "Измените токен/прокси/user-agent через:\n"
-                                        "⚙️ Настройки → 🔑 Аккаунт"
-                                    )
-                                )
-                            ),
-                        get_telegram_bot_loop()
+                            text=log_text(
+                                title="⚠️ Бот запущен, но Playerok пока недоступен",
+                                text=(
+                                    "Не удалось подключиться к Playerok аккаунту на старте.\n"
+                                    "Слушатель запущен в режиме восстановления и будет продолжать попытки подключения.\n"
+                                    "После восстановления доступности Playerok/токена работа продолжится автоматически.\n\n"
+                                    "Проверьте текущий статус командой:\n"
+                                    "/playerok_status\n\n"
+                                    "Проверьте токен/прокси/user-agent в:\n"
+                                    "⚙️ Настройки → 🔑 Аккаунт"
+                                ),
+                            )
+                        ),
+                        get_telegram_bot_loop(),
                     )
-            except:
+            except Exception:
                 pass
+        else:
+            self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
+            self.logger.info(f"{ACCENT_COLOR}Информация об аккаунте:")
+            self.logger.info(f" · ID: {Fore.LIGHTWHITE_EX}{self.account.id}")
+            self.logger.info(f" · Никнейм: {Fore.LIGHTWHITE_EX}{self.account.username}")
+            if self.playerok_account.profile.balance:
+                self.logger.info(f" · Баланс: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.value}₽")
+                self.logger.info(f"   · Доступно: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.available}₽")
+                self.logger.info(f"   · В ожидании: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.pending_income}₽")
+                self.logger.info(f"   · Заморожено: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.frozen}₽")
+            self.logger.info(
+                f" · Активные продажи: {Fore.LIGHTWHITE_EX}"
+                f"{self.account.profile.stats.deals.outgoing.total - self.account.profile.stats.deals.outgoing.finished}"
+            )
+            self.logger.info(
+                f" · Активные покупки: {Fore.LIGHTWHITE_EX}"
+                f"{self.account.profile.stats.deals.incoming.total - self.account.profile.stats.deals.incoming.finished}"
+            )
+            self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
+            self.logger.info("")
 
-            return
+            if self.config["playerok"]["api"]["proxy"]:
+                try:
+                    proxy_str = self.config["playerok"]["api"]["proxy"]
 
-        self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-        self.logger.info(f"{ACCENT_COLOR}Информация об аккаунте:")
-        self.logger.info(f" · ID: {Fore.LIGHTWHITE_EX}{self.account.id}")
-        self.logger.info(f" · Никнейм: {Fore.LIGHTWHITE_EX}{self.account.username}")
-        if self.playerok_account.profile.balance:
-            self.logger.info(f" · Баланс: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.value}₽")
-            self.logger.info(f"   · Доступно: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.available}₽")
-            self.logger.info(f"   · В ожидании: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.pending_income}₽")
-            self.logger.info(f"   · Заморожено: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.frozen}₽")
-        self.logger.info(f" · Активные продажи: {Fore.LIGHTWHITE_EX}{self.account.profile.stats.deals.outgoing.total - self.account.profile.stats.deals.outgoing.finished}")
-        self.logger.info(f" · Активные покупки: {Fore.LIGHTWHITE_EX}{self.account.profile.stats.deals.incoming.total - self.account.profile.stats.deals.incoming.finished}")
-        self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-        self.logger.info("")
-        if self.config["playerok"]["api"]["proxy"]:
-            try:
-                proxy_str = self.config["playerok"]["api"]["proxy"]
+                    # Удаляем протокол (socks5://, socks4://, http://, https://)
+                    if "://" in proxy_str:
+                        protocol, proxy_str = proxy_str.split("://", 1)
 
-                # Удаляем протокол (socks5://, socks4://, http://, https://)
-                if "://" in proxy_str:
-                    protocol, proxy_str = proxy_str.split("://", 1)
+                    if "@" in proxy_str:
+                        # Формат: user:password@host:port
+                        auth_part, server_part = proxy_str.split("@", 1)
+                        auth_parts = auth_part.split(":", 1)
+                        user = auth_parts[0] if len(auth_parts) > 0 else "Без авторизации"
+                        password = auth_parts[1] if len(auth_parts) > 1 else "Без авторизации"
 
-                if "@" in proxy_str:
-                    # Формат: user:password@host:port
-                    auth_part, server_part = proxy_str.split("@", 1)
-                    auth_parts = auth_part.split(":", 1)
-                    user = auth_parts[0] if len(auth_parts) > 0 else "Без авторизации"
-                    password = auth_parts[1] if len(auth_parts) > 1 else "Без авторизации"
+                        server_parts = server_part.rsplit(":", 1)
+                        ip = server_parts[0] if len(server_parts) > 0 else "unknown"
+                        port = server_parts[1] if len(server_parts) > 1 else "unknown"
+                    else:
+                        # Формат: host:port (без авторизации)
+                        user = "Без авторизации"
+                        password = "Без авторизации"
+                        server_parts = proxy_str.rsplit(":", 1)
+                        ip = server_parts[0] if len(server_parts) > 0 else "unknown"
+                        port = server_parts[1] if len(server_parts) > 1 else "unknown"
 
-                    server_parts = server_part.rsplit(":", 1)
-                    ip = server_parts[0] if len(server_parts) > 0 else "unknown"
-                    port = server_parts[1] if len(server_parts) > 1 else "unknown"
-                else:
-                    # Формат: host:port (без авторизации)
-                    user = "Без авторизации"
-                    password = "Без авторизации"
-                    server_parts = proxy_str.rsplit(":", 1)
-                    ip = server_parts[0] if len(server_parts) > 0 else "unknown"
-                    port = server_parts[1] if len(server_parts) > 1 else "unknown"
+                    # Маскируем IP
+                    if "." in ip:
+                        ip = ".".join([("*" * len(nums)) if i >= 3 else nums for i, nums in enumerate(ip.split("."), start=1)])
+                    else:
+                        ip = f"{ip[:3]}***" if len(ip) > 3 else ip
 
-                # Маскируем IP
-                if "." in ip:
-                    ip = ".".join([("*" * len(nums)) if i >= 3 else nums for i, nums in enumerate(ip.split("."), start=1)])
-                else:
-                    ip = f"{ip[:3]}***" if len(ip) > 3 else ip
+                    # Маскируем данные
+                    port = f"{port[:3]}**" if len(str(port)) > 3 else str(port)
+                    user = f"{user[:3]}*****" if user != "Без авторизации" and len(user) > 3 else user
+                    password = f"{password[:3]}*****" if password != "Без авторизации" and len(password) > 3 else password
 
-                # Маскируем данные
-                port = f"{port[:3]}**" if len(str(port)) > 3 else str(port)
-                user = f"{user[:3]}*****" if user != "Без авторизации" and len(user) > 3 else user
-                password = f"{password[:3]}*****" if password != "Без авторизации" and len(password) > 3 else password
-
-                self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-                self.logger.info(f"{ACCENT_COLOR}Информация о прокси:")
-                self.logger.info(f" · IP: {Fore.LIGHTWHITE_EX}{ip}:{port}")
-                self.logger.info(f" · Юзер: {Fore.LIGHTWHITE_EX}{user}")
-                self.logger.info(f" · Пароль: {Fore.LIGHTWHITE_EX}{password}")
-                self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-                self.logger.info("")
-            except Exception as e:
-                self.logger.warning(f"{Fore.YELLOW}Не удалось распарсить информацию о прокси: {e}")
+                    self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
+                    self.logger.info(f"{ACCENT_COLOR}Информация о прокси:")
+                    self.logger.info(f" · IP: {Fore.LIGHTWHITE_EX}{ip}:{port}")
+                    self.logger.info(f" · Юзер: {Fore.LIGHTWHITE_EX}{user}")
+                    self.logger.info(f" · Пароль: {Fore.LIGHTWHITE_EX}{password}")
+                    self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
+                    self.logger.info("")
+                except Exception as e:
+                    self.logger.warning(f"{Fore.YELLOW}Не удалось распарсить информацию о прокси: {e}")
 
         add_playerok_event_handler(EventTypes.NEW_MESSAGE, PlayerokBot._on_new_message, 0)
         add_playerok_event_handler(EventTypes.DEAL_HAS_PROBLEM, PlayerokBot._on_new_problem, 0)
@@ -1721,4 +1851,7 @@ class PlayerokBot:
 
         self._start_listener()
 
-        self.logger.info(f"{SUCCESS_COLOR}✅ Фоновые задачи запущены: listener")
+        if started_in_recovery_mode:
+            self.logger.warning(f"{Fore.YELLOW}⚠️ Фоновые задачи запущены в режиме восстановления: listener")
+        else:
+            self.logger.info(f"{SUCCESS_COLOR}✅ Фоновые задачи запущены: listener")
