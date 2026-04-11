@@ -24,6 +24,8 @@ _LOCK = threading.RLock()
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SPACE_RE = re.compile(r"\s+")
 _HEALTH_GREEN_CIRCLE = "\U0001F7E2"
+_HEALTH_ORANGE_CIRCLE = "\U0001F7E0"
+_HEALTH_RED_CIRCLE = "\U0001F534"
 _HEALTH_WHITE_CIRCLE = "\u26AA"
 
 _KIND_TIMEOUT = "timeout"
@@ -147,7 +149,13 @@ def _health_level(errors_10m: int, incident_active: bool) -> int:
 
 def _health_circles(level: int) -> str:
     normalized = max(1, min(5, int(level)))
-    return (_HEALTH_GREEN_CIRCLE * normalized) + (_HEALTH_WHITE_CIRCLE * (5 - normalized))
+    if normalized >= 5:
+        filled = _HEALTH_GREEN_CIRCLE
+    elif normalized >= 3:
+        filled = _HEALTH_ORANGE_CIRCLE
+    else:
+        filled = _HEALTH_RED_CIRCLE
+    return (filled * normalized) + (_HEALTH_WHITE_CIRCLE * (5 - normalized))
 
 
 def _health_snapshot(payload: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:

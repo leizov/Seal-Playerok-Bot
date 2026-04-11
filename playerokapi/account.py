@@ -8,6 +8,7 @@ import time
 import email.utils
 import tempfile
 import shutil
+import hashlib
 from datetime import datetime
 from curl_cffi.requests import Session as CurlSession, Response as CurlResponse, exceptions as curl_exceptions
 from curl_cffi import CurlMime
@@ -58,6 +59,192 @@ class Account:
             cls.instance = super(Account, cls).__new__(cls)
         return getattr(cls, "instance")
 
+    def _resolve_runtime_cert_dir(self) -> str:
+        return os.path.join(
+            tempfile.gettempdir(),
+            "sealplayerokbot",
+            "certs",
+            self._build_bot_identity_digest(),
+        )
+
+    def _build_bot_identity_digest(self) -> str:
+        identity_parts: list[str] = []
+        try:
+            import paths as app_paths
+
+            root_dir = getattr(app_paths, "ROOT_DIR", None)
+            if root_dir:
+                identity_parts.append(os.path.abspath(str(root_dir)))
+        except Exception:
+            pass
+
+        if not identity_parts:
+            identity_parts.append(os.path.abspath(os.getcwd()))
+
+        identity_parts.append(os.path.abspath(os.path.dirname(__file__)))
+
+        try:
+            user_identity = str(os.getuid())
+        except Exception:
+            user_identity = os.environ.get("USERNAME") or os.environ.get("USER") or "unknown-user"
+
+        identity_parts.append(user_identity)
+        identity_seed = "|".join(identity_parts)
+        return hashlib.sha256(identity_seed.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+    def _build_bot_cert_name(self) -> str:
+        return f"cacert-{self._build_bot_identity_digest()}.pem"
+
+    def _is_usable_cert(self, cert_path: str) -> bool:
+        if not cert_path:
+            return False
+        try:
+            if not os.path.isfile(cert_path):
+                return False
+            if os.path.getsize(cert_path) <= 0:
+                return False
+            with open(cert_path, "rb") as cert_file:
+                return bool(cert_file.read(1))
+        except PermissionError:
+            return False
+        except Exception:
+            return False
+
+    def _list_temp_cert_candidates(self, include_global_fallback: bool = True) -> list[str]:
+        temp_root = tempfile.gettempdir()
+        runtime_cert_dir = self._resolve_runtime_cert_dir()
+        preferred_cert_path = os.path.join(runtime_cert_dir, self._build_bot_cert_name())
+        preferred_norm = os.path.normcase(os.path.abspath(preferred_cert_path))
+        runtime_dir_norm = os.path.normcase(os.path.abspath(runtime_cert_dir))
+
+        candidates: list[str] = []
+        seen_paths: set[str] = set()
+
+        def _add_candidate(path: str) -> None:
+            if not path:
+                return
+            abs_path = os.path.abspath(path)
+            normalized = os.path.normcase(abs_path)
+            if normalized in seen_paths:
+                return
+            seen_paths.add(normalized)
+            if self._is_usable_cert(abs_path):
+                candidates.append(abs_path)
+
+        def _candidate_sort_key(path: str) -> tuple[int, int, float]:
+            normalized = os.path.normcase(os.path.abspath(path))
+            is_preferred = 1 if normalized == preferred_norm else 0
+            in_runtime_dir = 1 if os.path.normcase(os.path.dirname(os.path.abspath(path))) == runtime_dir_norm else 0
+            try:
+                mtime = os.path.getmtime(path)
+            except Exception:
+                mtime = 0.0
+            return (is_preferred, in_runtime_dir, mtime)
+
+        _add_candidate(preferred_cert_path)
+
+        try:
+            if os.path.isdir(runtime_cert_dir):
+                for entry in os.scandir(runtime_cert_dir):
+                    try:
+                        if not entry.is_file():
+                            continue
+                    except Exception:
+                        continue
+                    name_lower = entry.name.lower()
+                    if not name_lower.endswith(".pem"):
+                        continue
+                    if "cert" not in name_lower and "ca" not in name_lower:
+                        continue
+                    _add_candidate(entry.path)
+        except Exception:
+            pass
+
+        if not candidates and include_global_fallback:
+            def _walk_error(_err: OSError) -> None:
+                return
+
+            try:
+                for root, _, files in os.walk(temp_root, onerror=_walk_error):
+                    for file_name in files:
+                        file_name_lower = file_name.lower()
+                        if not file_name_lower.endswith(".pem"):
+                            continue
+                        if "cert" not in file_name_lower and "ca" not in file_name_lower:
+                            continue
+                        _add_candidate(os.path.join(root, file_name))
+            except Exception:
+                pass
+
+        candidates.sort(key=_candidate_sort_key, reverse=True)
+        return candidates
+
+    def _copy_cert_to_runtime_path(self, target_path: str, _attempt_label: str) -> bool:
+        tmp_copy_path = f"{target_path}.tmp-{os.getpid()}-{int(time.time() * 1000)}"
+        try:
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            shutil.copyfile(self._cert_path, tmp_copy_path)
+            try:
+                os.chmod(tmp_copy_path, 0o600)
+            except Exception:
+                pass
+            os.replace(tmp_copy_path, target_path)
+            try:
+                os.chmod(target_path, 0o600)
+            except Exception:
+                pass
+            self._runtime_cert_path = target_path
+            return True
+        except Exception:
+            try:
+                if os.path.exists(tmp_copy_path):
+                    os.remove(tmp_copy_path)
+            except Exception:
+                pass
+            return False
+
+    def _build_verify_candidates(self) -> list[str]:
+        candidates: list[str] = []
+        seen_paths: set[str] = set()
+
+        def _append_candidate(path: str | None) -> None:
+            if not path:
+                return
+            abs_path = os.path.abspath(path)
+            normalized = os.path.normcase(abs_path)
+            if normalized in seen_paths:
+                return
+            seen_paths.add(normalized)
+            candidates.append(abs_path)
+
+        _append_candidate(getattr(self, "_runtime_cert_path", None))
+        for temp_candidate in self._list_temp_cert_candidates(include_global_fallback=True):
+            _append_candidate(temp_candidate)
+        _append_candidate(getattr(self, "_cert_path", None))
+        return candidates
+
+    def _prepare_runtime_cert_file(self) -> None:
+        self._cert_path = os.path.join(os.path.dirname(__file__), "cacert.pem")
+        runtime_cert_dir = self._resolve_runtime_cert_dir()
+        runtime_cert_path = os.path.join(runtime_cert_dir, self._build_bot_cert_name())
+
+        if self._is_usable_cert(runtime_cert_path):
+            self._runtime_cert_path = runtime_cert_path
+            return
+
+        if self._copy_cert_to_runtime_path(runtime_cert_path, "primary"):
+            return
+
+        fallback_candidates = self._list_temp_cert_candidates(include_global_fallback=True)
+        if fallback_candidates:
+            self._runtime_cert_path = fallback_candidates[0]
+            return
+
+        if self._copy_cert_to_runtime_path(runtime_cert_path, "retry"):
+            return
+
+        self._runtime_cert_path = self._cert_path
+
     def __init__(
             self,
             token: str,
@@ -99,14 +286,9 @@ class Account:
             if not hasattr(self, "_Account__curl_session"):
                 self.__curl_session = None
 
-            if not hasattr(self, "_cert_path"):
-                self._cert_path = os.path.join(os.path.dirname(__file__), "cacert.pem")
-            if not hasattr(self, "_tmp_cert_path"):
-                self._tmp_cert_path = os.path.join(tempfile.gettempdir(), "cacert.pem")
-            shutil.copyfile(self._cert_path, self._tmp_cert_path)
-
             if not hasattr(self, "_Account__logger"):
                 self.__logger = getLogger("playerokapi")
+            self._prepare_runtime_cert_file()
 
             try:
                 self._refresh_clients()
@@ -179,13 +361,11 @@ class Account:
         self.interlocutor_ids: dict[str, str] = {}
         """ Кэш: {chat_id: user_id_собеседника}. Заполняется автоматически при получении чатов. """
 
-        self._cert_path = os.path.join(os.path.dirname(__file__), "cacert.pem")
-        self._tmp_cert_path = os.path.join(tempfile.gettempdir(), "cacert.pem")
-        shutil.copyfile(self._cert_path, self._tmp_cert_path)
+        self.__logger = getLogger("playerokapi")
+        self._prepare_runtime_cert_file()
         self.__curl_session = None
 
         self._refresh_clients()
-        self.__logger = getLogger("playerokapi")
         self._initialized = True
 
     def _refresh_clients(self):
@@ -196,23 +376,41 @@ class Account:
                 self.__curl_session.close()
             except:
                 pass
-        
-        # Создаём новую сессию с имперсонацией Chrome
+
+        verify_candidates = self._build_verify_candidates()
+        last_session_error: Exception | None = None
+
+        for verify_path in verify_candidates:
+            try:
+                self.__curl_session = CurlSession(
+                    impersonate="chrome120",
+                    proxy=self.__proxy_string,
+                    timeout=self.requests_timeout,
+                    verify=verify_path,
+                )
+                self._runtime_cert_path = verify_path
+                return
+            except Exception as session_error:
+                last_session_error = session_error
+
+        if last_session_error is not None:
+            raise last_session_error
+
+        # Крайний fallback: системная верификация без явного cert-файла.
         self.__curl_session = CurlSession(
             impersonate="chrome120",
             proxy=self.__proxy_string,
             timeout=self.requests_timeout,
-            verify=self._tmp_cert_path
         )
 
     def update_proxy(self, proxy: str | None):
         """
         Обновляет прокси без перезапуска бота (hot-reload).
-        
+
         :param proxy: Новая прокси строка или None для отключения.
         """
         self.proxy = proxy
-        
+
         if self.proxy:
             if self.proxy.startswith('socks5://') or self.proxy.startswith('socks4://'):
                 self.__proxy_string = self.proxy
@@ -221,12 +419,12 @@ class Account:
                 self.__proxy_string = f"http://{clean_proxy}"
         else:
             self.__proxy_string = None
-        
+
         # Пересоздаём клиенты с новым прокси
         self._refresh_clients()
         self.__logger.info(f"Прокси обновлён: {self.__proxy_string or 'отключён'}")
 
-    def request(self, method: Literal["get", "post"], url: str, headers: dict[str, str], 
+    def request(self, method: Literal["get", "post"], url: str, headers: dict[str, str],
                 payload: dict[str, str] | None = None, files: dict | None = None,
                 multipart: CurlMime | None = None) -> CurlResponse:
         """
@@ -240,10 +438,10 @@ class Account:
 
         :param headers: Заголовки запроса.
         :type headers: `dict[str, str]`
-        
+
         :param payload: Payload запроса.
         :type payload: `dict[str, str]` or `None`
-        
+
         :param files: Файлы запроса.
         :type files: `dict` or `None`
 
@@ -270,6 +468,10 @@ class Account:
             except:
                 pass
 
+        try:
+            x_gql_op = payload.get("operationName", "viewer")
+        except:
+            x_gql_op = "viewer"
         _headers = {
             "accept": "*/*",
             "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -291,8 +493,10 @@ class Account:
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-origin",
-            "x-gql-op": "viewer",
-            "x-timezone-offset": "-180"
+            "x-gql-op": x_gql_op,
+            "x-gql-path": "/",
+            "x-apollo-operation-name": x_gql_op,
+            "x-timezone-offset": "-180",
         }
 
         headers["cookie"] = f"token={self.token}"
@@ -333,7 +537,7 @@ class Account:
 
                 else:
                     r = self.__curl_session.post(
-                        url=url, 
+                        url=url,
                         json=payload,
                         headers=headers
                     )
@@ -649,7 +853,7 @@ class Account:
         if last_network_exc is not None:
             raise last_network_exc
         raise RuntimeError(f"Request to {url} failed with unknown reason")
-    
+
     def get(self) -> Account:
         """
         Получает/обновляет данные об аккаунте.
@@ -668,7 +872,7 @@ class Account:
         data: dict = rjson["data"]["viewer"]
         if data is None:
             raise UnauthorizedError()
-        
+
         self.id = data.get("id")
         self.username = data.get("username")
         self.email = data.get("email")
@@ -683,7 +887,7 @@ class Account:
         self.last_item_created_at = data.get("lastItemCreatedAt")
         self.has_confirmed_phone_number = data.get("hasConfirmedPhoneNumber")
         self.can_publish_items = data.get("canPublishItems")
-        
+
         headers = {"accept": "*/*"}
         payload = {
             "operationName": "user",
@@ -694,7 +898,7 @@ class Account:
         data: dict = r["data"]["user"]
         if data.get("__typename") == "User": self.profile = account_profile(data)
         return self
-    
+
     def get_user(self, id: str | None = None, username: str | None = None) -> types.UserProfile:
         """
         Получает профиль пользователя.\n
@@ -722,7 +926,7 @@ class Account:
         else: profile = None
         return user_profile(profile)
 
-    def get_deals(self, count: int = 24, statuses: list[ItemDealStatuses] | None = None, 
+    def get_deals(self, count: int = 24, statuses: list[ItemDealStatuses] | None = None,
                   direction: ItemDealDirections | None = None, after_cursor: str = None) -> types.ItemDealList:
         """
         Получает сделки аккаунта.
@@ -738,7 +942,7 @@ class Account:
 
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str`
-        
+
         :return: Страница сделок.
         :rtype: `playerokapi.types.ItemDealList`
         """
@@ -759,7 +963,7 @@ class Account:
 
         :param deal_id: ID сделки.
         :type deal_id: `str`
-        
+
         :return: Объект сделки.
         :rtype: `playerokapi.types.ItemDeal`
         """
@@ -771,7 +975,7 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return item_deal(r["data"]["deal"])
-    
+
     def update_deal(self, deal_id: str, new_status: ItemDealStatuses) -> types.ItemDeal:
         """
         Обновляет статус сделки
@@ -782,7 +986,7 @@ class Account:
 
         :param new_status: Новый статус сделки.
         :type new_status: `playerokapi.enums.ItemDealStatuses`
-        
+
         :return: Объект обновлённой сделки.
         :rtype: `playerokapi.types.ItemDeal`
         """
@@ -801,7 +1005,7 @@ class Account:
         r = self.request("post", f"{self.base_url}/graphql", headers, payload).json()
         return item_deal(r["data"]["updateDeal"])
 
-    def get_games(self, count: int = 24, type: GameTypes | None = None, 
+    def get_games(self, count: int = 24, type: GameTypes | None = None,
                   after_cursor: str = None) -> types.GameList:
         """
         Получает все игры или/и приложения.
@@ -814,7 +1018,7 @@ class Account:
 
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str`
-        
+
         :return: Страница игр.
         :rtype: `playerokapi.types.GameList`
         """
@@ -826,7 +1030,7 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return game_list(r["data"]["games"])
-    
+
     def get_game(self, id: str | None = None, slug: str | None = None) -> types.Game:
         """
         Получает игру/приложение.\n
@@ -837,7 +1041,7 @@ class Account:
 
         :param slug: Имя страницы игры/приложения, _опционально_.
         :type slug: `str` or `None`
-        
+
         :return: Объект игры.
         :rtype: `playerokapi.types.Game`
         """
@@ -864,7 +1068,7 @@ class Account:
 
         :param slug: Имя страницы категории, _опционально_.
         :type slug: `str` or `None`
-        
+
         :return: Объект категории игры.
         :rtype: `playerokapi.types.GameCategory`
         """
@@ -876,7 +1080,7 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return game_category(r["data"]["gameCategory"])
-    
+
     def get_game_category_agreements(self, game_category_id: str, user_id: str | None = None,
                                      count: int = 24, after_cursor: str | None = None) -> types.GameCategoryAgreementList:
         """
@@ -890,10 +1094,10 @@ class Account:
 
         :param count: Кол-во соглашений, которые нужно получить (не более 24 за один запрос).
         :type count: `int`
-        
+
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница соглашений.
         :rtype: `playerokapi.types.GameCategoryAgreementList`
         """
@@ -905,21 +1109,21 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return game_category_agreement_list(r["data"]["gameCategoryAgreements"])
-    
+
     def get_game_category_obtaining_types(self, game_category_id: str, count: int = 24,
                                           after_cursor: str | None = None) -> types.GameCategoryObtainingTypeList:
         """
         Получает типы (способы) получения предмета в категории.
-        
+
         :param game_category_id: ID категории игры.
         :type game_category_id: `str`
 
         :param count: Кол-во соглашений, которые нужно получить (не более 24 за один запрос).
         :type count: `int`
-        
+
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница соглашений.
         :rtype: `playerokapi.types.GameCategoryAgreementList`
         """
@@ -931,27 +1135,27 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return game_category_obtaining_type_list(r["data"]["gameCategoryObtainingTypes"])
-    
+
     def get_game_category_instructions(self, game_category_id: str, obtaining_type_id: str, count: int = 24,
                                        type: GameCategoryInstructionTypes | None = None, after_cursor: str | None = None) -> types.GameCategoryInstructionList:
         """
         Получает инструкции по продаже/покупке в категории.
-        
+
         :param game_category_id: ID категории игры.
         :type game_category_id: `str`
-        
+
         :param obtaining_type_id: ID типа (способа) получения предмета.
         :type obtaining_type_id: `str`
 
         :param count: Кол-во инструкций, которые нужно получить (не более 24 за один запрос).
         :type count: `int`
-        
+
         :param type: Тип инструкции: для продавца или для покупателя, _опционально_.
         :type type: `enums.GameCategoryInstructionTypes` or `None`
 
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница инструкий.
         :rtype: `playerokapi.types.GameCategoryInstructionList`
         """
@@ -968,22 +1172,22 @@ class Account:
                                       type: GameCategoryDataFieldTypes | None = None, after_cursor: str | None = None) -> types.GameCategoryDataFieldList:
         """
         Получает поля с данными категории (которые отправляются после покупки).
-        
+
         :param game_category_id: ID категории игры.
         :type game_category_id: `str`
-        
+
         :param obtaining_type_id: ID типа (способа) получения предмета.
         :type obtaining_type_id: `str`
 
         :param count: Кол-во инструкций, которые нужно получить (не более 24 за один запрос).
         :type count: `int`
-        
+
         :param type: Тип полей с данными, _опционально_.
         :type type: `enums.GameCategoryDataFieldTypes` or `None`
 
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница полей с данными.
         :rtype: `playerokapi.types.GameCategoryDataFieldList`
         """
@@ -995,7 +1199,7 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return game_category_data_field_list(r["data"]["gameCategoryDataFields"])
-    
+
     def get_chats(self, count: int = 24, type: ChatTypes | None = None,
                   status: ChatStatuses | None = None, after_cursor: str | None = None) -> types.ChatList:
         """
@@ -1009,10 +1213,10 @@ class Account:
 
         :param status: Статус чатов, которые нужно получать. По умолчанию не указано, значит будут любые, _опционально_.
         :type status: `playerokapi.enums.ChatStatuses` or `None`
-        
+
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница чатов.
         :rtype: `playerokapi.types.ChatList`
         """
@@ -1024,20 +1228,20 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         chat_list_obj = chat_list(r["data"]["chats"])
-        
+
         # Автоматически кэшируем interlocutor_ids для полученных чатов
         for chat in chat_list_obj.chats:
             self._cache_interlocutor(chat)
-        
+
         return chat_list_obj
-    
+
     def get_chat(self, chat_id: str) -> types.Chat:
         """
         Получает чат.
 
         :param chat_id: ID чата.
         :type chat_id: `str`
-        
+
         :return: Объект чата.
         :rtype: `playerokapi.types.Chat`
         """
@@ -1049,12 +1253,12 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         chat_obj = chat(r["data"]["chat"])
-        
+
         # Автоматически кэшируем interlocutor_id для полученного чата
         self._cache_interlocutor(chat_obj)
-        
+
         return chat_obj
-    
+
     def get_chat_by_username(self, username: str) -> types.Chat | None:
         """
         Получает чат по никнейму собеседника.
@@ -1074,7 +1278,7 @@ class Account:
             if not chats.page_info.has_next_page:
                 break
             next_cursor = chats.page_info.end_cursor
-    
+
     def get_chat_messages(self, chat_id: str, count: int = 24,
                           after_cursor: str | None = None) -> types.ChatMessageList:
         """
@@ -1088,7 +1292,7 @@ class Account:
 
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница сообщений.
         :rtype: `playerokapi.types.ChatMessageList`
         """
@@ -1123,7 +1327,7 @@ class Account:
         }
         r = self.request("post", f"{self.base_url}/graphql", headers, payload).json()
         return chat(r["data"]["markChatAsRead"])
-    
+
     def send_message(self, chat_id: str, text: str | None = None,
                      photo_file_path: str | None = None, mark_chat_as_read: bool = False) -> types.ChatMessage:
         """
@@ -1168,7 +1372,7 @@ class Account:
             operations["variables"]["file"] = None
         elif text:
             operations["variables"]["input"]["text"] = text
-        
+
         files = None
         mp = None
         try:
@@ -1215,7 +1419,7 @@ class Account:
         return upload_image(r)
 
 
-    def create_item(self, game_category_id: str, obtaining_type_id: str, name: str, price: int, 
+    def create_item(self, game_category_id: str, obtaining_type_id: str, name: str, price: int,
                     description: str, options: list[GameCategoryOption], data_fields: list[GameCategoryDataField],
                     attachments: list[str]) -> types.Item:
         """
@@ -1287,9 +1491,9 @@ class Account:
         finally:
             for file_obj in files.values():
                 file_obj.close()
-    
-    def update_item(self, id: str, name: str | None = None, price: int | None = None, description: str | None = None, 
-                    options: list[GameCategoryOption] | None = None, data_fields: list[GameCategoryDataField] | None = None, 
+
+    def update_item(self, id: str, name: str | None = None, price: int | None = None, description: str | None = None,
+                    options: list[GameCategoryOption] | None = None, data_fields: list[GameCategoryDataField] | None = None,
                     remove_attachments: list[str] | None = None, add_attachments: list[str] | None = None) -> types.Item:
         """
         Обновляет предмет аккаунта.
@@ -1379,8 +1583,8 @@ class Account:
         }
         self.request("post", f"{self.base_url}/graphql", headers, payload)
         return True
-    
-    def publish_item(self, item_id: str, priority_status_id: str, 
+
+    def publish_item(self, item_id: str, priority_status_id: str,
                      transaction_provider_id: TransactionProviderIds = TransactionProviderIds.LOCAL) -> types.Item:
         """
         Выставляет предмет на продажу.
@@ -1432,7 +1636,7 @@ class Account:
 
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница профилей предметов.
         :rtype: `playerokapi.types.ItemProfileList`
         """
@@ -1456,7 +1660,7 @@ class Account:
 
         :param slug: Имя страницы предмета, _опционально_.
         :type slug: `str` or `None`
-        
+
         :return: Объект предмета.
         :rtype: `playerokapi.types.MyItem` or `playerokapi.types.Item` or `playerokapi.types.ItemProfile`
         """
@@ -1483,7 +1687,7 @@ class Account:
 
         :param item_price: Цена предмета.
         :type item_price: `int` or `str`
-        
+
         :return: Массив статусов приоритета предмета.
         :rtype: `list[playerokapi.types.ItemPriorityStatus]`
         """
@@ -1496,7 +1700,7 @@ class Account:
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return [item_priority_status(status) for status in r["data"]["itemPriorityStatuses"]]
 
-    def increase_item_priority_status(self, item_id: str, priority_status_id: str, payment_method_id: TransactionPaymentMethodIds | None = None, 
+    def increase_item_priority_status(self, item_id: str, priority_status_id: str, payment_method_id: TransactionPaymentMethodIds | None = None,
                                       transaction_provider_id: TransactionProviderIds = TransactionProviderIds.LOCAL) -> types.Item:
         """
         Повышает статус приоритета предмета.
@@ -1512,7 +1716,7 @@ class Account:
 
         :param transaction_provider_id: ID провайдера транзакции (LOCAL - с баланса кошелька на сайте).
         :type transaction_provider_id: `playerokapi.enums.TransactionProviderIds`
-        
+
         :return: Объект обновлённого предмета.
         :rtype: `playerokapi.types.Item`
         """
@@ -1540,7 +1744,7 @@ class Account:
 
         :param direction: Направление транзакций (пополнение/вывод).
         :type direction: `playerokapi.enums.TransactionProviderDirections`
-        
+
         :return: Список провайдеров транзакий.
         :rtype: `list` of `playerokapi.types.TransactionProvider`
         """
@@ -1579,7 +1783,7 @@ class Account:
 
         :param after_cursor: Курсор, с которого будет идти парсинг (если нету - ищет с самого начала страницы), _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница транзакций.
         :rtype: `playerokapi.types.TransactionList`
         """
@@ -1599,7 +1803,7 @@ class Account:
         payload["variables"] = json.dumps(payload["variables"], ensure_ascii=False),
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return transaction_list(r["data"]["transactions"])
-    
+
     def get_sbp_bank_members(self) -> list[SBPBankMember]:
         """
         Получает всех членов банка СБП.
@@ -1615,7 +1819,7 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return [sbp_bank_member(member) for member in r["data"]["sbpBankMembers"]]
-    
+
     def get_verified_cards(self, count: int = 24, after_cursor: str | None = None,
                            direction: SortDirections = SortDirections.ASC) -> types.UserBankCardList:
         """
@@ -1629,7 +1833,7 @@ class Account:
 
         :param direction: Тип сортировки банковских карт.
         :type direction: `playerokapi.enums.SortDirections`
-        
+
         :return: Страница банковских карт пользователя.
         :rtype: `playerokapi.types.UserBankCardList`
         """
@@ -1641,14 +1845,14 @@ class Account:
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return user_bank_card_list(r["data"]["verifiedCards"])
-    
+
     def delete_card(self, card_id: str) -> bool:
         """
         Удаляет карту из сохранённых в аккаунте.
 
         :param card_id: ID банковской карты.
         :type card_id: `str`
-        
+
         :return: True, если карта удалилась, иначе False
         :rtype: `bool`
         """
@@ -1664,7 +1868,7 @@ class Account:
         }
         r = self.request("post", f"{self.base_url}/graphql", headers, payload).json()
         return r["data"]["deleteCard"]
-    
+
     def request_withdrawal(self, provider: TransactionProviderIds, account: str, value: int,
                            payment_method_id: TransactionPaymentMethodIds | None = None,
                            sbp_bank_member_id: str | None = None) -> types.Transaction:
@@ -1685,7 +1889,7 @@ class Account:
 
         :param sbp_bank_member_id: ID члена банка СБП (только если указан провайдер СБП), _опционально_.
         :type sbp_bank_member_id: `str` or `None`
-        
+
         :return: Объект транзакции вывода.
         :rtype: `playerokapi.types.Transaction`
         """
@@ -1707,14 +1911,14 @@ class Account:
         }
         r = self.request("post", f"{self.base_url}/graphql", headers, payload).json()
         return transaction(r["data"]["requestWithdrawal"])
-    
+
     def remove_transaction(self, transaction_id: str) -> types.Transaction:
         """
         Удаляет транзакцию (например, можно отменить вывод).
 
         :param transaction_id: ID транзакции.
         :type transaction_id: `str`
-        
+
         :return: Объект отменённой транзакции.
         :rtype: `playerokapi.types.Transaction`
         """
@@ -1728,24 +1932,24 @@ class Account:
         }
         r = self.request("post", f"{self.base_url}/graphql", headers, payload).json()
         return transaction(r["data"]["removeTransaction"])
-    
+
     ###
 
     def _cache_interlocutor(self, chat: types.Chat) -> None:
         """
         Кэширует ID собеседника для чата.
         Автоматически вызывается при получении чатов через get_chats() и get_chat().
-        
+
         :param chat: Объект чата.
         :type chat: `playerokapi.types.Chat`
         """
         if chat.id in self.interlocutor_ids:
             return  # Уже закэширован
-        
+
         # Ищем собеседника среди участников чата
         if not chat.users:
             return
-        
+
         for user in chat.users:
             if user.id != self.id:
                 # Нашли собеседника (не наш ID)
@@ -1755,26 +1959,26 @@ class Account:
                     f"user_id={user.id}, username={user.username}"
                 )
                 return
-    
+
     def get_interlocutor_id(self, chat_id: str) -> str | None:
         """
         Быстро получает ID собеседника из кэша по ID чата.
-        
+
         :param chat_id: ID чата.
         :type chat_id: `str`
-        
+
         :return: ID собеседника или None, если чат не найден в кэше.
         :rtype: `str` or `None`
         """
         return self.interlocutor_ids.get(chat_id)
-    
+
     def get_interlocutor_profile(self, chat_id: str) -> types.UserProfile | None:
         """
         Получает полный профиль собеседника по ID чата.
-        
+
         :param chat_id: ID чата.
         :type chat_id: `str`
-        
+
         :return: Профиль собеседника или None.
         :rtype: `playerokapi.types.UserProfile` or `None`
         """
@@ -1785,36 +1989,36 @@ class Account:
                 f"Возможно, чат еще не был получен через get_chats() или get_chat()."
             )
             return None
-        
+
         return self.get_user_profile(user_id)
-    
+
     def get_chats_with_user(self, user_id: str) -> list[str]:
         """
         Находит все чаты с конкретным пользователем в кэше.
-        
+
         :param user_id: ID пользователя.
         :type user_id: `str`
-        
+
         :return: Список chat_id, в которых участвует данный пользователь.
         :rtype: `list[str]`
         """
         return [
-            chat_id 
-            for chat_id, cached_user_id in self.interlocutor_ids.items() 
+            chat_id
+            for chat_id, cached_user_id in self.interlocutor_ids.items()
             if cached_user_id == user_id
         ]
-    
+
     def get_chat_by_interlocutor_id(self, user_id: str) -> types.Chat | None:
         """
         Получает чат по ID собеседника (обратное к get_interlocutor_id).
         Возвращает первый найденный чат с этим пользователем из кэша.
-        
+
         :param user_id: ID пользователя (собеседника).
         :type user_id: `str`
-        
+
         :return: Объект чата или None, если чат не найден в кэше.
         :rtype: `playerokapi.types.Chat` or `None`
-        
+
         Примечание:
             Если с пользователем несколько чатов, вернется первый найденный.
             Используйте get_chats_with_user() для получения всех чатов.
@@ -1825,36 +2029,36 @@ class Account:
             if uid == user_id:
                 chat_id = cid
                 break
-        
+
         if not chat_id:
             self.__logger.warning(
                 f"Чат с пользователем {user_id} не найден в кэше. "
                 f"Попробуйте использовать get_chat_by_username() или загрузите чаты через get_chats()."
             )
             return None
-        
+
         # Получаем полный объект чата
         return self.get_chat(chat_id)
-    
+
     def get_chat_objects_with_user(self, user_id: str) -> list[types.Chat]:
         """
         Получает все объекты чатов с конкретным пользователем.
-        
+
         :param user_id: ID пользователя (собеседника).
         :type user_id: `str`
-        
+
         :return: Список объектов Chat с этим пользователем.
         :rtype: `list[playerokapi.types.Chat]`
-        
+
         Примечание:
             Делает HTTP запрос для каждого чата. Для больших списков может быть медленным.
         """
         chat_ids = self.get_chats_with_user(user_id)
-        
+
         if not chat_ids:
             self.__logger.info(f"Чатов с пользователем {user_id} не найдено в кэше")
             return []
-        
+
         chats = []
         for chat_id in chat_ids:
             try:
@@ -1862,13 +2066,13 @@ class Account:
                 chats.append(chat)
             except Exception as e:
                 self.__logger.error(f"Ошибка получения чата {chat_id}: {e}")
-        
+
         return chats
-    
+
     def clear_interlocutor_cache(self, chat_id: str | None = None) -> None:
         """
         Очищает кэш interlocutor_ids.
-        
+
         :param chat_id: ID конкретного чата для очистки. Если None - очищает весь кэш.
         :type chat_id: `str` or `None`
         """
@@ -1879,74 +2083,74 @@ class Account:
         else:
             self.interlocutor_ids.clear()
             self.__logger.debug("Очищен весь кэш interlocutor_ids")
-    
+
     # ========================================================================
     # Методы для работы напрямую с user_id (обертки над методами с chat_id)
     # ========================================================================
-    
+
     def send_message_to_user(self, user_id: str, text: str | None = None,
-                            photo_file_path: str | None = None, 
+                            photo_file_path: str | None = None,
                             mark_chat_as_read: bool = False) -> types.ChatMessage | None:
         """
         Отправляет сообщение пользователю по его ID (в первый найденный чат).
-        
+
         :param user_id: ID пользователя (собеседника).
         :type user_id: `str`
-        
+
         :param text: Текст сообщения, _опционально_.
         :type text: `str` or `None`
-        
+
         :param photo_file_path: Путь к файлу фотографии, _опционально_.
         :type photo_file_path: `str` or `None`
-        
+
         :param mark_chat_as_read: Пометить чат как прочитанный перед отправкой, _опционально_.
         :type mark_chat_as_read: `bool`
-        
+
         :return: Объект отправленного сообщения или None, если чат не найден.
         :rtype: `playerokapi.types.ChatMessage` or `None`
-        
+
         Примечание:
             Если с пользователем несколько чатов, отправится в первый найденный.
             Используйте send_message_to_user_all_chats() для отправки во все чаты.
         """
         chat = self.get_chat_by_interlocutor_id(user_id)
-        
+
         if not chat:
             self.__logger.warning(f"Не удалось отправить сообщение пользователю {user_id}: чат не найден")
             return None
-        
+
         return self.send_message(chat.id, text, photo_file_path, mark_chat_as_read)
-    
+
     def send_message_to_user_all_chats(self, user_id: str, text: str | None = None,
                                       photo_file_path: str | None = None,
                                       mark_chat_as_read: bool = False) -> list[types.ChatMessage]:
         """
         Отправляет сообщение пользователю во ВСЕ его чаты.
-        
+
         :param user_id: ID пользователя (собеседника).
         :type user_id: `str`
-        
+
         :param text: Текст сообщения, _опционально_.
         :type text: `str` or `None`
-        
+
         :param photo_file_path: Путь к файлу фотографии, _опционально_.
         :type photo_file_path: `str` or `None`
-        
+
         :param mark_chat_as_read: Пометить чаты как прочитанные перед отправкой, _опционально_.
         :type mark_chat_as_read: `bool`
-        
+
         :return: Список объектов отправленных сообщений.
         :rtype: `list[playerokapi.types.ChatMessage]`
-        
+
         Примечание:
             Полезно для массовой рассылки одному клиенту по всем его сделкам.
         """
         chat_ids = self.get_chats_with_user(user_id)
-        
+
         if not chat_ids:
             self.__logger.warning(f"Не удалось отправить сообщения пользователю {user_id}: чаты не найдены")
             return []
-        
+
         messages = []
         for chat_id in chat_ids:
             try:
@@ -1955,47 +2159,47 @@ class Account:
                 self.__logger.debug(f"Сообщение отправлено пользователю {user_id} в чат {chat_id}")
             except Exception as e:
                 self.__logger.error(f"Ошибка отправки сообщения в чат {chat_id}: {e}")
-        
+
         return messages
-    
+
     def get_user_messages(self, user_id: str, count: int = 24,
                          after_cursor: str | None = None) -> types.ChatMessageList | None:
         """
         Получает сообщения из чата с пользователем по его ID.
-        
+
         :param user_id: ID пользователя (собеседника).
         :type user_id: `str`
-        
+
         :param count: Количество сообщений для получения (не более 24 за запрос).
         :type count: `int`
-        
+
         :param after_cursor: Курсор для пагинации, _опционально_.
         :type after_cursor: `str` or `None`
-        
+
         :return: Страница сообщений или None, если чат не найден.
         :rtype: `playerokapi.types.ChatMessageList` or `None`
-        
+
         Примечание:
             Если с пользователем несколько чатов, вернутся сообщения из первого.
         """
         chat = self.get_chat_by_interlocutor_id(user_id)
-        
+
         if not chat:
             self.__logger.warning(f"Не удалось получить сообщения с пользователем {user_id}: чат не найден")
             return None
-        
+
         return self.get_chat_messages(chat.id, count, after_cursor)
-    
+
     def mark_user_chat_as_read(self, user_id: str, all_chats: bool = False) -> bool:
         """
         Помечает чат(ы) с пользователем как прочитанные.
-        
+
         :param user_id: ID пользователя (собеседника).
         :type user_id: `str`
-        
+
         :param all_chats: Пометить все чаты с пользователем или только первый.
         :type all_chats: `bool`
-        
+
         :return: True если хотя бы один чат помечен, False если чаты не найдены.
         :rtype: `bool`
         """
@@ -2004,7 +2208,7 @@ class Account:
             if not chat_ids:
                 self.__logger.warning(f"Чаты с пользователем {user_id} не найдены")
                 return False
-            
+
             success = False
             for chat_id in chat_ids:
                 try:
@@ -2012,14 +2216,14 @@ class Account:
                     success = True
                 except Exception as e:
                     self.__logger.error(f"Ошибка при пометке чата {chat_id} как прочитанного: {e}")
-            
+
             return success
         else:
             chat = self.get_chat_by_interlocutor_id(user_id)
             if not chat:
                 self.__logger.warning(f"Чат с пользователем {user_id} не найден")
                 return False
-            
+
             try:
                 self.mark_chat_as_read(chat.id)
                 return True

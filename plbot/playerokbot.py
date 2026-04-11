@@ -942,7 +942,13 @@ class PlayerokBot:
 
             def _health_circles(level: int) -> str:
                 normalized = max(1, min(5, _safe_int(level, 5)))
-                return ("\U0001F7E2" * normalized) + ("\u26AA" * (5 - normalized))
+                if normalized >= 5:
+                    filled = "\U0001F7E2"  # green
+                elif normalized >= 3:
+                    filled = "\U0001F7E0"  # orange
+                else:
+                    filled = "\U0001F534"  # red
+                return (filled * normalized) + ("\u26AA" * (5 - normalized))
 
             def _read_health_snapshot() -> dict:
                 try:
@@ -1757,7 +1763,8 @@ class PlayerokBot:
                                 text=(
                                     "Не удалось подключиться к Playerok аккаунту на старте.\n"
                                     "Слушатель запущен в режиме восстановления и будет продолжать попытки подключения.\n"
-                                    "После восстановления доступности Playerok/токена работа продолжится автоматически.\n\n"
+                                    "После восстановления доступности Playerok/токена работа продолжится автоматически.\n"
+                                    "Когда подключение будет восстановлено, вам придёт уведомление.\n\n"
                                     "Проверьте текущий статус командой:\n"
                                     "/playerok_status\n\n"
                                     "Проверьте токен/прокси/user-agent в:\n"

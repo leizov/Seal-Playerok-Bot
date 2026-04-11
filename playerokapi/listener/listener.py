@@ -43,6 +43,7 @@ class EventListener:
         self.__review_poll_interval_seconds = 30
         self.__review_primary_check_delay_seconds = 10
         self.__review_wait_timeout_seconds = 5 * 60
+        self.__error_pause_max_seconds = 60
         self.__pending_review_checks: list[dict[str, str]] = []
         self._load_pending_reviews_from_storage()
 
@@ -694,7 +695,8 @@ class EventListener:
                 try:
 
                     if last_errors_count >= 3:
-                        error_delay = (last_errors_count - 2) * 10
+                        raw_error_delay = (last_errors_count - 2) * 10
+                        error_delay = min(raw_error_delay, self.__error_pause_max_seconds)
                         error_log = f'Мы попали под шквал ошибок, ставлю слушатель на паузу на {error_delay} секунд'
                         if last_errors_count > 7:
                             error_log += '\n Проверь токен аккаунта и прокси, попробуй перезагрузить бота'
