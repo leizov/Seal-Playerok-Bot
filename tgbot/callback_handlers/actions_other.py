@@ -129,8 +129,12 @@ async def callback_remember_deal_id(callback: CallbackQuery, callback_data: call
         )
         
 
-@router.callback_query(calls.DealView.filter())
-async def callback_deal_view(callback: CallbackQuery, callback_data: calls.DealView, state: FSMContext):
+async def _render_deal_view(
+    callback: CallbackQuery,
+    state: FSMContext,
+    deal_id: str,
+    back_cb: str | None = None,
+):
     from plbot.playerokbot import get_playerok_bot
 
     await state.set_state(None)
@@ -139,7 +143,6 @@ async def callback_deal_view(callback: CallbackQuery, callback_data: calls.DealV
         await callback.answer("❌ Нет подключения к Playerok", show_alert=True)
         return
 
-    deal_id = callback_data.de_id
     try:
         try:
             await callback.message.edit_text(
@@ -160,6 +163,7 @@ async def callback_deal_view(callback: CallbackQuery, callback_data: calls.DealV
             deal_id=deal_id,
             deal_status=getattr(full_deal, "status", None),
             chat_id=chat_id,
+            back_cb=back_cb,
         )
 
         try:
@@ -186,6 +190,29 @@ async def callback_deal_view(callback: CallbackQuery, callback_data: calls.DealV
         await callback.answer()
     except Exception as e:
         await callback.answer(f"❌ Не удалось открыть сделку: {e}", show_alert=True)
+
+
+@router.callback_query(calls.DealView.filter())
+async def callback_deal_view(callback: CallbackQuery, callback_data: calls.DealView, state: FSMContext):
+    await _render_deal_view(
+        callback=callback,
+        state=state,
+        deal_id=callback_data.de_id,
+    )
+
+
+@router.callback_query(calls.DealViewFromDeals.filter())
+async def callback_deal_view_from_deals(
+    callback: CallbackQuery,
+    callback_data: calls.DealViewFromDeals,
+    state: FSMContext,
+):
+    await _render_deal_view(
+        callback=callback,
+        state=state,
+        deal_id=callback_data.de_id,
+        back_cb=calls.DealsAction(action="open").pack(),
+    )
 
 
 @router.callback_query(F.data == "refund_deal")

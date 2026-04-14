@@ -32,6 +32,12 @@ def _default_filters() -> dict:
     }
 
 
+def _default_ui_state() -> dict:
+    return {
+        "filter_open": False,
+    }
+
+
 def _normalize_filters(raw_filters: dict | None) -> dict:
     filters = _default_filters()
     if isinstance(raw_filters, dict):
@@ -52,6 +58,14 @@ def _normalize_filters(raw_filters: dict | None) -> dict:
     except Exception:
         filters["page"] = 0
     return filters
+
+
+def _normalize_ui_state(raw_ui_state: dict | None) -> dict:
+    ui_state = _default_ui_state()
+    if isinstance(raw_ui_state, dict):
+        ui_state.update(raw_ui_state)
+    ui_state["filter_open"] = bool(ui_state.get("filter_open"))
+    return ui_state
 
 
 def _enum_name(value) -> str | None:
@@ -223,6 +237,10 @@ async def show_deals_menu(
 
     data = await state.get_data()
     filters = _default_filters() if reset else _normalize_filters(data.get("deals_filters"))
+    if reset and callback is None:
+        ui_state = _default_ui_state()
+    else:
+        ui_state = _normalize_ui_state(data.get("deals_ui"))
 
     cached_deals = data.get("deals_cached")
     if force_reload or not isinstance(cached_deals, list):
@@ -258,6 +276,7 @@ async def show_deals_menu(
 
     await state.update_data(
         deals_filters=filters,
+        deals_ui=ui_state,
         deals_cached=cached_deals,
         deals_total_loaded=len(cached_deals),
     )
@@ -270,7 +289,13 @@ async def show_deals_menu(
         total_found=len(filtered_deals),
         total_loaded=len(cached_deals),
     )
-    kb = templ.deals_search_kb(filters, page_deals, page, total_pages)
+    kb = templ.deals_search_kb(
+        filters=filters,
+        page_deals=page_deals,
+        page=page,
+        total_pages=total_pages,
+        filter_open=bool(ui_state.get("filter_open")),
+    )
 
     await throw_float_message(
         state=state,
@@ -296,11 +321,14 @@ async def callback_deals_actions(
 
     data = await state.get_data()
     filters = _normalize_filters(data.get("deals_filters"))
+    ui_state = _normalize_ui_state(data.get("deals_ui"))
     reset = False
     force_reload = False
 
     if action == "open":
         pass
+    elif action == "filter":
+        ui_state["filter_open"] = not bool(ui_state.get("filter_open"))
     elif action == "page":
         try:
             filters["page"] = max(0, int(value or 0))
@@ -340,9 +368,9 @@ async def callback_deals_actions(
         return
 
     if reset:
-        await state.update_data(deals_filters=_default_filters())
+        await state.update_data(deals_filters=_default_filters(), deals_ui=ui_state)
     else:
-        await state.update_data(deals_filters=filters)
+        await state.update_data(deals_filters=filters, deals_ui=ui_state)
 
     await show_deals_menu(
         message=callback.message,

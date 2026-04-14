@@ -13,6 +13,21 @@ STATUS_LABELS = {
     "ROLLED_BACK": "Возврат",
 }
 
+STATUS_BUTTON_LABELS = {
+    "ALL": "🧾 Все",
+    "PAID": "⏳ Оплачена",
+    "SENT": "🧊 Отправлена",
+    "CONFIRMED": "✅ Подтверждена",
+    "ROLLED_BACK": "❌ Возврат",
+}
+
+DEAL_STATUS_EMOJIS = {
+    "PAID": "⏳",
+    "SENT": "🧊",
+    "CONFIRMED": "✅",
+    "ROLLED_BACK": "❌",
+}
+
 SORT_FIELD_LABELS = {
     "TIME": "Время",
     "PRICE": "Цена",
@@ -39,14 +54,20 @@ def _fmt_price(value) -> str:
 
 
 def _mark(active: bool, text: str) -> str:
-    return f"✅ {text}" if active else text
+    return f"{text} ✅" if active else text
 
 
-def _deal_link(deal_id: str | None) -> str:
-    if not deal_id:
-        return "—"
-    safe_id = html.escape(str(deal_id), quote=True)
-    return f"<a href=\"https://playerok.com/deal/{safe_id}\">перейти</a>"
+def _mark_status(active: bool, text: str) -> str:
+    return f"{text} 🟢" if active else text
+
+
+def _deal_button_text(deal: dict) -> str:
+    buyer = _short((deal.get("buyer") or "Покупатель").strip() or "Покупатель", 14)
+    item_name = _short(deal.get("item_name") or "Без названия", 18)
+    price = _fmt_price(deal.get("price"))
+    status = str(deal.get("status") or "").upper()
+    status_emoji = DEAL_STATUS_EMOJIS.get(status, "❔")
+    return f"{item_name} | {buyer} | {price} | {status_emoji}"
 
 
 def _sort_order_caption(sort_by: str, sort_order: str) -> str:
@@ -88,39 +109,33 @@ def deals_search_text(
         f"📌 Статус: <code>{_safe(status_text)}</code>",
         f"⚠️ Проблема: <code>{_safe(problem_text)}</code>",
         f"🔀 Сортировка: <code>{_safe(sort_field)}, {_safe(sort_order_text)}</code>",
-        "",
-        "<b>📋 Сделки на странице</b>",
     ]
 
-    if not page_deals:
+    if total_found == 0:
+        lines.extend(["", "❌ По выбранным фильтрам сделки не найдены."])
+    elif not page_deals:
         lines.append("❌ По выбранным фильтрам сделки не найдены.")
     else:
-        start_index = page * 10
-        for index, deal in enumerate(page_deals, start=1):
-            buyer = _safe(_short(deal.get("buyer") or "Покупатель", 24))
-            item_name = _safe(_short(deal.get("item_name") or "Без названия", 34))
-            price = _fmt_price(deal.get("price"))
-            deal_link = _deal_link(deal.get("id"))
-            has_problem = " ⚠️" if deal.get("has_problem") else ""
-            lines.append(
-                f"{start_index + index}. 👤 <b>{buyer}</b>{has_problem} | "
-                f"💳 {price} | 📦 {item_name} | 🔗 {deal_link}"
-            )
+        lines.extend(["", "👇 Выберите сделку кнопкой ниже."])
 
     return "\n".join(lines)
 
 
-def deals_search_kb(filters: dict, page_deals: list[dict], page: int, total_pages: int) -> InlineKeyboardMarkup:
+def deals_search_kb(
+    filters: dict,
+    page_deals: list[dict],
+    page: int,
+    total_pages: int,
+    filter_open: bool = False,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
     for deal in page_deals:
-        buyer = (deal.get("buyer") or "Покупатель").strip() or "Покупатель"
-        buyer = _short(buyer, 32)
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=buyer,
-                    callback_data=calls.DealView(de_id=str(deal.get("id"))).pack(),
+                    text=_deal_button_text(deal),
+                    callback_data=calls.DealViewFromDeals(de_id=str(deal.get("id"))).pack(),
                 )
             ]
         )
@@ -146,19 +161,35 @@ def deals_search_kb(filters: dict, page_deals: list[dict], page: int, total_page
             ]
         )
 
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="🔼 Скрыть фильтр" if filter_open else "🔎 Фильтр",
+                callback_data=calls.DealsAction(action="filter").pack(),
+            ),
+            InlineKeyboardButton(
+                text="🔄 Обновить",
+                callback_data=calls.DealsAction(action="refresh").pack(),
+            ),
+        ]
+    )
+
+    if not filter_open:
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
     status = filters.get("status", "ALL")
     rows.append(
         [
             InlineKeyboardButton(
-                text=_mark(status == "ALL", "Все"),
+                text=_mark_status(status == "ALL", STATUS_BUTTON_LABELS["ALL"]),
                 callback_data=calls.DealsAction(action="status", value="ALL").pack(),
             ),
             InlineKeyboardButton(
-                text=_mark(status == "PAID", "Оплачена"),
+                text=_mark_status(status == "PAID", STATUS_BUTTON_LABELS["PAID"]),
                 callback_data=calls.DealsAction(action="status", value="PAID").pack(),
             ),
             InlineKeyboardButton(
-                text=_mark(status == "SENT", "Отправлена"),
+                text=_mark_status(status == "SENT", STATUS_BUTTON_LABELS["SENT"]),
                 callback_data=calls.DealsAction(action="status", value="SENT").pack(),
             ),
         ]
@@ -166,11 +197,11 @@ def deals_search_kb(filters: dict, page_deals: list[dict], page: int, total_page
     rows.append(
         [
             InlineKeyboardButton(
-                text=_mark(status == "CONFIRMED", "Подтверждена"),
+                text=_mark_status(status == "CONFIRMED", STATUS_BUTTON_LABELS["CONFIRMED"]),
                 callback_data=calls.DealsAction(action="status", value="CONFIRMED").pack(),
             ),
             InlineKeyboardButton(
-                text=_mark(status == "ROLLED_BACK", "Возврат"),
+                text=_mark_status(status == "ROLLED_BACK", STATUS_BUTTON_LABELS["ROLLED_BACK"]),
                 callback_data=calls.DealsAction(action="status", value="ROLLED_BACK").pack(),
             ),
         ]
@@ -211,12 +242,8 @@ def deals_search_kb(filters: dict, page_deals: list[dict], page: int, total_page
     rows.append(
         [
             InlineKeyboardButton(
-                text="♻️ Сброс",
+                text="♻️ Сброс фильтра",
                 callback_data=calls.DealsAction(action="reset").pack(),
-            ),
-            InlineKeyboardButton(
-                text="🔄 Обновить",
-                callback_data=calls.DealsAction(action="refresh").pack(),
             ),
         ]
     )

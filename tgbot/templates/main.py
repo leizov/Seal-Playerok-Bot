@@ -72,7 +72,13 @@ def log_new_deal_kb(username: str, deal_id: str, chat_id: str = None):
     return kb
 
 
-def deal_view_kb(username: str | None, deal_id: str, deal_status, chat_id: str | None = None) -> InlineKeyboardMarkup:
+def deal_view_kb(
+    username: str | None,
+    deal_id: str,
+    deal_status,
+    chat_id: str | None = None,
+    back_cb: str | None = None,
+) -> InlineKeyboardMarkup:
     status_name = getattr(deal_status, "name", str(deal_status) if deal_status is not None else "")
     allow_complete = status_name in ("PAID", "PENDING")
     allow_refund = status_name != "ROLLED_BACK"
@@ -114,7 +120,16 @@ def deal_view_kb(username: str | None, deal_id: str, deal_status, chat_id: str |
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="🔗 Открыть сделку", url=f"https://playerok.com/deal/{deal_id}/")])
+    deal_link_button = InlineKeyboardButton(text="🔗 Открыть сделку", url=f"https://playerok.com/deal/{deal_id}/")
+    if back_cb:
+        rows.append(
+            [
+                InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb),
+                deal_link_button,
+            ]
+        )
+    else:
+        rows.append([deal_link_button])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
