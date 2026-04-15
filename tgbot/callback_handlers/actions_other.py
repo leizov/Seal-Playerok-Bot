@@ -12,6 +12,7 @@ from .. import callback_datas as calls
 from .. import states
 from ..helpful import throw_float_message
 from ..utils.deal_formatter import format_deal_card_text
+from ..utils.item_formatter import format_item_card_payload
 from .navigation import *
 from .pagination import (
     callback_included_restore_items_pagination, 
@@ -157,6 +158,7 @@ async def _render_deal_view(
         username = getattr(getattr(full_deal, "user", None), "username", None)
         chat_id = getattr(getattr(full_deal, "chat", None), "id", None)
         chat_id = str(chat_id) if chat_id is not None else None
+        item_id = str(getattr(getattr(full_deal, "item", None), "id", "") or "").strip()
         text = format_deal_card_text(full_deal)
         reply_markup = templ.deal_view_kb(
             username=username,
@@ -164,6 +166,7 @@ async def _render_deal_view(
             deal_status=getattr(full_deal, "status", None),
             chat_id=chat_id,
             back_cb=back_cb,
+            show_item_button=bool(item_id),
         )
 
         try:
@@ -213,6 +216,60 @@ async def callback_deal_view_from_deals(
         deal_id=callback_data.de_id,
         back_cb=calls.DealsAction(action="open").pack(),
     )
+
+
+@router.callback_query(calls.DealItemView.filter())
+async def callback_deal_item_view(
+    callback: CallbackQuery,
+    callback_data: calls.DealItemView,
+    state: FSMContext,
+):
+    from plbot.playerokbot import get_playerok_bot
+
+    await state.set_state(None)
+    plbot = get_playerok_bot()
+    if not plbot or not plbot.playerok_account:
+        await callback.answer("❌ Нет подключения к Playerok", show_alert=True)
+        return
+
+    deal_id = str(callback_data.de_id or "").strip()
+    if not deal_id:
+        await callback.answer("❌ Сделка не найдена", show_alert=True)
+        return
+
+    try:
+        full_deal = plbot.playerok_account.get_deal(deal_id)
+        deal_item = getattr(full_deal, "item", None)
+        item_id = str(getattr(deal_item, "id", "") or "").strip()
+
+        full_item = deal_item
+        if item_id:
+            try:
+                full_item = plbot.playerok_account.get_item(id=item_id)
+            except Exception:
+                # Fallback to item from deal payload when direct item fetch is unavailable.
+                full_item = deal_item
+
+        if full_item is None:
+            await callback.answer("❌ Товар в сделке не найден", show_alert=True)
+            return
+
+        payload = format_item_card_payload(item=full_item, account=plbot.playerok_account)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=payload.get("text", "❌ Не удалось открыть карточку товара"),
+            reply_markup=templ.item_card_kb(
+                back_cb=calls.DealView(de_id=deal_id).pack(),
+                back_text="🧾 Посмотреть сделку",
+                item_url=payload.get("item_url") or "https://playerok.com/products/",
+                is_owner=False,
+                item_status=payload.get("item_status"),
+            ),
+            callback=callback,
+        )
+    except Exception as e:
+        await callback.answer(f"❌ Не удалось открыть товар: {e}", show_alert=True)
 
 
 @router.callback_query(F.data == "refund_deal")

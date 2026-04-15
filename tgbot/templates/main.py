@@ -60,6 +60,7 @@ def log_new_deal_kb(username: str, deal_id: str, chat_id: str = None):
         [InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack())],
         [InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack())],
         [InlineKeyboardButton(text="🧾 Просмотр сделки", callback_data=calls.DealView(de_id=deal_id).pack())],
+        [InlineKeyboardButton(text="📦 Просмотр товара", callback_data=calls.DealItemView(de_id=deal_id).pack())],
     ]
     if chat_id:
         rows.append([InlineKeyboardButton(text="📜 Просмотр чата", callback_data=calls.ChatHistory(chat_id=chat_id).pack())])
@@ -74,6 +75,7 @@ def deal_view_kb(
     deal_status,
     chat_id: str | None = None,
     back_cb: str | None = None,
+    show_item_button: bool = True,
 ) -> InlineKeyboardMarkup:
     status_name = getattr(deal_status, "name", str(deal_status) if deal_status is not None else "")
     allow_complete = status_name in ("PAID", "PENDING")
@@ -113,6 +115,15 @@ def deal_view_kb(
                 InlineKeyboardButton(
                     text="📜 Просмотр чата",
                     callback_data=calls.ChatHistory(chat_id=chat_id).pack(),
+                )
+            ]
+        )
+    if show_item_button:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📦 Просмотр товара",
+                    callback_data=calls.DealItemView(de_id=deal_id).pack(),
                 )
             ]
         )

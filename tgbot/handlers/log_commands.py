@@ -7,6 +7,7 @@ from typing import List, Optional
 from aiogram import types, Router, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 
 # Импорт путей из центрального модуля
@@ -19,6 +20,17 @@ from ..helpful import throw_float_message
 
 router = Router()
 logger = logging.getLogger("seal.telegram.logs")
+
+
+async def _safe_edit_text(message: types.Message, text: str, reply_markup=None) -> bool:
+    """Returns False when Telegram says the message is not modified."""
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+        return True
+    except TelegramAPIError as e:
+        if "message is not modified" in str(e).lower():
+            return False
+        raise
 
 def get_latest_log_file() -> Optional[Path]:
     """
@@ -97,7 +109,7 @@ async def handle_logs_command(message: types.Message, state: FSMContext):
     ])
     
     # Обновляем сообщение с логами
-    await msg.edit_text(log_text, reply_markup=kb)
+    await _safe_edit_text(msg, log_text, reply_markup=kb)
 
     # Дополнительно отправляем сам лог-файл
     latest_log = get_latest_log_file()
@@ -119,15 +131,18 @@ async def refresh_logs(callback: types.CallbackQuery, callback_data: calls.LogsA
     if callback.message.text == log_text:
         await callback.answer("✅ Логи актуальны, обновление не требуется", show_alert=False)
         return
-    
-    await callback.answer("🔄 Обновляю логи...")
-    
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Обновить", callback_data=calls.LogsAction(action="refresh").pack())],
         [InlineKeyboardButton(text="❌ Закрыть", callback_data=calls.LogsAction(action="close").pack())]
     ])
-    
-    await callback.message.edit_text(log_text, reply_markup=kb)
+
+    changed = await _safe_edit_text(callback.message, log_text, reply_markup=kb)
+    if not changed:
+        await callback.answer("✅ Логи уже актуальны", show_alert=False)
+        return
+
+    await callback.answer("🔄 Обновляю логи...")
 
 @router.callback_query(calls.LogsAction.filter(F.action == "close"))
 async def close_logs(callback: types.CallbackQuery, callback_data: calls.LogsAction, state: FSMContext):
@@ -192,21 +207,45 @@ async def handle_error_command(message: types.Message, state: FSMContext):
     ])
     
     # Отправляем сообщение с ошибкой
-    await msg.edit_text(error_text, reply_markup=kb)
+    await _safe_edit_text(msg, error_text, reply_markup=kb)
+
+
+@router.message(Command("api_errors", "apierrors"))
+async def handle_api_errors_command(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /api_errors
+    Показывает статистику ошибок Playerok API
+    """
+    config = sett.get("config")
+
+    if message.from_user.id not in config["telegram"]["bot"].get("signed_users", []):
+        return await message.answer("❌ У вас нет прав для выполнения этой команды.")
+
+    await throw_float_message(
+        state=state,
+        message=message,
+        text=templ.error_stats_text(),
+        reply_markup=templ.error_stats_kb(),
+        send=True,
+    )
 
 
 @router.callback_query(calls.LogsAction.filter(F.action == "show_full"))
 async def show_full_logs(callback: types.CallbackQuery, callback_data: calls.LogsAction, state: FSMContext):
     """Показ полных логов по нажатию кнопки"""
-    await callback.answer("📜 Загружаю полные логи...")
     log_text = await asyncio.get_event_loop().run_in_executor(None, get_latest_logs)
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Обновить", callback_data=calls.LogsAction(action="refresh").pack())],
         [InlineKeyboardButton(text="❌ Закрыть", callback_data=calls.LogsAction(action="close").pack())]
     ])
-    
-    await callback.message.edit_text(log_text, reply_markup=kb)
+
+    changed = await _safe_edit_text(callback.message, log_text, reply_markup=kb)
+    if not changed:
+        await callback.answer("✅ Логи уже актуальны", show_alert=False)
+        return
+
+    await callback.answer("📜 Загружаю полные логи...")
 
 
 @router.callback_query(calls.LogsAction.filter(F.action == "refresh_error"))
@@ -219,13 +258,16 @@ async def refresh_error(callback: types.CallbackQuery, callback_data: calls.Logs
     if callback.message.text == error_text:
         await callback.answer("✅ Ошибка актуальна, обновление не требуется", show_alert=False)
         return
-    
-    await callback.answer("🔍 Ищу последнюю ошибку...")
-    
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📜 Показать полные логи", callback_data=calls.LogsAction(action="show_full").pack())],
         [InlineKeyboardButton(text="🔄 Обновить", callback_data=calls.LogsAction(action="refresh_error").pack()),
          InlineKeyboardButton(text="❌ Закрыть", callback_data=calls.LogsAction(action="close").pack())]
     ])
-    
-    await callback.message.edit_text(error_text, reply_markup=kb)
+
+    changed = await _safe_edit_text(callback.message, error_text, reply_markup=kb)
+    if not changed:
+        await callback.answer("✅ Ошибка уже актуальна", show_alert=False)
+        return
+
+    await callback.answer("🔍 Ищу последнюю ошибку...")

@@ -170,7 +170,6 @@ class TelegramBot:
                 BotCommand(command="playerok_status", description="🔰 Проверить авторизацию в аккаунте"),
                 # BotCommand(command="power_off", description="⚡ Выключить бота"), #todo продумать логику при автозапуске, пока спряу
                 BotCommand(command="logs", description="📜 Показать логи"),
-                BotCommand(command="error", description="🛑 Показать последнюю ошибку"),
                 BotCommand(command="sys", description="🧪 Диагностика системы"),
                 BotCommand(command="watermark", description="©️ Водяной знак"),
                 BotCommand(command="fingerprint", description="🧑‍💻 Фингерпринт устройства"),
@@ -238,6 +237,8 @@ class TelegramBot:
                         logger.error(f"Ошибка получения команд из плагина {plugin.meta.name}: {e}")
             
             # Устанавливаем обновленный список команд
+            if not any(getattr(cmd, "command", None) == "api_errors" for cmd in commands):
+                commands.append(BotCommand(command="api_errors", description="🚨 Ошибки API"))
             await self.bot.set_my_commands(commands)
             logger.info(f"set_my_commands: установлено команд = {len(commands)}")
             

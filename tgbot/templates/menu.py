@@ -54,7 +54,6 @@ def menu_kb(page: int = 0):
             [InlineKeyboardButton(text="⏰ Авто-Напоминание", callback_data=calls.SettingsNavigation(to="auto_reminder").pack())],
             [InlineKeyboardButton(text="👥 Пользователи", callback_data=calls.SettingsNavigation(to="users").pack())],
             [InlineKeyboardButton(text="📋 Логи", callback_data=calls.LogsNavigation(to="main").pack())],
-            [InlineKeyboardButton(text="🚨 Ошибки API", callback_data=calls.ErrorStatsNavigation(to="main").pack())],
             # [InlineKeyboardButton(text="👨‍💻 Настройки разработчика", callback_data=calls.SettingsNavigation(to="developer").pack())],
         ]
 

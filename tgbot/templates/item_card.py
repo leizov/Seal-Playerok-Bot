@@ -3,7 +3,13 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from .. import callback_datas as calls
 
 
-def item_card_kb(back_cb: str, item_url: str, is_owner: bool, item_status: str | None = None) -> InlineKeyboardMarkup:
+def item_card_kb(
+    back_cb: str,
+    item_url: str,
+    is_owner: bool,
+    item_status: str | None = None,
+    back_text: str | None = None,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     status_name = str(item_status or "").upper()
     can_publish = status_name in {"DRAFT", "EXPIRED"}
@@ -37,7 +43,10 @@ def item_card_kb(back_cb: str, item_url: str, is_owner: bool, item_status: str |
 
     rows.append(
         [
-            InlineKeyboardButton(text="\u2B05\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443", callback_data=back_cb),
+            InlineKeyboardButton(
+                text=back_text or "\u2B05\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443",
+                callback_data=back_cb,
+            ),
             InlineKeyboardButton(text="\U0001F517 \u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u043E\u0432\u0430\u0440", url=item_url),
         ]
     )

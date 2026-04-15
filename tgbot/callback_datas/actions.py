@@ -19,6 +19,10 @@ class DealViewFromDeals(CallbackData, prefix="dealvd"):
     de_id: str
 
 
+class DealItemView(CallbackData, prefix="dealit"):
+    de_id: str
+
+
 class DealsAction(CallbackData, prefix="dact"):
     action: str
     value: str | None = None
