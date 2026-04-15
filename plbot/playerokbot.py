@@ -592,6 +592,113 @@ class PlayerokBot:
         text = text.replace('\n', '').strip() if text else "БЕЗ ТЕКСТА"
         self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось отправить сообщение {Fore.LIGHTWHITE_EX}«{text}» {Fore.LIGHTRED_EX}в чат {Fore.LIGHTWHITE_EX}{chat_id}")
 
+    def _is_item_in_restore_scope(self, item_name: str | None) -> bool:
+        item_name_lower = str(item_name or "").strip().lower()
+        if not item_name_lower:
+            return False
+
+        auto_restore_items = self.auto_restore_items if isinstance(self.auto_restore_items, dict) else {}
+
+        included = any(
+            any(
+                phrase_lower in item_name_lower or item_name_lower == phrase_lower
+                for phrase_lower in (
+                    str(phrase).strip().lower()
+                    for phrase in included_item
+                )
+                if phrase_lower
+            )
+            for included_item in auto_restore_items.get("included", [])
+            if isinstance(included_item, list)
+        )
+        excluded = any(
+            any(
+                phrase_lower in item_name_lower or item_name_lower == phrase_lower
+                for phrase_lower in (
+                    str(phrase).strip().lower()
+                    for phrase in excluded_item
+                )
+                if phrase_lower
+            )
+            for excluded_item in auto_restore_items.get("excluded", [])
+            if isinstance(excluded_item, list)
+        )
+
+        auto_restore_cfg = self.config.get("playerok", {}).get("auto_restore_items", {})
+        all_mode = bool(auto_restore_cfg.get("all", True))
+
+        return (all_mode and not excluded) or ((not all_mode) and included)
+
+    def restore_item(self, item: Item | types.MyItem | types.ItemProfile) -> bool:
+        if not self.is_connected or self.account is None:
+            return False
+
+        item_name = str(getattr(item, "name", "") or "")
+        if not self._is_item_in_restore_scope(item_name):
+            return False
+
+        try:
+            try:
+                full_item: types.MyItem = self.account.get_item(item.id)
+            except Exception:
+                full_item = item
+
+            time.sleep(1)
+            item_price = getattr(full_item, "raw_price", None)
+            if item_price is None:
+                item_price = getattr(full_item, "price", None)
+            if item_price is None:
+                item_price = 0
+
+            priority_statuses = self.account.get_item_priority_statuses(full_item.id, item_price)
+            if not priority_statuses:
+                raise Exception("Нету статусов приоритета у предмета!")
+
+            try:
+                priority_status = [status for status in priority_statuses if status.type is PriorityTypes.DEFAULT or status.price == 0][0]
+            except IndexError:
+                priority_status = priority_statuses[0]
+
+            time.sleep(1)
+            new_item = self.account.publish_item(full_item.id, priority_status.id)
+
+            if new_item.status is ItemStatuses.PENDING_APPROVAL or new_item.status is ItemStatuses.APPROVED:
+                self.logger.info(f"{Fore.LIGHTWHITE_EX}«{item_name or full_item.id}» {Fore.WHITE}— {Fore.YELLOW}товар восстановлен")
+                if getattr(priority_status, "price", None) is not None:
+                    record_raise(priority_status.price)
+                return True
+
+            self.logger.error(
+                f"{Fore.LIGHTRED_EX}Не удалось восстановить предмет «{item_name or full_item.id}». "
+                f"Его статус: {Fore.WHITE}{new_item.status.name}"
+            )
+            return False
+        except Exception as e:
+            self.logger.error(
+                f"{Fore.LIGHTRED_EX}При восстановлении предмета «{item_name or getattr(item, 'id', '?')}» "
+                f"произошла ошибка: {Fore.WHITE}{e}"
+            )
+            return False
+
+    def restore_expired_items(self):
+        if not self.is_connected or self.account is None:
+            return
+
+        try:
+            restored_item_ids: set[str] = set()
+            expired_items = self.get_my_items(statuses=[ItemStatuses.EXPIRED])
+
+            for item in expired_items:
+                item_id = str(getattr(item, "id", "") or "")
+                if not item_id or item_id in restored_item_ids:
+                    continue
+
+                restored_item_ids.add(item_id)
+                self.restore_item(item)
+                time.sleep(0.5)
+        except Exception as e:
+            self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при восстановлении истёкших предметов: {Fore.WHITE}{e}")
+
     def restore_last_sold_item(self, item: Item):
         """
         Восстанавливает последний проданный предмет.
@@ -610,8 +717,8 @@ class PlayerokBot:
                         raise e
                     time.sleep(3)
 
-            attempts = 3
-            attempts_delay = 3
+            attempts = 4
+            attempts_delay = 4
             _item = []
             for i in range(attempts):
                 items = profile.get_items(count=24, statuses=[ItemStatuses.SOLD]).items
@@ -619,7 +726,7 @@ class PlayerokBot:
                 if _item:
                     break
                 self.logger.warning(f'Не нашёл товар {item.name} для востановления на нашём аккаунте\nПопытка {i}/{attempts}')
-                time.sleep(attempts_delay)
+                time.sleep((i+1) * attempts_delay)
 
             if len(_item) <= 0:
                 self.logger.error(f'Не нашёл товар {item.name} для востановления на нашём аккаунте')
@@ -716,7 +823,7 @@ class PlayerokBot:
                 return False
 
             # Поднимаем товар
-            publish_attempts = 3
+            publish_attempts = 5
             publish_delay = 3
             for attempt in range(publish_attempts):
                 try:
@@ -751,7 +858,7 @@ class PlayerokBot:
 
                         return True
 
-                    time.sleep(publish_delay)
+                    time.sleep((attempt+1) * publish_delay)
 
                 except Exception as e:
                     self.logger.error(
@@ -759,7 +866,7 @@ class PlayerokBot:
                         exc_info=True
                     )
                     if attempt != publish_attempts-1:  # Если это не последняя попытка
-                        time.sleep(3)
+                        time.sleep((attempt+1) * publish_delay)
 
             # Если все попытки неудачны - обновляем время чтобы не пытаться снова сразу
             self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось поднять товар «{full_item.name}» после {publish_attempts} попыток")
@@ -1101,9 +1208,21 @@ class PlayerokBot:
                 self.check_banned()
                 time.sleep(900)
 
+        def restore_expired_items_loop():
+            while True:
+                try:
+                    auto_restore_cfg = self.config.get("playerok", {}).get("auto_restore_items", {})
+                    if bool(auto_restore_cfg.get("expired", False)):
+                        self.restore_expired_items()
+                except Exception as e:
+                    self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка в цикле восстановления истёкших предметов: {Fore.WHITE}{e}")
+
+                time.sleep(45)
+
         Thread(target=refresh_loop, daemon=True).start()
         Thread(target=refresh_account_loop, daemon=True).start()
         Thread(target=check_banned_loop, daemon=True).start()
+        Thread(target=restore_expired_items_loop, daemon=True).start()
 
 
     async def _on_new_message(self, event: NewMessageEvent):
@@ -1332,7 +1451,7 @@ class PlayerokBot:
             greeting_msg = self.msg("first_message", username=event.deal.user.username)
             if greeting_msg:  # Отправляем только если сообщение включено
                 self.send_message(event.chat.id, greeting_msg)
-                self.logger.info(f'Отправил приветственное сообщение для {event.deal.user}')
+                self.logger.info(f'Отправил приветственное сообщение для {event.deal.user.username}')
 
         if self.config["playerok"]["auto_deliveries"]["enabled"]:
             auto_deliveries = normalize_auto_deliveries(self.auto_deliveries)
@@ -1514,37 +1633,7 @@ class PlayerokBot:
         elif not self.config["playerok"]["auto_restore_items"]["enabled"]:
             return
 
-        included = False
-        excluded = False
-
-        for included_item in self.auto_restore_items["included"]:
-            for keyphrases in included_item:
-                if any(
-                        phrase.lower() in event.deal.item.name.lower()
-                        or event.deal.item.name.lower() == phrase.lower()
-                        for phrase in keyphrases
-                ):
-                    included = True
-                    break
-            if included: break
-        for excluded_item in self.auto_restore_items["excluded"]:
-            for keyphrases in excluded_item:
-                if any(
-                        phrase.lower() in event.deal.item.name.lower()
-                        or event.deal.item.name.lower() == phrase.lower()
-                        for phrase in keyphrases
-                ):
-                    excluded = True
-                    break
-            if excluded: break
-        if (
-                self.config["playerok"]["auto_restore_items"]["all"]
-                and not excluded
-        ) or (
-                not self.config["playerok"]["auto_restore_items"]["all"]
-                and included
-        ):
-
+        if self._is_item_in_restore_scope(event.deal.item.name):
             self.restore_last_sold_item(event.deal.item)
 
     async def _on_item_sent(self, event: ItemSentEvent):

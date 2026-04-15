@@ -24,6 +24,15 @@ class DealsAction(CallbackData, prefix="dact"):
     value: str | None = None
 
 
+class ItemViewFromItems(CallbackData, prefix="itmv"):
+    it_id: str
+
+
+class ItemsAction(CallbackData, prefix="iact"):
+    action: str
+    value: str | None = None
+
+
 class DeleteIncludedRestoreItem(CallbackData, prefix="delinre"):
     index: int
 

@@ -36,3 +36,5 @@ from .settings_watermark import *
 from .quick_replies import *
 from .config_backup import *
 from .deals import *
+from .items import *
+from .item_card import *

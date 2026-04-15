@@ -523,6 +523,22 @@ async def handler_deals(message: types.Message, state: FSMContext):
     await show_deals_menu(message, state, reset=True, force_reload=True)
 
 
+@router.message(Command("items"))
+async def handler_items(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /items
+    Открывает меню просмотра и фильтрации товаров аккаунта.
+    """
+    await state.set_state(None)
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    from ..callback_handlers.items import show_items_menu
+
+    await show_items_menu(message, state, reset=True, force_reload=True)
+
+
 @router.message(Command("restart"))
 async def handler_restart(message: types.Message, state: FSMContext):
     """

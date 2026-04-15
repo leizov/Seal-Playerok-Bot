@@ -33,11 +33,7 @@ def destroy_kb():
 
 
 def do_action_text(placeholder: str):
-    txt = textwrap.dedent(f"""
-        🧩 <b>Действие</b>
-        \n{placeholder}
-    """)
-    return txt
+    return textwrap.dedent(str(placeholder)).strip()
 
 
 def log_text(title: str, text: str, by: str = None):

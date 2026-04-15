@@ -9,6 +9,7 @@ from .. import callback_datas as calls
 def settings_restore_text():
     config = sett.get("config")
     is_all_mode = bool(config["playerok"]["auto_restore_items"]["all"])
+    auto_restore_items_expired = "🟢 Включено" if bool(config["playerok"]["auto_restore_items"].get("expired", False)) else "🔴 Выключено"
     auto_restore_items_all = "Все предметы" if is_all_mode else "Указанные предметы"
     auto_restore_items = sett.get("auto_restore_items")
     auto_restore_items_included = len(auto_restore_items["included"])
@@ -21,6 +22,7 @@ def settings_restore_text():
     txt = textwrap.dedent(f"""
         ⚙️ <b>Настройки → ♻️ Восстановление</b>
 
+        <b>⏰ Истёкшие:</b> {auto_restore_items_expired}
         📦 <b>Восстанавливать:</b> {auto_restore_items_all}
 
         {items_line}
@@ -39,12 +41,16 @@ def settings_restore_text():
 def settings_restore_kb():
     config = sett.get("config")
     is_all_mode = bool(config["playerok"]["auto_restore_items"]["all"])
+    auto_restore_items_expired = "🟢 Включено" if bool(config["playerok"]["auto_restore_items"].get("expired", False)) else "🔴 Выключено"
     auto_restore_items_all = "Все предметы" if is_all_mode else "Указанные предметы"
     auto_restore_items = sett.get("auto_restore_items")
     auto_restore_items_included = len(auto_restore_items["included"])
     auto_restore_items_excluded = len(auto_restore_items["excluded"])
 
-    rows = [[InlineKeyboardButton(text=f"📦 Восстанавливать: {auto_restore_items_all}", callback_data="switch_auto_restore_items_all")]]
+    rows = [
+        [InlineKeyboardButton(text=f"⏰ Истёкшие: {auto_restore_items_expired}", callback_data="switch_auto_restore_items_expired")],
+        [InlineKeyboardButton(text=f"📦 Восстанавливать: {auto_restore_items_all}", callback_data="switch_auto_restore_items_all")],
+    ]
 
     if is_all_mode:
         rows.append([

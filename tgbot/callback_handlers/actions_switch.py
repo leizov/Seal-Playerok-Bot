@@ -72,6 +72,15 @@ async def callback_switch_auto_restore_items_all(callback: CallbackQuery, state:
     return await callback_settings_navigation(callback, calls.SettingsNavigation(to="restore"), state)
 
 
+@router.callback_query(F.data == "switch_auto_restore_items_expired")
+async def callback_switch_auto_restore_items_expired(callback: CallbackQuery, state: FSMContext):
+    config = sett.get("config")
+    auto_restore_items = config["playerok"]["auto_restore_items"]
+    auto_restore_items["expired"] = not bool(auto_restore_items.get("expired", False))
+    sett.set("config", config)
+    return await callback_settings_navigation(callback, calls.SettingsNavigation(to="restore"), state)
+
+
 @router.callback_query(F.data == "switch_auto_raise_items_enabled")
 async def callback_switch_auto_raise_items_enabled(callback: CallbackQuery, state: FSMContext):
     config = sett.get("config")

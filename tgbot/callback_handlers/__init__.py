@@ -12,6 +12,7 @@ from .proxy_management import router as proxy_management_router
 from .error_stats import router as error_stats_router
 from .config_backup import router as config_backup_router
 from .deals import router as deals_router
+from .items import router as items_router
 
 router = Router()
 router.include_routers(
@@ -28,4 +29,5 @@ router.include_routers(
     error_stats_router,
     config_backup_router,
     deals_router,
+    items_router,
 )

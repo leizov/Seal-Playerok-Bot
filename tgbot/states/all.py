@@ -10,6 +10,10 @@ class ActionsStates(StatesGroup):
     waiting_for_message_text = State()
 
 
+class ItemsStates(StatesGroup):
+    waiting_for_name_query = State()
+
+
 class SettingsStates(StatesGroup):
     waiting_for_token = State()
     waiting_for_user_agent = State()

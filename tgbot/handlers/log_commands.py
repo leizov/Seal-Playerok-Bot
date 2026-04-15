@@ -20,7 +20,28 @@ from ..helpful import throw_float_message
 router = Router()
 logger = logging.getLogger("seal.telegram.logs")
 
-def get_latest_logs(lines: int = 50) -> Optional[str]:
+def get_latest_log_file() -> Optional[Path]:
+    """
+    Возвращает путь к последнему лог-файлу.
+
+    :return: Path к файлу лога или None
+    """
+    try:
+        log_dir = Path(paths.LOGS_DIR)
+        if not log_dir.exists():
+            return None
+
+        log_files = sorted(
+            log_dir.glob("*.log"),
+            key=os.path.getmtime,
+            reverse=True
+        )
+        return log_files[0] if log_files else None
+    except Exception as e:
+        logger.error(f"Ошибка при получении последнего лог-файла: {e}")
+        return None
+
+def get_latest_logs(lines: int = 100) -> Optional[str]:
     """
     Получает последние N строк из лог-файла.
     
@@ -31,20 +52,11 @@ def get_latest_logs(lines: int = 50) -> Optional[str]:
         log_dir = Path(paths.LOGS_DIR)
         if not log_dir.exists():
             return "❌ Директория с логами не найдена."
-            
-        # Получаем список лог-файлов и сортируем по дате изменения
-        log_files = sorted(
-            log_dir.glob("*.log"),
-            key=os.path.getmtime,
-            reverse=True
-        )
-        
-        if not log_files:
+
+        latest_log = get_latest_log_file()
+        if latest_log is None:
             return "❌ Лог-файлы не найдены."
-            
-        # Берем последний лог-файл
-        latest_log = log_files[0]
-        
+
         # Читаем последние N строк из файла
         with open(latest_log, 'r', encoding='utf-8') as f:
             log_lines = f.readlines()[-lines:]
@@ -54,7 +66,7 @@ def get_latest_logs(lines: int = 50) -> Optional[str]:
         if len(log_text) > 4000:
             log_text = "..." + log_text[-3997:]
             
-        return f"📜 <b>Последние {len(log_lines)} строк лога:</b>\n\n<code>{log_text}</code>"
+        return f"📜 Последние {len(log_lines)} строк лога:\n\n{log_text}"
         
     except Exception as e:
         logger.error(f"Ошибка при чтении логов: {e}")
@@ -64,7 +76,7 @@ def get_latest_logs(lines: int = 50) -> Optional[str]:
 async def handle_logs_command(message: types.Message, state: FSMContext):
     """
     Обработчик команды /logs
-    Показывает последние 50 строк лога
+    Показывает последние 100 строк лога
     """
     config = sett.get("config")
     
@@ -85,7 +97,18 @@ async def handle_logs_command(message: types.Message, state: FSMContext):
     ])
     
     # Обновляем сообщение с логами
-    await msg.edit_text(log_text, reply_markup=kb, parse_mode="HTML")
+    await msg.edit_text(log_text, reply_markup=kb)
+
+    # Дополнительно отправляем сам лог-файл
+    latest_log = get_latest_log_file()
+    if latest_log is not None and latest_log.exists():
+        try:
+            await message.answer_document(
+                types.FSInputFile(str(latest_log)),
+                caption=f"📎 Файл лога: {latest_log.name}"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке файла лога: {e}")
 
 @router.callback_query(calls.LogsAction.filter(F.action == "refresh"))
 async def refresh_logs(callback: types.CallbackQuery, callback_data: calls.LogsAction, state: FSMContext):
@@ -104,7 +127,7 @@ async def refresh_logs(callback: types.CallbackQuery, callback_data: calls.LogsA
         [InlineKeyboardButton(text="❌ Закрыть", callback_data=calls.LogsAction(action="close").pack())]
     ])
     
-    await callback.message.edit_text(log_text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_text(log_text, reply_markup=kb)
 
 @router.callback_query(calls.LogsAction.filter(F.action == "close"))
 async def close_logs(callback: types.CallbackQuery, callback_data: calls.LogsAction, state: FSMContext):
@@ -137,7 +160,7 @@ def find_latest_error(log_text: str) -> str:
     if len(last_error) > 4000:
         last_error = "..." + last_error[-3997:]
     
-    return f"🛑 <b>Последняя ошибка в логах:</b>\n\n<code>{last_error}</code>"
+    return f"🛑 Последняя ошибка в логах:\n\n{last_error}"
 
 
 @router.message(Command("error"))
@@ -169,7 +192,7 @@ async def handle_error_command(message: types.Message, state: FSMContext):
     ])
     
     # Отправляем сообщение с ошибкой
-    await msg.edit_text(error_text, reply_markup=kb, parse_mode="HTML")
+    await msg.edit_text(error_text, reply_markup=kb)
 
 
 @router.callback_query(calls.LogsAction.filter(F.action == "show_full"))
@@ -183,7 +206,7 @@ async def show_full_logs(callback: types.CallbackQuery, callback_data: calls.Log
         [InlineKeyboardButton(text="❌ Закрыть", callback_data=calls.LogsAction(action="close").pack())]
     ])
     
-    await callback.message.edit_text(log_text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_text(log_text, reply_markup=kb)
 
 
 @router.callback_query(calls.LogsAction.filter(F.action == "refresh_error"))
@@ -205,4 +228,4 @@ async def refresh_error(callback: types.CallbackQuery, callback_data: calls.Logs
          InlineKeyboardButton(text="❌ Закрыть", callback_data=calls.LogsAction(action="close").pack())]
     ])
     
-    await callback.message.edit_text(error_text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_text(error_text, reply_markup=kb)

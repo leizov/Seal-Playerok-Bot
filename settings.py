@@ -46,6 +46,7 @@ CONFIG = SettingsFile(
             },
             "auto_restore_items": {
                 "enabled": False,
+                "expired": False,
                 "all": True
             },
             "auto_raise_items": {
