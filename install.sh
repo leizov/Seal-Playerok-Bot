@@ -867,6 +867,58 @@ is_running() {
     systemctl is-active --quiet \$SERVICE
 }
 
+find_manual_bot_python_pids() {
+    local pid
+    for pid in \$(pgrep -u "\$BOT_USER" -f "python.*bot.py" 2>/dev/null); do
+        local cwd
+        cwd=\$(readlink -f "/proc/\$pid/cwd" 2>/dev/null || true)
+        if [ "\$cwd" = "\$INSTALL_DIR" ]; then
+            echo "\$pid"
+        fi
+    done
+}
+
+cleanup_stale_manual_processes() {
+    local found_any=0
+    local su_pid
+    local py_pid
+
+    while IFS= read -r su_pid; do
+        [ -z "\$su_pid" ] && continue
+        found_any=1
+        sudo kill -TERM "\$su_pid" 2>/dev/null || true
+    done < <(
+        ps -eo pid=,args= | awk -v bot_user="\$BOT_USER" -v install_dir="\$INSTALL_DIR" '
+            index(\$0, "su - " bot_user " -c") && index(\$0, install_dir) && \$0 ~ /bot\.py/ {print \$1}
+        '
+    )
+
+    while IFS= read -r py_pid; do
+        [ -z "\$py_pid" ] && continue
+        found_any=1
+        sudo kill -TERM "\$py_pid" 2>/dev/null || true
+    done < <(find_manual_bot_python_pids)
+
+    if [ "\$found_any" -eq 1 ]; then
+        sleep 1
+        while IFS= read -r su_pid; do
+            [ -z "\$su_pid" ] && continue
+            sudo kill -KILL "\$su_pid" 2>/dev/null || true
+        done < <(
+            ps -eo pid=,args= | awk -v bot_user="\$BOT_USER" -v install_dir="\$INSTALL_DIR" '
+                index(\$0, "su - " bot_user " -c") && index(\$0, install_dir) && \$0 ~ /bot\.py/ {print \$1}
+            '
+        )
+
+        while IFS= read -r py_pid; do
+            [ -z "\$py_pid" ] && continue
+            sudo kill -KILL "\$py_pid" 2>/dev/null || true
+        done < <(find_manual_bot_python_pids)
+
+        echo "🧹 Найдены и остановлены зависшие su/ручные процессы этого бота"
+    fi
+}
+
 case "\$1" in
     start)
         if is_running; then
@@ -874,6 +926,7 @@ case "\$1" in
             echo "   Используй: ${COMMAND_NAME} status"
         else
             echo "🚀 Запуск бота..."
+            cleanup_stale_manual_processes
             sudo systemctl start \$SERVICE
             sleep 2
             if is_running; then

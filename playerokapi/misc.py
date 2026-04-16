@@ -21,6 +21,7 @@
 #     "SbpBankMembers": "ef7902598e855fa15fb5e3112156ac226180f0b009a36606fc80a18f00b80c63",
 #     "verifiedCards": "eb338d8432981307a2b3d322b3310b2447cab3a6acf21aba4b8773b97e72d1aa"
 # }
+
 PERSISTED_QUERIES = {
     "user": "1149bd67f3773e9d37beb4a22a1fb4dd5bd248986b810a25bae0b717f19a449d",
     "deals": "c3b623b5fe0758cf91b2335ebf36ff65f8650a6672a792a3ca7a36d270d396fb",
@@ -35,7 +36,8 @@ PERSISTED_QUERIES = {
     "gameCategoryDataFields": "6fdadfb9b05880ce2d307a1412bc4f2e383683061c281e2b65a93f7266ea4a49",
     "userChats": "999f86b7c94a4cb525ed5549d8f24d0d24036214f02a213e8fd7cefc742bbd58",
     "chat": "bb024dc0652fc7c1302a64a117d56d99fb0d726eb4b896ca803dca55f611d933",
-    "chatMessages": "e8162a8500865f4bb18dbaacb1c4703823f74c1925a91a5103f41c2021f0557a",
+    "chatMessages": "587e8a28b6a2487232d82abed32093367609d57a05601246d09926f4c83deb67",
+    # "chatMessages": "aea703079f569275fad657c27ce8a131226b2879a7997fe5aa24122078517c42",
     # "chatMessages": "4d506af2d2b457be6a4efbab8180dad9120a5825d02215aa37ad3b2c0525dcd4",
     "items": "63eefcfd813442882ad846360d925279bc376e8bc85a577ebefbee0f9c78b557",
     "item": "37d2d9f947e950c09322e2f5e3056451ee5f12dc38565eb811423e915c094c22",
@@ -43,7 +45,6 @@ PERSISTED_QUERIES = {
     "transactionProviders": "31960e5dd929834c1f85bc685db80657ff576373076f016b2578c0a34e6e9f42",
     "transactions": "e3c9d07ba6b2dd15cc82c5006449db50f8d9b88b0c4cb02d50d308ebee1276f6",
     "SbpBankMembers": "ef7902598e855fa15fb5e3112156ac226180f0b009a36606fc80a18f00b80c63",
-    "verifiedCards": "eb338d8432981307a2b3d322b3310b2447cab3a6acf21aba4b8773b97e72d1aa"
 }
 
 QUERIES = {
