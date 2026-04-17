@@ -67,7 +67,7 @@ class QuickReplySelect(CallbackData, prefix="qrsel"):
 
 
 class QuickReplyAction(CallbackData, prefix="qract"):
-    action: str  # add, edit, delete
+    action: str  # add, edit, delete, confirm_edit, confirm_delete, cancel_send
     reply_name: str | None = None
 
 

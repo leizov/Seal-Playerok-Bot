@@ -158,7 +158,6 @@ async def _render_deal_view(
         username = getattr(getattr(full_deal, "user", None), "username", None)
         chat_id = getattr(getattr(full_deal, "chat", None), "id", None)
         chat_id = str(chat_id) if chat_id is not None else None
-        item_id = str(getattr(getattr(full_deal, "item", None), "id", "") or "").strip()
         text = format_deal_card_text(full_deal)
         reply_markup = templ.deal_view_kb(
             username=username,
@@ -166,7 +165,6 @@ async def _render_deal_view(
             deal_status=getattr(full_deal, "status", None),
             chat_id=chat_id,
             back_cb=back_cb,
-            show_item_button=bool(item_id),
         )
 
         try:

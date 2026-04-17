@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import html
+import json
 import logging
 import os
 import platform
@@ -10,7 +12,7 @@ import threading
 import time
 from datetime import datetime
 from aiogram import types, Router, Bot, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile
 
@@ -33,6 +35,194 @@ try:
     import psutil  # type: ignore
 except Exception:
     psutil = None
+
+
+_START_BANNER_IMAGE_CANDIDATES = (
+    "start_banner.png",
+    "start_banner.jpg",
+    "start_banner.jpeg",
+    "start_banner.webp",
+)
+_START_BANNER_FILE_ID_CACHE_FILE = os.path.join(paths.BOT_DATA_DIR, "start_banner_file_id_cache.json")
+_START_BANNER_FILE_ID_CACHE: dict[str, str] | None = None
+
+
+def _resolve_start_banner_image_path() -> str | None:
+    start_images_dir = getattr(paths, "START_IMAGES_DIR", os.path.join(paths.ROOT_DIR, "start_images"))
+    try:
+        os.makedirs(start_images_dir, exist_ok=True)
+    except Exception as e:
+        logger.debug("Не удалось подготовить папку стартовых изображений: %s", e)
+
+    candidates: list[str] = []
+    preferred = getattr(paths, "START_BANNER_IMAGE_FILE", None)
+    if isinstance(preferred, str) and preferred:
+        candidates.append(preferred)
+
+    for file_name in _START_BANNER_IMAGE_CANDIDATES:
+        candidate_path = os.path.join(start_images_dir, file_name)
+        if candidate_path not in candidates:
+            candidates.append(candidate_path)
+
+    for candidate_path in candidates:
+        if os.path.isfile(candidate_path):
+            return candidate_path
+    return None
+
+
+def _calc_file_sha256(file_path: str) -> str | None:
+    try:
+        hasher = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception as e:
+        logger.debug("Не удалось вычислить sha256 для стартового баннера: %s", e)
+        return None
+
+
+def _build_start_banner_signature(file_path: str) -> str | None:
+    hash_value = _calc_file_sha256(file_path)
+    if hash_value:
+        return hash_value
+
+    try:
+        stat = os.stat(file_path)
+        return f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
+    except Exception:
+        return None
+
+
+def _load_start_banner_file_id_cache() -> dict[str, str]:
+    global _START_BANNER_FILE_ID_CACHE
+    if _START_BANNER_FILE_ID_CACHE is not None:
+        return _START_BANNER_FILE_ID_CACHE
+
+    cache: dict[str, str] = {}
+    try:
+        os.makedirs(paths.BOT_DATA_DIR, exist_ok=True)
+    except Exception:
+        pass
+
+    try:
+        with open(_START_BANNER_FILE_ID_CACHE_FILE, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except FileNotFoundError:
+        payload = {}
+    except Exception as e:
+        logger.debug("Не удалось прочитать кэш file_id стартового баннера: %s", e)
+        payload = {}
+
+    entries = payload.get("entries") if isinstance(payload, dict) else {}
+    if isinstance(entries, dict):
+        for key, value in entries.items():
+            if isinstance(key, str) and key and isinstance(value, str) and value:
+                cache[key] = value
+
+    _START_BANNER_FILE_ID_CACHE = cache
+    return cache
+
+
+def _save_start_banner_file_id_cache(cache: dict[str, str]) -> None:
+    global _START_BANNER_FILE_ID_CACHE
+    _START_BANNER_FILE_ID_CACHE = dict(cache)
+
+    payload = {
+        "entries": cache,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    temp_path = f"{_START_BANNER_FILE_ID_CACHE_FILE}.tmp"
+
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, _START_BANNER_FILE_ID_CACHE_FILE)
+    except Exception as e:
+        logger.debug("Не удалось сохранить кэш file_id стартового баннера: %s", e)
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+
+
+def _get_cached_start_banner_file_id(file_path: str) -> tuple[str | None, str | None]:
+    signature = _build_start_banner_signature(file_path)
+    if not signature:
+        return None, None
+
+    cache = _load_start_banner_file_id_cache()
+    return signature, cache.get(signature)
+
+
+def _cache_start_banner_file_id(signature: str | None, file_id: str | None) -> None:
+    if not signature or not file_id:
+        return
+
+    cache = _load_start_banner_file_id_cache()
+    if cache.get(signature) == file_id:
+        return
+
+    cache[signature] = file_id
+    _save_start_banner_file_id_cache(cache)
+
+
+async def warmup_start_banner_file_id_cache(bot: Bot, signed_user_ids: list[int] | list[str] | None = None) -> bool:
+    """
+    Прогревает кэш file_id стартового баннера при запуске бота.
+    Возвращает True, если кэш уже был готов или успешно прогрет.
+    """
+    start_banner_path = _resolve_start_banner_image_path()
+    if not start_banner_path:
+        return False
+
+    signature, cached_file_id = _get_cached_start_banner_file_id(start_banner_path)
+    if signature and cached_file_id:
+        return True
+
+    if not bot:
+        return False
+
+    user_ids = []
+    for raw_user_id in signed_user_ids or []:
+        try:
+            user_id = int(raw_user_id)
+        except Exception:
+            continue
+        if user_id not in user_ids:
+            user_ids.append(user_id)
+
+    if not user_ids:
+        return False
+
+    for user_id in user_ids:
+        try:
+            temp_message = await bot.send_photo(
+                chat_id=user_id,
+                photo=FSInputFile(start_banner_path),
+                disable_notification=True,
+            )
+            photo_sizes = getattr(temp_message, "photo", None) or []
+            if not photo_sizes:
+                continue
+
+            uploaded_file_id = getattr(photo_sizes[-1], "file_id", None)
+            if isinstance(uploaded_file_id, str) and uploaded_file_id:
+                _cache_start_banner_file_id(signature, uploaded_file_id)
+                try:
+                    await bot.delete_message(chat_id=user_id, message_id=temp_message.message_id)
+                except Exception:
+                    pass
+                return True
+        except Exception as e:
+            logger.debug("Не удалось прогреть кэш стартового баннера для user_id=%s: %s", user_id, e)
+            continue
+
+    return False
 
 
 def _split_long_text(text: str, limit: int = 3500) -> list[str]:
@@ -445,12 +635,80 @@ async def handler_start(message: types.Message, state: FSMContext):
     config = sett.get("config")
     if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
         return await do_auth(message, state)
+
+    start_banner_path = _resolve_start_banner_image_path()
+    try:
+        if start_banner_path:
+            signature, cached_file_id = _get_cached_start_banner_file_id(start_banner_path)
+            sent_photo_message = None
+
+            if cached_file_id:
+                try:
+                    sent_photo_message = await message.answer_photo(
+                        photo=cached_file_id,
+                        caption=templ.start_banner_caption_text(),
+                        parse_mode="HTML",
+                        reply_markup=templ.start_shortcuts_kb(),
+                    )
+                except Exception as e:
+                    logger.debug("Кэшированный file_id стартового баннера не сработал, перезагружаю файл: %s", e)
+
+            if sent_photo_message is None:
+                sent_photo_message = await message.answer_photo(
+                    photo=FSInputFile(start_banner_path),
+                    caption=templ.start_banner_caption_text(),
+                    parse_mode="HTML",
+                    reply_markup=templ.start_shortcuts_kb(),
+                )
+                photo_sizes = getattr(sent_photo_message, "photo", None) or []
+                if photo_sizes:
+                    uploaded_file_id = getattr(photo_sizes[-1], "file_id", None)
+                    if isinstance(uploaded_file_id, str) and uploaded_file_id:
+                        _cache_start_banner_file_id(signature, uploaded_file_id)
+        else:
+            await message.answer(
+                text=templ.start_banner_caption_text(),
+                parse_mode="HTML",
+                reply_markup=templ.start_shortcuts_kb(),
+            )
+    except Exception as e:
+        logger.warning("Не удалось отправить стартовый баннер: %s", e)
+
+@router.message(StateFilter(None), F.text == templ.START_SHORTCUT_MAIN_MENU)
+async def handler_start_shortcut_main_menu(message: types.Message, state: FSMContext):
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
     await throw_float_message(
         state=state,
         message=message,
         text=templ.menu_text(),
-        reply_markup=templ.menu_kb(page=0)
+        reply_markup=templ.menu_kb(page=0),
+        send=True,
     )
+
+
+@router.message(StateFilter(None), F.text == templ.START_SHORTCUT_DEALS)
+async def handler_start_shortcut_deals(message: types.Message, state: FSMContext):
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    from ..callback_handlers.deals import show_deals_menu
+
+    await show_deals_menu(message=message, state=state, force_reload=True)
+
+
+@router.message(StateFilter(None), F.text == templ.START_SHORTCUT_ITEMS)
+async def handler_start_shortcut_items(message: types.Message, state: FSMContext):
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    from ..callback_handlers.items import show_items_menu
+
+    await show_items_menu(message=message, state=state, force_reload=True)
 
 
 @router.message(Command("developer"))

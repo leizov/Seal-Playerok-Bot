@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 
 from settings import Settings as sett
@@ -14,6 +14,34 @@ from ..states.quick_replies import QuickReplyStates
 from ..helpful import get_playerok_bot
 
 router = Router()
+
+
+def _serialize_inline_kb(reply_markup: InlineKeyboardMarkup | None) -> dict | None:
+    if reply_markup is None:
+        return None
+    try:
+        return reply_markup.model_dump(exclude_none=True)
+    except Exception:
+        return None
+
+
+def _deserialize_inline_kb(payload: dict | None) -> InlineKeyboardMarkup | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return InlineKeyboardMarkup.model_validate(payload)
+    except Exception:
+        return None
+
+
+def _extract_disable_preview(message: Message) -> bool | None:
+    options = getattr(message, "link_preview_options", None)
+    if options is None:
+        return None
+    try:
+        return bool(getattr(options, "is_disabled", False))
+    except Exception:
+        return None
 
 
 @router.callback_query(calls.QuickReplyAction.filter(F.action == "add"))
@@ -108,12 +136,64 @@ async def callback_show_quick_replies(callback: CallbackQuery, callback_data: ca
     if not quick_replies:
         await callback.answer("❌ Нет заготовок. Создайте их в настройках бота.", show_alert=True)
         return
+
+    back_text = (
+        getattr(callback.message, "html_text", None)
+        or getattr(callback.message, "html_caption", None)
+        or getattr(callback.message, "text", None)
+        or getattr(callback.message, "caption", None)
+    )
+    if not back_text:
+        back_text = do_action_text("⬅️ Возвращаемся назад...")
+    await state.update_data(
+        quick_reply_back_ctx={
+            "text": back_text,
+            "reply_markup": _serialize_inline_kb(callback.message.reply_markup),
+            "disable_web_page_preview": _extract_disable_preview(callback.message),
+        }
+    )
     
     await callback.message.edit_text(
         do_action_text(f"📋 <b>Выберите заготовку для отправки пользователю {callback_data.name}:</b>"),
         reply_markup=quick_reply_select_kb(callback_data.name),
         parse_mode="HTML"
     )
+    await callback.answer()
+
+
+@router.callback_query(calls.QuickReplyAction.filter(F.action == "cancel_send"))
+async def callback_cancel_send_quick_reply(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    back_ctx = data.get("quick_reply_back_ctx") if isinstance(data, dict) else None
+
+    text = None
+    reply_markup = None
+    if isinstance(back_ctx, dict):
+        text = back_ctx.get("text")
+        reply_markup = _deserialize_inline_kb(back_ctx.get("reply_markup"))
+        disable_preview = back_ctx.get("disable_web_page_preview")
+    else:
+        disable_preview = None
+
+    try:
+        if text:
+            edit_kwargs = {
+                "text": text,
+                "reply_markup": reply_markup,
+                "parse_mode": "HTML",
+            }
+            if isinstance(disable_preview, bool):
+                edit_kwargs["disable_web_page_preview"] = disable_preview
+            await callback.message.edit_text(**edit_kwargs)
+        else:
+            await callback.message.delete()
+    except Exception:
+        if text:
+            await callback.message.edit_text(text, reply_markup=reply_markup)
+        else:
+            await callback.message.delete()
+
+    await state.update_data(quick_reply_back_ctx=None)
     await callback.answer()
 
 

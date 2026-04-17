@@ -51,7 +51,7 @@ def quick_reply_select_kb(username: str):
                 callback_data=calls.QuickReplySelect(username=username, reply_name=name).pack()
             )])
     
-    rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data="destroy")])
+    rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data=calls.QuickReplyAction(action="cancel_send").pack())])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     return kb
 

@@ -46,8 +46,10 @@ def log_text(title: str, text: str, by: str = None):
 
 def log_new_mess_kb(username: str, chat_id: str = None):
     rows = [
-        [InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack())],
-        [InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack())]
+        [
+            InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack()),
+            InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack()),
+        ]
     ]
     if chat_id:
         rows.append([InlineKeyboardButton(text="📜 Просмотр чата", callback_data=calls.ChatHistory(chat_id=chat_id).pack())])
@@ -57,13 +59,18 @@ def log_new_mess_kb(username: str, chat_id: str = None):
 
 def log_new_deal_kb(username: str, deal_id: str, chat_id: str = None):
     rows = [
-        [InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack())],
-        [InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack())],
-        [InlineKeyboardButton(text="🧾 Просмотр сделки", callback_data=calls.DealView(de_id=deal_id).pack())],
-        [InlineKeyboardButton(text="📦 Просмотр товара", callback_data=calls.DealItemView(de_id=deal_id).pack())],
+        [
+            InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack()),
+            InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack()),
+        ],
     ]
     if chat_id:
-        rows.append([InlineKeyboardButton(text="📜 Просмотр чата", callback_data=calls.ChatHistory(chat_id=chat_id).pack())])
+        rows.append([
+            InlineKeyboardButton(text="🧾 Просмотр сделки", callback_data=calls.DealView(de_id=deal_id).pack()),
+            InlineKeyboardButton(text="📜 Просмотр чата", callback_data=calls.ChatHistory(chat_id=chat_id).pack()),
+        ])
+    else:
+        rows.append([InlineKeyboardButton(text="🧾 Просмотр сделки", callback_data=calls.DealView(de_id=deal_id).pack())])
     rows.append([InlineKeyboardButton(text="🔗 Ссылка", url=f"https://playerok.com/deal/{deal_id}/")])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     return kb
@@ -75,7 +82,6 @@ def deal_view_kb(
     deal_status,
     chat_id: str | None = None,
     back_cb: str | None = None,
-    show_item_button: bool = True,
 ) -> InlineKeyboardMarkup:
     status_name = getattr(deal_status, "name", str(deal_status) if deal_status is not None else "")
     allow_complete = status_name in ("PAID", "PENDING")
@@ -118,15 +124,6 @@ def deal_view_kb(
                 )
             ]
         )
-    if show_item_button:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="📦 Просмотр товара",
-                    callback_data=calls.DealItemView(de_id=deal_id).pack(),
-                )
-            ]
-        )
     deal_link_button = InlineKeyboardButton(text="🔗 Открыть сделку", url=f"https://playerok.com/deal/{deal_id}/")
     if back_cb:
         rows.append(
@@ -143,8 +140,10 @@ def deal_view_kb(
 def log_new_review_kb(username: str, deal_id: str, chat_id: str = None):
     rows = [
         # [InlineKeyboardButton(text="💬🌟 Ответить на отзыв", callback_data=calls.RememberDealId(de_id=deal_id, do="answer_rev").pack())],
-        [InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack())],
-        [InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack())]
+        [
+            InlineKeyboardButton(text="💬 Написать", callback_data=calls.RememberUsername(name=username, do="send_mess").pack()),
+            InlineKeyboardButton(text="📋 Заготовки", callback_data=calls.RememberUsername(name=username, do="quick_reply").pack()),
+        ]
     ]
     if chat_id:
         rows.append([InlineKeyboardButton(text="📜 Просмотр чата", callback_data=calls.ChatHistory(chat_id=chat_id).pack())])

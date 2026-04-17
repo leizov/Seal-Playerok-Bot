@@ -6,6 +6,7 @@ import asyncio
 
 from datetime import datetime
 from html import escape
+from urllib.parse import quote
 
 from threading import Thread
 import textwrap
@@ -127,6 +128,21 @@ class PlayerokBot:
             pass
 
         return 0.0
+
+    def _format_deal_line(self, deal_id: str | None, emoji: str = "🧾") -> str:
+        safe_deal_id = escape(str(deal_id or "—"))
+        return f"<b>{emoji} Сделка:</b> <code>{safe_deal_id}</code>"
+
+    def _format_buyer_line(self, username: str | None, emoji: str = "👤") -> str:
+        safe_username_raw = str(username or "Неизвестно")
+        safe_username = escape(safe_username_raw)
+        username_slug = str(username or "").strip()
+
+        if not username_slug:
+            return f"<b>{emoji} Покупатель:</b> {safe_username}"
+
+        profile_link = f"https://playerok.com/profile/{quote(username_slug, safe='')}"
+        return f'<b>{emoji} Покупатель:</b> <a href="{profile_link}">{safe_username}</a>'
 
     def _try_connect(self) -> bool:
         try:
@@ -974,8 +990,15 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'✨ Новый отзыв по <a href="https://playerok.com/deal/{deal.id}">сделке</a>',
-                        text=f"<b>Оценка:</b> {'⭐' * deal.review.rating}\n<b>Оставил:</b> {deal.review.creator.username}\n<b>Текст:</b> {deal.review.text}\n<b>Дата:</b> {datetime.fromisoformat(deal.review.created_at).strftime('%d.%m.%Y %H:%M:%S')}"
+                        title="✨ Новый отзыв по сделке",
+                        text=(
+                            f"{self._format_deal_line(deal.id)}\n"
+                            f"{self._format_buyer_line(getattr(deal.user, 'username', None))}\n"
+                            f"<b>⭐ Оценка:</b> {'⭐' * max(int(deal.review.rating or 0), 0)}\n"
+                            f"<b>📝 Оставил:</b> {escape(str(deal.review.creator.username or '—'))}\n"
+                            f"<b>💬 Текст:</b> {escape(str(deal.review.text or '—'))}\n"
+                            f"<b>📅 Дата:</b> {datetime.fromisoformat(deal.review.created_at).strftime('%d.%m.%Y %H:%M:%S')}"
+                        )
                     ),
                     kb=log_new_review_kb(deal.user.username, deal.id, chat_id)
                 ),
@@ -1352,10 +1375,11 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'🤬 Новая жалоба в <a href="https://playerok.com/deal/{event.deal.id}">сделке #{event.deal.id}</a>',
-                        text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
-                             f"<b>📦 Товар:</b> {event.deal.item.name}\n"
-                             f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
+                        title="🤬 Новая жалоба в сделке",
+                        text=f"{self._format_deal_line(event.deal.id)}\n"
+                             f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                             f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                             f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽"
                     ),
                     kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                 ),
@@ -1386,10 +1410,11 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'🥰 Проблема <a href="https://playerok.com/deal/{event.deal.id}">сделке #{event.deal.id}</a> разрешена!',
-                        text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
-                             f"<b>📦 Товар:</b> {event.deal.item.name}\n"
-                             f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
+                        title="🥰 Проблема в сделке разрешена",
+                        text=f"{self._format_deal_line(event.deal.id)}\n"
+                             f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                             f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                             f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽"
                     ),
                     kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                 ),
@@ -1434,10 +1459,11 @@ class PlayerokBot:
                 asyncio.run_coroutine_threadsafe(
                     tg_bot.log_event(
                         text=log_text(
-                            title=f'📋 Новая <a href="https://playerok.com/deal/{event.deal.id}">сделка</a>',
-                            text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
-                                 f"<b>📦 Товар:</b> {event.deal.item.name}\n"
-                                 f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
+                            title="📋 Новая сделка",
+                            text=f"{self._format_deal_line(event.deal.id)}\n"
+                                 f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                                 f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                                 f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽"
                         ),
                         kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                     ),
@@ -1493,14 +1519,15 @@ class PlayerokBot:
                             asyncio.run_coroutine_threadsafe(
                                 get_telegram_bot().log_event(
                                     text=log_text(
-                                        title=f'🚀📦 Выдан товар из мультивыдачи в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                        title="🚀📦 Выдан товар из мультивыдачи",
                                         text=(
-                                            f"<b>Товар:</b> {event.deal.item.name}\n"
-                                            f"<b>Покупатель:</b> {event.deal.user.username}\n"
-                                            f"<b>Сумма:</b> {event.deal.item.price or '?'}₽\n"
-                                            f"<b>Ключевая фраза:</b> {matched_phrase}\n"
+                                            f"{self._format_deal_line(event.deal.id)}\n"
+                                            f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                                            f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                                            f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽\n"
+                                            f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}\n"
                                             f"<b>Выданная строка:</b> <tg-spoiler>{safe_issued_item}</tg-spoiler>\n"
-                                            f"<b>Осталось:</b> {remaining}"
+                                            f"<b>Осталось:</b> {escape(str(remaining))}"
                                         )
                                     )
                                 ),
@@ -1515,11 +1542,12 @@ class PlayerokBot:
                             asyncio.run_coroutine_threadsafe(
                                 get_telegram_bot().log_event(
                                     text=log_text(
-                                        title=f'⚠️ Последний товар мультивыдачи выдан в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                        title="⚠️ Последний товар мультивыдачи выдан",
                                         text=(
-                                            f"<b>Товар:</b> {event.deal.item.name}\n"
-                                            f"<b>Покупатель:</b> {event.deal.user.username}\n"
-                                            f"<b>Ключевая фраза:</b> {matched_phrase}\n"
+                                            f"{self._format_deal_line(event.deal.id)}\n"
+                                            f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                                            f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                                            f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}\n"
                                             f"<b>Остаток:</b> 0"
                                         )
                                     )
@@ -1538,11 +1566,12 @@ class PlayerokBot:
                             asyncio.run_coroutine_threadsafe(
                                 get_telegram_bot().log_event(
                                     text=log_text(
-                                        title=f'⚠️ Остаток мультивыдачи пуст в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                        title="⚠️ Остаток мультивыдачи пуст",
                                         text=(
-                                            f"<b>Товар:</b> {event.deal.item.name}\n"
-                                            f"<b>Покупатель:</b> {event.deal.user.username}\n"
-                                            f"<b>Ключевая фраза:</b> {matched_phrase}"
+                                            f"{self._format_deal_line(event.deal.id)}\n"
+                                            f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                                            f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                                            f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}"
                                         )
                                     )
                                 ),
@@ -1561,12 +1590,13 @@ class PlayerokBot:
                         asyncio.run_coroutine_threadsafe(
                             get_telegram_bot().log_event(
                                 text=log_text(
-                                    title=f'🚀📦 Выдан товар из автовыдачи в <a href="https://playerok.com/deal/{event.deal.id}">сделке</a>',
+                                    title="🚀📦 Выдан товар из автовыдачи",
                                     text=(
-                                        f"<b>Товар:</b> {event.deal.item.name}\n"
-                                        f"<b>Покупатель:</b> {event.deal.user.username}\n"
-                                        f"<b>Сумма:</b> {event.deal.item.price or '?'}₽\n"
-                                        f"<b>Ключевая фраза:</b> {matched_phrase}"
+                                        f"{self._format_deal_line(event.deal.id)}\n"
+                                        f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                                        f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                                        f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽\n"
+                                        f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}"
                                     )
                                 )
                             ),
@@ -1690,10 +1720,11 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'✅ Покупатель подтвердил <a href="https://playerok.com/deal/{event.deal.id}/">сделку #{event.deal.id}</a>',
-                        text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
-                             f"<b>📦 Товар:</b> {event.deal.item.name}\n"
-                             f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
+                        title="✅ Покупатель подтвердил сделку",
+                        text=f"{self._format_deal_line(event.deal.id)}\n"
+                             f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                             f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                             f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽"
                     ),
                     kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                 ),
@@ -1720,10 +1751,11 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'❌ Произошёл возврат для <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a>',
-                        text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
-                             f"<b>📦 Товар:</b> {event.deal.item.name}\n"
-                             f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
+                        title="❌ Произошёл возврат по сделке",
+                        text=f"{self._format_deal_line(event.deal.id)}\n"
+                             f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                             f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                             f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽"
                     ),
                     kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                 ),
@@ -1752,10 +1784,11 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'✅ Автоматически подтверждена сделка <a href="https://playerok.com/deal/{event.deal.id}/">сделку #{event.deal.id}</a>',
-                        text=f"<b>👤 Покупатель:</b> {event.deal.user.username}\n"
-                             f"<b>📦 Товар:</b> {event.deal.item.name}\n"
-                             f"<b>💰 Сумма:</b> {event.deal.item.price or '?'}₽"
+                        title="✅ Сделка подтверждена автоматически",
+                        text=f"{self._format_deal_line(event.deal.id)}\n"
+                             f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                             f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                             f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽"
                     ),
                     kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                 ),
@@ -1809,8 +1842,12 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title=f'📋 Статус <a href="https://playerok.com/deal/{event.deal.id}/">сделки #{event.deal.id}</a> изменился',
-                        text=f"<b>Новый статус:</b> {status_frmtd}\n<b>Товар:</b> {event.deal.item.name}\n<b>Покупатель:</b> {event.deal.user.username}\n<b>Сумма:</b> {event.deal.item.price or '?'}₽"
+                        title="📋 Статус сделки изменился",
+                        text=f"{self._format_deal_line(event.deal.id)}\n"
+                             f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
+                             f"<b>🔄 Новый статус:</b> {escape(str(status_frmtd or '—'))}\n"
+                             f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+                             f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽"
                     ),
                     kb=log_new_deal_kb(event.deal.user.username, event.deal.id, event.chat.id)
                 ),

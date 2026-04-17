@@ -1,10 +1,14 @@
 import textwrap
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 from __init__ import VERSION, DEVELOPER, REPOSITORY
 from settings import Settings as sett
 
 from .. import callback_datas as calls
+
+START_SHORTCUT_MAIN_MENU = "🏠 Главное меню"
+START_SHORTCUT_DEALS = "💼 Сделки"
+START_SHORTCUT_ITEMS = "📦 Предметы"
 
 
 def menu_text():
@@ -25,6 +29,33 @@ def menu_text():
         Выберите раздел ниже ↓
     """)
     return txt
+
+
+def start_banner_caption_text() -> str:
+    txt = textwrap.dedent("""
+        🦭 <b>Привет!</b>
+
+        <b>Быстрее тыкай по кнопкам снизу!</b>
+    """)
+    return txt.strip()
+
+
+def start_shortcuts_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text=START_SHORTCUT_MAIN_MENU),
+            ],
+            [
+                KeyboardButton(text=START_SHORTCUT_DEALS),
+                KeyboardButton(text=START_SHORTCUT_ITEMS),
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        input_field_placeholder="Выберите раздел",
+    )
+
 
 def menu_kb(page: int = 0):
     """

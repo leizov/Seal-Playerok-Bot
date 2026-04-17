@@ -75,19 +75,27 @@ def _chat_history_kb(chat_id: str, username: str | None = None, deal_id: str | N
                 InlineKeyboardButton(
                     text="💬 Написать",
                     callback_data=calls.RememberUsername(name=username, do="send_mess").pack(),
-                )
+                ),
+                InlineKeyboardButton(
+                    text="📋 Заготовки",
+                    callback_data=calls.RememberUsername(name=username, do="quick_reply").pack(),
+                ),
             ]
         )
+
+    chat_button = InlineKeyboardButton(text="🔗 Ссылка", url=f"https://playerok.com/chats/{chat_id}")
     if deal_id:
         rows.append(
             [
                 InlineKeyboardButton(
                     text="🧾 Просмотр сделки",
                     callback_data=calls.DealView(de_id=deal_id).pack(),
-                )
+                ),
+                chat_button,
             ]
         )
-    rows.append([InlineKeyboardButton(text="🔗 Открыть чат", url=f"https://playerok.com/chats/{chat_id}")])
+    else:
+        rows.append([chat_button])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

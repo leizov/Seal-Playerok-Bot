@@ -18,6 +18,8 @@ BOT_SETTINGS_DIR = os.path.join(ROOT_DIR, "bot_settings")
 # Директория данных бота
 BOT_DATA_DIR = os.path.join(ROOT_DIR, "bot_data")
 ERROR_STATS_DIR = os.path.join(BOT_DATA_DIR, "error_stats")
+START_IMAGES_DIR = os.path.join(ROOT_DIR, "start_images")
+START_BANNER_IMAGE_FILE = os.path.join(START_IMAGES_DIR, "пасхо.png")
 
 # Директория логов
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
@@ -78,6 +80,7 @@ def ensure_dirs():
         BOT_SETTINGS_DIR,
         BOT_DATA_DIR,
         ERROR_STATS_DIR,
+        START_IMAGES_DIR,
         LOGS_DIR,
         PLUGINS_DIR,
         STORAGE_DIR,
@@ -90,7 +93,7 @@ def ensure_dirs():
 def get_path(*parts) -> str:
     """
     Возвращает абсолютный путь относительно корня проекта.
-    
+
     :param parts: Части пути
     :return: Абсолютный путь
     """

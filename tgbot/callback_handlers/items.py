@@ -383,7 +383,7 @@ async def show_items_menu(
     if force_reload or not isinstance(cached_items, list):
         loading_message = message
         loading_callback = callback
-        loading_text = "\u23F3 \u0417\u0430\u0433\u0440\u0443\u0436\u0430\u044e \u0442\u043e\u0432\u0430\u0440\u044b, \u043f\u043e\u0434\u043e\u0436\u0434\u0438\u0442\u0435..."
+        loading_text = "\u23F3 \u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043F\u0440\u0435\u0434\u043C\u0435\u0442\u043E\u0432..."
 
         if callback is not None:
             await throw_float_message(
@@ -393,7 +393,7 @@ async def show_items_menu(
                 callback=callback,
             )
             loading_callback = None
-        elif getattr(message, "text", None) and str(getattr(message, "text", "")).startswith("/"):
+        else:
             loading_message = await throw_float_message(
                 state=state,
                 message=message,

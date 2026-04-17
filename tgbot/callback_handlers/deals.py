@@ -246,7 +246,7 @@ async def show_deals_menu(
     if force_reload or not isinstance(cached_deals, list):
         loading_message = message
         loading_callback = callback
-        loading_text = "\u23F3 \u0417\u0430\u0433\u0440\u0443\u0436\u0430\u044e \u0441\u0434\u0435\u043B\u043A\u0438, \u043F\u043E\u0434\u043E\u0436\u0434\u0438\u0442\u0435..."
+        loading_text = "\u23F3 \u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u0441\u0434\u0435\u043B\u043E\u043A..."
 
         if callback is not None:
             await throw_float_message(
@@ -256,7 +256,7 @@ async def show_deals_menu(
                 callback=callback,
             )
             loading_callback = None
-        elif getattr(message, "text", None) and str(getattr(message, "text", "")).startswith("/"):
+        else:
             loading_message = await throw_float_message(
                 state=state,
                 message=message,

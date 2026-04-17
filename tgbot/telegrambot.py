@@ -319,7 +319,20 @@ class TelegramBot:
                 await self._update_bot_commands()
                 await self._set_short_description()
                 await self._set_description()
-                
+
+                try:
+                    from .handlers.commands import warmup_start_banner_file_id_cache
+
+                    config = sett.get("config")
+                    signed_users = config.get("telegram", {}).get("bot", {}).get("signed_users", [])
+                    warmed = await warmup_start_banner_file_id_cache(self.bot, signed_users)
+                    if warmed:
+                        logger.info("Кэш стартового баннера прогрет при инициализации Telegram-бота.")
+                    else:
+                        logger.debug("Прогрев кэша стартового баннера пропущен или не выполнен.")
+                except Exception as e:
+                    logger.debug("Не удалось прогреть кэш стартового баннера при инициализации: %s", e)
+
                 await call_bot_event("ON_TELEGRAM_BOT_INIT", [self])
                 
                 logger.info(f"{ACCENT_COLOR}Telegram бот {Fore.LIGHTCYAN_EX}@{me.username} {ACCENT_COLOR}запущен и активен")
