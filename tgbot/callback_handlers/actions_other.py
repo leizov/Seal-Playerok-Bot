@@ -40,7 +40,7 @@ async def callback_delete_included_restore_item(callback: CallbackQuery, callbac
         await state.set_state(None)
         index = callback_data.index
         if index is None:
-            raise Exception("❌ Включенный предмет не был найден, повторите процесс с самого начала")
+            raise Exception("❌ Включенный товар не был найден, повторите процесс с самого начала")
         
         auto_restore_items = sett.get("auto_restore_items")
         auto_restore_items["included"].pop(index)
@@ -66,7 +66,7 @@ async def callback_delete_excluded_restore_item(callback: CallbackQuery, callbac
         await state.set_state(None)
         index = callback_data.index
         if index is None:
-            raise Exception("❌ Исключенный предмет не был найден, повторите процесс с самого начала")
+            raise Exception("❌ Исключенный товар не был найден, повторите процесс с самого начала")
         
         auto_restore_items = sett.get("auto_restore_items")
         auto_restore_items["excluded"].pop(index)

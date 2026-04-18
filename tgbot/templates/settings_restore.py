@@ -10,7 +10,7 @@ def settings_restore_text():
     config = sett.get("config")
     is_all_mode = bool(config["playerok"]["auto_restore_items"]["all"])
     auto_restore_items_expired = "🟢 Включено" if bool(config["playerok"]["auto_restore_items"].get("expired", False)) else "🔴 Выключено"
-    auto_restore_items_all = "Все предметы" if is_all_mode else "Указанные предметы"
+    auto_restore_items_all = "Все товары" if is_all_mode else "Указанные товары"
     auto_restore_items = sett.get("auto_restore_items")
     auto_restore_items_included = len(auto_restore_items["included"])
     auto_restore_items_excluded = len(auto_restore_items["excluded"])
@@ -27,11 +27,11 @@ def settings_restore_text():
 
         {items_line}
 
-        <b>Что такое автоматическое восстановление предметов?</b>
-        На Playerok как только ваш товар покупают - он исчезает из продажи. Эта функция позволит автоматически восстанавливать (заново выставлять) предмет, который только что купили, чтобы он снова был на продаже. Предмет будет выставлен с тем же статусом приоритета, что и был раньше.
+        <b>Что такое автоматическое восстановление товаров?</b>
+        На Playerok как только ваш товар покупают - он исчезает из продажи. Эта функция позволит автоматически восстанавливать (заново выставлять) товар, который только что купили, чтобы он снова был на продаже. Товар будет выставлен с тем же статусом приоритета, что и был раньше.
 
         <b>Примечание:</b>
-        Если вы выберете "Все предметы", то будут восстанавливаться все товары, кроме тех, что указаны в исключениях. Если вы выберете "Указанные предметы", то будут восстанавливаться только те товары, которые вы добавите во включенные.
+        Если вы выберете "Все товары", то будут восстанавливаться все товары, кроме тех, что указаны в исключениях. Если вы выберете "Указанные товары", то будут восстанавливаться только те товары, которые вы добавите во включенные.
         
         Выберите параметр для изменения ↓
     """)
@@ -42,7 +42,7 @@ def settings_restore_kb():
     config = sett.get("config")
     is_all_mode = bool(config["playerok"]["auto_restore_items"]["all"])
     auto_restore_items_expired = "🟢 Включено" if bool(config["playerok"]["auto_restore_items"].get("expired", False)) else "🔴 Выключено"
-    auto_restore_items_all = "Все предметы" if is_all_mode else "Указанные предметы"
+    auto_restore_items_all = "Все товары" if is_all_mode else "Указанные товары"
     auto_restore_items = sett.get("auto_restore_items")
     auto_restore_items_included = len(auto_restore_items["included"])
     auto_restore_items_excluded = len(auto_restore_items["excluded"])

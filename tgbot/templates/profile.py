@@ -42,7 +42,7 @@ def profile_text():
           ┣ <b>⌛ В процессе:</b> {profile.balance.pending_income}₽
           ┗ <b>❄️ Заморожено:</b> {profile.balance.frozen}₽
         
-        <b>📦 Предметы:</b>
+        <b>📦 Товары:</b>
           ┣ <b>➖ Истёкших:</b> {profile.stats.items.finished}
           ┗ <b>♾️ Всего:</b> {profile.stats.items.total}
         

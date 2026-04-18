@@ -1,5 +1,7 @@
+import asyncio
+
 from aiogram import Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
 
 from .. import templates as templ
@@ -256,13 +258,24 @@ async def callback_logs_navigation(callback: CallbackQuery, callback_data: calls
         to = callback_data.to
         
         if to in ["default", "main"]:
-            await throw_float_message(
-                state=state,
-                message=callback.message,
-                text=templ.logs_text(),
-                reply_markup=templ.logs_kb(),
-                callback=callback
-            )
+            from ..handlers.log_commands import get_latest_logs, get_latest_log_file, _safe_edit_text
+
+            msg = await callback.message.answer("⏳ Загружаю логи...")
+            log_text = await asyncio.get_event_loop().run_in_executor(None, get_latest_logs)
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data=calls.LogsAction(action="refresh").pack())],
+                [InlineKeyboardButton(text="❌ Закрыть", callback_data=calls.LogsAction(action="close").pack())]
+            ])
+            await _safe_edit_text(msg, log_text, reply_markup=kb)
+
+            latest_log = get_latest_log_file()
+            if latest_log is not None and latest_log.exists():
+                await callback.message.answer_document(
+                    FSInputFile(str(latest_log)),
+                    caption=f"📎 Файл лога: {latest_log.name}"
+                )
+            await callback.answer()
         else:
             await callback.answer("❌ Неизвестный раздел логов.", show_alert=True)
             

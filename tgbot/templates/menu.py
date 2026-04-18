@@ -8,7 +8,7 @@ from .. import callback_datas as calls
 
 START_SHORTCUT_MAIN_MENU = "🏠 Главное меню"
 START_SHORTCUT_DEALS = "💼 Сделки"
-START_SHORTCUT_ITEMS = "📦 Предметы"
+START_SHORTCUT_ITEMS = "📦 Товары"
 
 
 def menu_text():

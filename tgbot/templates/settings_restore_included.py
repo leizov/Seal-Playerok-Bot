@@ -11,7 +11,7 @@ def settings_restore_included_text():
     included_restore_items = sett.get("auto_restore_items").get("included")
     txt = textwrap.dedent(f"""
         <b>♻️ Восстановление → ➕ Включенные</b>
-        Всего <b>{len(included_restore_items)}</b> включенных предметов для авто-восстановления
+        Всего <b>{len(included_restore_items)}</b> включенных товаров для авто-восстановления
 
         Перемещайтесь по разделам ниже. Нажмите на корзину справа от ключевых фраз, чтобы удалить товар из включенных ↓
     """)
@@ -70,7 +70,7 @@ def settings_restore_included_float_text(placeholder: str):
 
 def settings_new_restore_included_float_text(placeholder: str):
     txt = textwrap.dedent(f"""
-        <b>♻️➕ Добавление нового включенного предмета</b>
+        <b>♻️➕ Добавление нового включенного товара</b>
         \n{placeholder}
     """)
     return txt

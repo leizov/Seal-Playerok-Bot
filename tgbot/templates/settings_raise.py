@@ -29,7 +29,7 @@ def settings_raise_text():
     mode = _normalize_raise_mode(auto_raise_config.get("mode"))
 
     is_all_mode = bool(auto_raise_config["all"])
-    auto_raise_items_all = "Все предметы" if is_all_mode else "Указанные предметы"
+    auto_raise_items_all = "Все товары" if is_all_mode else "Указанные товары"
     auto_raise_items = sett.get("auto_raise_items")
     auto_raise_items_included = len(auto_raise_items["included"])
     auto_raise_items_excluded = len(auto_raise_items["excluded"])
@@ -97,7 +97,7 @@ def settings_raise_kb():
     mode = _normalize_raise_mode(auto_raise_config.get("mode"))
 
     is_all_mode = bool(auto_raise_config["all"])
-    auto_raise_items_all = "Все предметы" if is_all_mode else "Указанные предметы"
+    auto_raise_items_all = "Все товары" if is_all_mode else "Указанные товары"
     auto_raise_items = sett.get("auto_raise_items")
     auto_raise_items_included = len(auto_raise_items["included"])
     auto_raise_items_excluded = len(auto_raise_items["excluded"])

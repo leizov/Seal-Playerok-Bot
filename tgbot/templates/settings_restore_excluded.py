@@ -11,7 +11,7 @@ def settings_restore_excluded_text():
     excluded_restore_items = sett.get("auto_restore_items").get("excluded")
     txt = textwrap.dedent(f"""
         <b>♻️ Восстановление → ➖ Исключенные</b>
-        Всего <b>{len(excluded_restore_items)}</b> исключенных предметов из авто-восстановления
+        Всего <b>{len(excluded_restore_items)}</b> исключенных товаров из авто-восстановления
 
         Перемещайтесь по разделам ниже. Нажмите на корзину справа от ключевых фраз, чтобы удалить товар из исключенных ↓
     """)
@@ -70,7 +70,7 @@ def settings_restore_excluded_float_text(placeholder: str):
 
 def settings_new_restore_excluded_float_text(placeholder: str):
     txt = textwrap.dedent(f"""
-        <b>♻️➖ Добавление нового исключенного предмета</b>
+        <b>♻️➖ Добавление нового исключенного товара</b>
         \n{placeholder}
     """)
     return txt

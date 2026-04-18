@@ -187,7 +187,7 @@ def items_menu_kb(filters: dict, page_items: list[dict], page: int, total_pages:
 
 def items_filter_text(filters: dict) -> str:
     selected = set(filters.get("status_presets", []))
-    lines = ["🔎 <b>Фильтры товаров</b>", "", "Настройте фильтры и нажмите «Применить»."]
+    lines = ["🔎 <b>Фильтры товаров</b>", "", "Настройте фильтры и нажмите «К списку»."]
 
     for preset in ("PREMIUM", "APPROVED", "MODERATION", "SOLD", "BLOCKED_DECLINED", "DRAFT"):
         label = PRESET_LABELS.get(preset, preset)
