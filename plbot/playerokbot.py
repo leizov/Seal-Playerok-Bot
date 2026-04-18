@@ -91,6 +91,99 @@ class PlayerokBot:
 
         self.__saved_chats: dict[str, Chat] = {}
 
+    def _start_daemon_thread(self, target, args: tuple = (), name: str | None = None):
+        thread = Thread(target=target, args=args, daemon=True, name=name)
+        thread.start()
+        return thread
+
+    def _record_new_deal_async(self, deal: types.ItemDeal):
+        deal_id = str(getattr(deal, "id", "unknown"))
+
+        def _worker():
+            record_new_deal(self._deal_amount(deal))
+
+        self._start_daemon_thread(_worker, name=f"record-new-deal-{deal_id}")
+
+    def _record_refund_async(self, deal: types.ItemDeal):
+        deal_id = str(getattr(deal, "id", "unknown"))
+
+        def _worker():
+            record_refund(self._deal_amount(deal))
+
+        self._start_daemon_thread(_worker, name=f"record-refund-{deal_id}")
+
+    def _record_review_async(self):
+        self._start_daemon_thread(record_review, name="record-review")
+
+    def _record_raise_async(self, amount: float):
+        self._start_daemon_thread(record_raise, args=(amount,), name="record-raise")
+
+    def _should_auto_complete_deal(self, deal: types.ItemDeal) -> bool:
+        auto_complete_config = self.config["playerok"].get("auto_complete_deals", {})
+        if not auto_complete_config.get("enabled"):
+            return False
+
+        auto_complete_items = self.auto_complete_items or {}
+        should_complete_deal = bool(auto_complete_config.get("all", True))
+        item_name_lower = str(getattr(getattr(deal, "item", None), "name", "") or "").lower()
+
+        is_excluded = False
+        for excluded_keyphrases in auto_complete_items.get("excluded", []):
+            if not isinstance(excluded_keyphrases, list):
+                continue
+            if any(
+                str(phrase).strip().lower() in item_name_lower
+                or item_name_lower == str(phrase).strip().lower()
+                for phrase in excluded_keyphrases
+                if str(phrase).strip()
+            ):
+                is_excluded = True
+                break
+
+        if is_excluded:
+            return False
+
+        if should_complete_deal:
+            return True
+
+        for included_keyphrases in auto_complete_items.get("included", []):
+            if not isinstance(included_keyphrases, list):
+                continue
+            if any(
+                str(phrase).strip().lower() in item_name_lower
+                or item_name_lower == str(phrase).strip().lower()
+                for phrase in included_keyphrases
+                if str(phrase).strip()
+            ):
+                return True
+
+        return False
+
+    def _auto_complete_deal_worker(self, deal: types.ItemDeal):
+        if not self.is_connected or self.account is None:
+            return
+
+        success = False
+        attempts = 3
+        delay = 3
+        deal_id = getattr(deal, "id", None)
+
+        for attempt in range(attempts):
+            try:
+                self.account.update_deal(deal_id, ItemDealStatuses.SENT)
+                success = True
+                break
+            except Exception as e:
+                self.logger.warning(
+                    f'Неудачная попытка ({attempt + 1}/{attempts}) подтвердить сделку {deal_id}:\n{e}'
+                )
+                time.sleep(delay)
+
+        if success:
+            self.logger.info(f'Автоматически подтвердил сделку {deal_id}')
+        else:
+            self.logger.error(f'Автоматически подтверждение не сработало {deal_id}\nПричина: сайт хуйни')
+
     def _deal_amount(self, deal: types.ItemDeal) -> float:
         """
         Возвращает сумму сделки по правилу:
@@ -681,7 +774,7 @@ class PlayerokBot:
             if new_item.status is ItemStatuses.PENDING_APPROVAL or new_item.status is ItemStatuses.APPROVED:
                 self.logger.info(f"{Fore.LIGHTWHITE_EX}«{item_name or full_item.id}» {Fore.WHITE}— {Fore.YELLOW}товар восстановлен")
                 if getattr(priority_status, "price", None) is not None:
-                    record_raise(priority_status.price)
+                    self._record_raise_async(priority_status.price)
                 return True
 
             self.logger.error(
@@ -733,7 +826,7 @@ class PlayerokBot:
                         raise e
                     time.sleep(3)
 
-            attempts = 4
+            attempts = 6
             attempts_delay = 4
             _item = []
             for i in range(attempts):
@@ -741,7 +834,10 @@ class PlayerokBot:
                 _item = [profile_item for profile_item in items if profile_item.name == item.name]
                 if _item:
                     break
-                self.logger.warning(f'Не нашёл товар {item.name} для востановления на нашём аккаунте\nПопытка {i}/{attempts}')
+                self.logger.warning(
+                    f'Не нашёл товар {item.name} для востановления на нашём аккаунте\n'
+                    f'Попытка {i + 1}/{attempts}'
+                )
                 time.sleep((i+1) * attempts_delay)
 
             if len(_item) <= 0:
@@ -784,7 +880,7 @@ class PlayerokBot:
                 self.logger.info(f"{Fore.LIGHTWHITE_EX}«{item.name}» {Fore.WHITE}— {Fore.YELLOW}товар восстановлен")
                 # Учитываем стоимость автовосстановления (если цена статуса доступна).
                 if getattr(priority_status, "price", None) is not None:
-                    record_raise(priority_status.price)
+                    self._record_raise_async(priority_status.price)
             else:
                 self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось восстановить предмет «{new_item.name}». Его статус: {Fore.WHITE}{new_item.status.name}")
         except Exception as e:
@@ -852,7 +948,7 @@ class PlayerokBot:
                         self.logger.info(f"{Fore.LIGHTWHITE_EX}«{full_item.name}» {Fore.WHITE}— {Fore.GREEN}товар поднят")
                         # Учитываем стоимость поднятия (если цена статуса доступна).
                         if getattr(current_priority_status, "price", None) is not None:
-                            record_raise(current_priority_status.price)
+                            self._record_raise_async(current_priority_status.price)
 
                         # Обновляем время последнего поднятия
                         set_last_raise_time(full_item.id)
@@ -1438,7 +1534,7 @@ class PlayerokBot:
             return
 
         self.log_new_deal(event.deal)
-        record_new_deal(self._deal_amount(event.deal))
+        self._record_new_deal_async(event.deal)
         if (
             self.config["playerok"]["tg_logging"]["enabled"]
             and self.config["playerok"]["tg_logging"].get("events", {}).get("new_deal", True)
@@ -1602,58 +1698,13 @@ class PlayerokBot:
                             ),
                             get_telegram_bot_loop()
                         )
-        auto_complete_config = self.config["playerok"].get("auto_complete_deals", {})
-        if auto_complete_config.get("enabled"):
-            auto_complete_items = self.auto_complete_items or {}
-            should_complete_deal = bool(auto_complete_config.get("all", True))
-            item_name_lower = str(getattr(event.deal.item, "name", "") or "").lower()
-
-            is_excluded = False
-            for excluded_keyphrases in auto_complete_items.get("excluded", []):
-                if not isinstance(excluded_keyphrases, list):
-                    continue
-                if any(
-                    str(phrase).strip().lower() in item_name_lower
-                    or item_name_lower == str(phrase).strip().lower()
-                    for phrase in excluded_keyphrases
-                    if str(phrase).strip()
-                ):
-                    is_excluded = True
-                    break
-
-            if is_excluded:
-                should_complete_deal = False
-            elif not should_complete_deal:
-                for included_keyphrases in auto_complete_items.get("included", []):
-                    if not isinstance(included_keyphrases, list):
-                        continue
-                    if any(
-                        str(phrase).strip().lower() in item_name_lower
-                        or item_name_lower == str(phrase).strip().lower()
-                        for phrase in included_keyphrases
-                        if str(phrase).strip()
-                    ):
-                        should_complete_deal = True
-                        break
-
-            if should_complete_deal:
-                success = False
-                attempts = 3
-                delay = 3
-
-                for attempt in range(attempts):
-                    try:
-                        self.account.update_deal(event.deal.id, ItemDealStatuses.SENT)
-                        success = True
-                        break
-                    except Exception as e:
-                        self.logger.warning(f'Неудачная попытка ({attempt+1}/{attempts}) подтвердить сделку {event.deal.id}:\n{e}')
-                        time.sleep(delay)
-
-                if success:
-                    self.logger.info(f'Автоматически подтвердил сделку {event.deal.id}')
-                else:
-                    self.logger.error(f'Автоматически подтверждение не сработало {event.deal.id}\nПричина: сайт хуйни')
+        if self._should_auto_complete_deal(event.deal):
+            deal_id = str(getattr(event.deal, "id", "unknown"))
+            self._start_daemon_thread(
+                self._auto_complete_deal_worker,
+                args=(event.deal,),
+                name=f"auto-complete-deal-{deal_id}",
+            )
 
     async def _on_item_paid(self, event: ItemPaidEvent):
         if not self.is_connected or self.account is None:
@@ -1664,7 +1715,12 @@ class PlayerokBot:
             return
 
         if self._is_item_in_restore_scope(event.deal.item.name):
-            self.restore_last_sold_item(event.deal.item)
+            deal_id = str(getattr(event.deal, "id", "unknown"))
+            self._start_daemon_thread(
+                self.restore_last_sold_item,
+                args=(event.deal.item,),
+                name=f"auto-restore-item-{deal_id}",
+            )
 
     async def _on_item_sent(self, event: ItemSentEvent):
         if not self.is_connected or self.account is None:
@@ -1765,7 +1821,7 @@ class PlayerokBot:
         self.send_message(event.chat.id,
                           self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
-        record_refund(self._deal_amount(event.deal))
+        self._record_refund_async(event.deal)
 
 
     async def _on_deal_confirmed_automatically(self, event: DealConfirmedEvent):
@@ -1817,7 +1873,7 @@ class PlayerokBot:
         if response_text:
             self.send_message(event.chat.id, response_text)
 
-        record_review()
+        self._record_review_async()
 
 
     #old handler
