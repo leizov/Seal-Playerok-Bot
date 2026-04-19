@@ -2,6 +2,7 @@ import os
 import sys
 import importlib
 import uuid
+import re
 from uuid import UUID
 from pathlib import Path
 from colorama import Fore
@@ -56,6 +57,85 @@ def get_plugins():
     :rtype: `list` of `core.plugins.Plugin`
     """
     return loaded_plugins
+
+
+def _normalize_compiled_plugin_stem(path: Path) -> str:
+    """
+    Приводит имя .pyd/.so плагина к display-name (без cp/cpython хвоста и HWID-суффикса).
+    """
+    stem = path.stem
+    stem = re.sub(r"\.cp\d+-.*$", "", stem)
+    stem = re.sub(r"\.cpython-\d+-.*$", "", stem)
+
+    parts = stem.rsplit("_", 1)
+    if len(parts) == 2 and len(parts[1]) == 8 and parts[1].isalnum():
+        return parts[0]
+    return stem
+
+
+def resolve_plugin_source_path(plugin: Plugin, candidates: list[Path] | None = None) -> Path | None:
+    """
+    Возвращает путь до исходника плагина в папке plugins/ (папка, .py, .pyd/.so), если найден.
+    """
+    plugins_dir = Path(paths.PLUGINS_DIR)
+    if candidates is None:
+        try:
+            candidates = list(plugins_dir.iterdir())
+        except OSError:
+            candidates = []
+
+    # 1) Плагин-папка
+    folder_candidate = plugins_dir / plugin._dir_name
+    if folder_candidate.is_dir():
+        return folder_candidate
+
+    # 2) Прямое совпадение по имени модуля
+    for ext in (".py", ".pyd", ".so", ".dll"):
+        file_candidate = plugins_dir / f"{plugin._dir_name}{ext}"
+        if file_candidate.is_file():
+            return file_candidate
+
+    # 3) Скомпилированный плагин (.pyd/.so), где _dir_name хранится как pyd_<display_name>
+    if plugin._dir_name.startswith("pyd_"):
+        display_name = plugin._dir_name[len("pyd_"):]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            lowered = candidate.name.lower()
+            is_compiled = candidate.suffix.lower() == ".pyd" or (
+                candidate.suffix.lower() == ".so" and (".cpython-" in lowered or sys.platform != "win32")
+            )
+            if not is_compiled:
+                continue
+            if _normalize_compiled_plugin_stem(candidate) == display_name:
+                return candidate
+
+    return None
+
+
+def is_plugin_source_available(plugin: Plugin) -> bool:
+    """
+    Проверяет, существует ли исходник плагина в папке plugins/.
+    """
+    return resolve_plugin_source_path(plugin) is not None
+
+
+def get_visible_plugins() -> list[Plugin]:
+    """
+    Возвращает плагины, для которых исходники всё ещё существуют в папке plugins/.
+    Используется для TG-меню, чтобы скрыть уже удалённые с диска плагины до перезапуска.
+    """
+    plugins_dir = Path(paths.PLUGINS_DIR)
+    try:
+        candidates = list(plugins_dir.iterdir())
+    except OSError:
+        candidates = []
+
+    visible_plugins: list[Plugin] = []
+    for plugin in loaded_plugins:
+        if resolve_plugin_source_path(plugin, candidates) is not None:
+            visible_plugins.append(plugin)
+    return visible_plugins
 
 
 def set_plugins(plugins: list[Plugin]):
@@ -482,4 +562,3 @@ async def connect_plugins(plugins: list[Plugin]):
     names = [f"{Fore.YELLOW}{plugin.meta.name} {Fore.LIGHTWHITE_EX}{plugin.meta.version}" for plugin in connected_plugins]
     if names:
         logger.info(f'{ACCENT_COLOR}{_format_string(len(connected_plugins))}: {f"{Fore.WHITE}, ".join(names)}')
-

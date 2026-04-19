@@ -92,3 +92,7 @@ class AutoCompleteDealsStates(StatesGroup):
 class ConfigBackupStates(StatesGroup):
     waiting_for_backup_file = State()
     waiting_for_restore_confirmation = State()
+
+
+class PluginStates(StatesGroup):
+    waiting_for_plugin_file = State()

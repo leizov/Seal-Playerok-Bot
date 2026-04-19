@@ -2,20 +2,20 @@ import math
 import textwrap
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from core.plugins import get_plugins
+from core.plugins import get_visible_plugins
 
 from .. import callback_datas as calls
 
 
 def plugins_text():
-    plugins = get_plugins()
+    plugins = get_visible_plugins()
     txt = textwrap.dedent(f"""
         🔌 <b>Плагины</b>
-        Всего <b>{len(plugins)}</b> загруженных плагинов
-        Для добавления плагина перенесите плагин в папку plugins/ и пропищите команду /restart
+        Всего <b>{len(plugins)}</b> доступных плагинов
+        Для добавления плагина нажмите кнопку <b>«Добавить плагин»</b> ниже
         Перемещайтесь по разделам ниже. Нажмите на название плагина, чтобы перейти в его управление ↓
 
-        <b>Купить/заказать плагин - @leizov</b>
+        <b>Купить официальные плагины - @leizov</b>
 
         💡 <i>Для обновления кода плагинов используйте команду /restart</i>
     """)
@@ -23,7 +23,7 @@ def plugins_text():
 
 
 def plugins_kb(page: int = 0):
-    plugins = get_plugins()
+    plugins = get_visible_plugins()
     rows = []
     items_per_page = 7
     total_pages = math.ceil(len(plugins) / items_per_page)
@@ -50,9 +50,8 @@ def plugins_kb(page: int = 0):
         buttons_row.append(btn_next)
         rows.append(buttons_row)
 
-    rows.append([
-        InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.MenuPagination(page=0).pack())
-    ])
+    rows.append([InlineKeyboardButton(text="➕ Добавить плагин", callback_data="plugin_add_warning")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.MenuPagination(page=0).pack())])
 
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     return kb

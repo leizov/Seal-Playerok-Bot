@@ -33,6 +33,10 @@ def plugin_page_kb(plugin_uuid: UUID, page: int = 0):
     rows = [
         [InlineKeyboardButton(text="🔴 Деактивировать плагин" if plugin.enabled else "🟢 Активировать плагин", callback_data="switch_plugin_enabled")],
         [InlineKeyboardButton(text="📋 Команды плагина", callback_data=calls.PluginCommands(uuid=plugin_uuid).pack())],
+        [
+            InlineKeyboardButton(text="📤 Выгрузить плагин", callback_data="plugin_export"),
+            InlineKeyboardButton(text="🗑 Удалить плагин", callback_data="plugin_delete_ask")
+        ],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.PluginsPagination(page=page).pack())]
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
