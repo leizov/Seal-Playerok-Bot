@@ -13,6 +13,7 @@ from .error_stats import router as error_stats_router
 from .config_backup import router as config_backup_router
 from .deals import router as deals_router
 from .items import router as items_router
+from .chats import router as chats_router
 from .plugin_management import router as plugin_management_router
 
 router = Router()
@@ -32,4 +33,5 @@ router.include_routers(
     plugin_management_router,
     deals_router,
     items_router,
+    chats_router,
 )

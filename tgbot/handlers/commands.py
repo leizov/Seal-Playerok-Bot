@@ -711,6 +711,32 @@ async def handler_start_shortcut_items(message: types.Message, state: FSMContext
     await show_items_menu(message=message, state=state, force_reload=True)
 
 
+@router.message(StateFilter(None), F.text == templ.START_SHORTCUT_CHATS)
+async def handler_start_shortcut_chats(message: types.Message, state: FSMContext):
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    from ..callback_handlers.chats import show_chats_menu
+
+    await show_chats_menu(message=message, state=state, force_reload=True)
+
+
+@router.message(StateFilter(None), F.text == templ.START_SHORTCUT_PROFILE)
+async def handler_start_shortcut_profile(message: types.Message, state: FSMContext):
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    await throw_float_message(
+        state=state,
+        message=message,
+        text=templ.profile_text(),
+        reply_markup=templ.profile_kb(),
+        send=True,
+    )
+
+
 @router.message(Command("developer"))
 async def handler_developer(message: types.Message, state: FSMContext):
     """
@@ -795,6 +821,22 @@ async def handler_items(message: types.Message, state: FSMContext):
     from ..callback_handlers.items import show_items_menu
 
     await show_items_menu(message, state, reset=True, force_reload=True)
+
+
+@router.message(Command("chats"))
+async def handler_chats(message: types.Message, state: FSMContext):
+    """
+    Обработчик команды /chats
+    Открывает меню просмотра чатов аккаунта.
+    """
+    await state.set_state(None)
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    from ..callback_handlers.chats import show_chats_menu
+
+    await show_chats_menu(message, state, reset=True, force_reload=True)
 
 
 @router.message(Command("restart"))
@@ -913,13 +955,12 @@ async def handler_update(message: types.Message, state: FSMContext):
             parse_mode="HTML",
         )
     except Exception as e:
-        logger.exception("Ошибка при формировании backup перед обновлением: %s", e)
+        logger.exception("Ошибка при подготовке/отправке backup перед обновлением: %s", e)
         await update_status_text(
             f"❌ Не удалось отправить backup перед обновлением: "
             f"<code>{html.escape(str(e))}</code>\n"
-            "Обновление отменено."
+            "Продолжаю установку обновления без backup."
         )
-        return
     finally:
         if backup_path and os.path.exists(backup_path):
             try:

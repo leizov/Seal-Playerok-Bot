@@ -67,6 +67,33 @@ def _select_chat_deal(message_deals: list[ItemDeal], chat_deals: list[ItemDeal])
     return ordered[0]
 
 
+def _resolve_message_user(msg: ChatMessage) -> tuple[object | None, str, str]:
+    user = getattr(msg, "user", None)
+    username = str(getattr(user, "username", "") or "").strip()
+    user_id = str(getattr(user, "id", "") or "").strip()
+    return user, username, user_id
+
+
+def _chat_fallback_sender_name(chat_id: str, chat_obj, account) -> str:
+    chat_id = str(chat_id or "")
+    support_chat_id = str(getattr(account, "support_chat_id", "") or "")
+    system_chat_id = str(getattr(account, "system_chat_id", "") or "")
+
+    if chat_id and support_chat_id and chat_id == support_chat_id:
+        return "Поддержка"
+
+    chat_type = getattr(chat_obj, "type", None)
+    chat_type_name = getattr(chat_type, "name", str(chat_type) if chat_type is not None else "")
+    if chat_type_name == "SUPPORT":
+        return "Поддержка"
+    if chat_type_name == "NOTIFICATIONS":
+        return "Уведомления"
+
+    if chat_id and system_chat_id and chat_id == system_chat_id:
+        return "Playerok"
+    return "Система"
+
+
 def _chat_history_kb(chat_id: str, username: str | None = None, deal_id: str | None = None) -> InlineKeyboardMarkup:
     rows = []
     if username:
@@ -103,6 +130,15 @@ def _chat_history_kb(chat_id: str, username: str | None = None, deal_id: str | N
 async def callback_show_chat_history(callback: CallbackQuery, callback_data: calls.ChatHistory, state: FSMContext):
     """Показывает последние 10 сообщений из чата"""
     try:
+        try:
+            await callback.message.edit_text(
+                "⏳ <b>Загружаю чат...</b>",
+                disable_web_page_preview=True,
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
         playerok_bot = get_playerok_bot()
         
         # Получаем сообщения чата (последние 24)
@@ -140,8 +176,7 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
         # Переворачиваем для хронологического порядка
         messages.reverse()
         # Формируем текст с историей
-        history_text = f"📜 <b>История чата (последние {len(messages)} сообщений)</b>\n"
-        history_text += f"<b>Ссылка:</b> <a href='https://playerok.com/chats/{callback_data.chat_id}'>Открыть чат</a>\n\n"
+        history_text = f"📜 <b>История чата (последние {len(messages)} сообщений)</b>\n\n"
         
         total_length = len(history_text)
         messages_text = []
@@ -161,13 +196,25 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
                 line = f"{formatted_msg} <i>({msg_time})</i>\n\n"
             else:
                 # Обычное сообщение от пользователя
+                _, username, user_id = _resolve_message_user(msg)
+
                 # Определяем эмодзи отправителя
-                if msg.user.username in ["Playerok.com", "Поддержка"]:
+                if username in ["Playerok.com", "Поддержка"]:
                     emoji = "🆘"
-                elif msg.user.id == playerok_bot.account.id:
+                    display_username = username
+                elif user_id and str(playerok_bot.account.id) == user_id:
                     emoji = "🤖"  # Вы (продавец)
-                else:
+                    display_username = username or "Вы"
+                elif username:
                     emoji = "👤"  # Покупатель
+                    display_username = username
+                else:
+                    emoji = "🔔"  # Сообщение без user (часто системные/уведомления)
+                    display_username = _chat_fallback_sender_name(
+                        chat_id=callback_data.chat_id,
+                        chat_obj=chat_obj,
+                        account=playerok_bot.account,
+                    )
                 
                 # Форматируем время
                 try:
@@ -214,9 +261,9 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
                     continue
 
                 if msg_text:
-                    line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n<blockquote>{final_text}</blockquote>\n"
+                    line = f"{emoji} <b>{html.escape(display_username)}</b> ({msg_time}):\n<blockquote>{final_text}</blockquote>\n"
                 else:
-                    line = f"{emoji} <b>{html.escape(msg.user.username)}</b> ({msg_time}):\n"
+                    line = f"{emoji} <b>{html.escape(display_username)}</b> ({msg_time}):\n"
                 if image_row:
                     line += image_row
                     line += '\n'
@@ -258,6 +305,7 @@ async def callback_show_chat_history(callback: CallbackQuery, callback_data: cal
             disable_web_page_preview=True,
             parse_mode="HTML"
         )
+        await callback.answer()
         
     except Exception as e:
         await callback.answer(f"❌ Ошибка загрузки истории: {str(e)}", show_alert=True)

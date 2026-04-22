@@ -9,6 +9,8 @@ from .. import callback_datas as calls
 START_SHORTCUT_MAIN_MENU = "🏠 Главное меню"
 START_SHORTCUT_DEALS = "💼 Сделки"
 START_SHORTCUT_ITEMS = "📦 Товары"
+START_SHORTCUT_CHATS = "💬 Чаты"
+START_SHORTCUT_PROFILE = "👤 Профиль"
 
 
 def menu_text():
@@ -49,7 +51,11 @@ def start_shortcuts_kb() -> ReplyKeyboardMarkup:
             [
                 KeyboardButton(text=START_SHORTCUT_DEALS),
                 KeyboardButton(text=START_SHORTCUT_ITEMS),
-            ]
+            ],
+            [
+                KeyboardButton(text=START_SHORTCUT_CHATS),
+                KeyboardButton(text=START_SHORTCUT_PROFILE),
+            ],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,

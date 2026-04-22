@@ -37,4 +37,5 @@ from .quick_replies import *
 from .config_backup import *
 from .deals import *
 from .items import *
+from .chats import *
 from .item_card import *

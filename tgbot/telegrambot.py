@@ -165,6 +165,7 @@ class TelegramBot:
                 BotCommand(command="profile", description="🏠 Профиль Playerok"),
                 BotCommand(command="deals", description="🧾 Поиск сделок"),
                 BotCommand(command="items", description="📦 Товары аккаунта"),
+                BotCommand(command="chats", description="💬 Чаты аккаунта"),
                 BotCommand(command="restart", description="🔄 Перезагрузить бота"),
                 BotCommand(command="update", description="⬆️ Обновить бота"),
                 BotCommand(command="playerok_status", description="🔰 Проверить авторизацию в аккаунте"),
