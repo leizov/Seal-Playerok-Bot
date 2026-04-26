@@ -750,6 +750,27 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
 
 @router.callback_query(F.data == ONBOARDING_CANCEL_CB)
 async def callback_onboarding_cancel(callback: types.CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    onboarding_ua_choice_states = {
+        states.SystemStates.waiting_for_playerok_onboarding_choose_user_agent.state,
+        states.SystemStates.waiting_for_playerok_onboarding_user_agent.state,
+        states.SystemStates.waiting_for_playerok_onboarding_proxy.state,
+    }
+    if current_state in onboarding_ua_choice_states:
+        await state.set_state(states.SystemStates.waiting_for_playerok_onboarding_choose_user_agent)
+        _set_recovery_dialog_active(callback.from_user.id, True)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            callback=callback,
+            text=(
+                "✅ Cookies получены.\n\n"
+                "Шаг 2/3: хотите ввести User-Agent вручную?"
+            ),
+            reply_markup=_onboarding_ua_choice_kb(),
+        )
+        return
+
     await state.set_state(None)
     await state.set_data({})
     _set_recovery_dialog_active(callback.from_user.id, False)
@@ -950,6 +971,26 @@ async def callback_recovery_open(callback: types.CallbackQuery, state: FSMContex
 
 @router.callback_query(F.data == RECOVERY_CANCEL_CB)
 async def callback_recovery_cancel(callback: types.CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    recovery_ua_choice_states = {
+        states.SystemStates.waiting_for_playerok_recovery_choose_user_agent.state,
+        states.SystemStates.waiting_for_playerok_recovery_user_agent.state,
+    }
+    if current_state in recovery_ua_choice_states:
+        await state.set_state(states.SystemStates.waiting_for_playerok_recovery_choose_user_agent)
+        _set_recovery_dialog_active(callback.from_user.id, True)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            callback=callback,
+            text=(
+                "✅ Cookies получены.\n\n"
+                "Хотите ввести User-Agent перед повторной авторизацией?"
+            ),
+            reply_markup=_recovery_ua_choice_kb(),
+        )
+        return
+
     await state.set_state(None)
     await state.set_data({})
     _set_recovery_dialog_active(callback.from_user.id, False)
