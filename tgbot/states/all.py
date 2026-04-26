@@ -4,6 +4,13 @@ from .quick_replies import QuickReplyStates
 
 class SystemStates(StatesGroup):
     waiting_for_password = State()
+    waiting_for_playerok_onboarding_cookies = State()
+    waiting_for_playerok_onboarding_choose_user_agent = State()
+    waiting_for_playerok_onboarding_user_agent = State()
+    waiting_for_playerok_onboarding_proxy = State()
+    waiting_for_playerok_recovery_cookies = State()
+    waiting_for_playerok_recovery_choose_user_agent = State()
+    waiting_for_playerok_recovery_user_agent = State()
 
 
 class ActionsStates(StatesGroup):

@@ -202,6 +202,7 @@ from core.plugins import (
 )
 from core.handlers import call_bot_event
 from core.proxy_utils import normalize_proxy, validate_proxy
+from tgbot.cookie_guide import COOKIE_COLLECTION_GUIDE_TEXT, COOKIE_SUPPORTED_INPUTS_TEXT
 from updater import check_for_updates
 
 
@@ -212,8 +213,6 @@ asyncio.set_event_loop(main_loop)
 
 init_colorama()
 init_main_loop(main_loop)
-
-
 
 async def start_telegram_bot():
     from tgbot.telegrambot import TelegramBot
@@ -291,7 +290,6 @@ def check_and_configure_config():
 
     # Проверяем, нужна ли интерактивная настройка
     needs_config = (
-        not config["playerok"]["api"]["token"] or
         not config["telegram"]["api"]["token"] or
         not config["telegram"]["bot"]["password"]
     )
@@ -307,8 +305,6 @@ def check_and_configure_config():
         print("  не завершена. Интерактивный ввод невозможен.")
         print("")
         print("  Отсутствуют:")
-        if not config["playerok"]["api"]["token"]:
-            print("    - Токен Playerok")
         if not config["telegram"]["api"]["token"]:
             print("    - Токен Telegram бота")
         if not config["telegram"]["bot"]["password"]:
@@ -333,6 +329,7 @@ def check_and_configure_config():
         try:
             Account(
                 token=config["playerok"]["api"]["token"],
+                cookies=config["playerok"]["api"].get("cookies", ""),
                 user_agent=config["playerok"]["api"]["user_agent"],
                 requests_timeout=config["playerok"]["api"]["requests_timeout"],
                 proxy=config["playerok"]["api"]["proxy"] or None
@@ -345,6 +342,7 @@ def check_and_configure_config():
         try:
             acc = Account(
                 token=config["playerok"]["api"]["token"],
+                cookies=config["playerok"]["api"].get("cookies", ""),
                 user_agent=config["playerok"]["api"]["user_agent"],
                 requests_timeout=config["playerok"]["api"]["requests_timeout"],
                 proxy=config["playerok"]["api"]["proxy"] or None
@@ -593,85 +591,6 @@ def check_and_configure_config():
             return False
         return True
 
-    while not config["playerok"]["api"]["token"]:
-        while not config["playerok"]["api"]["token"]:
-            print(f"\n{Fore.WHITE}Введите {Fore.LIGHTBLUE_EX}токен {Fore.WHITE}вашего Playerok аккаунта. Его можно узнать из Cookie-данных, воспользуйтесь расширением Cookie-Editor."
-                f"\n  {Fore.WHITE}· Пример: eyJhbGciOiJIUzI1NiIsInR5cCI1IkpXVCJ9.eyJzdWIiOiIxZWUxMzg0Ni...")
-            token = input(f"  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
-            if is_token_valid(token):
-                config["playerok"]["api"]["token"] = token
-                sett.set("config", config)
-                print(f"\n{Fore.GREEN}Токен успешно сохранён в конфиг.")
-            else:
-                print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный токен. Убедитесь, что он соответствует формату и попробуйте ещё раз.")
-
-        while not config["playerok"]["api"]["user_agent"]:
-            print(f"\n{Fore.WHITE}Введите {Fore.LIGHTMAGENTA_EX}User Agent {Fore.WHITE}вашего браузера. Его можно скопировать на сайте {Fore.LIGHTWHITE_EX}https://whatmyuseragent.com. Или вы можете пропустить этот параметр, нажав Enter."
-                f"\n  {Fore.WHITE}· Пример: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
-            user_agent = input(f"  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
-            if not user_agent:
-                print(f"\n{Fore.YELLOW}Вы пропустили ввод User Agent. Учтите, что в таком случае бот может работать нестабильно.")
-                break
-            if is_user_agent_valid(user_agent):
-                config["playerok"]["api"]["user_agent"] = user_agent
-                sett.set("config", config)
-                print(f"\n{Fore.GREEN}User Agent успешно сохранён в конфиг.")
-            else:
-                print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный User Agent. Убедитесь, что в нём нет русских символов и попробуйте ещё раз.")
-
-        while not config["playerok"]["api"]["proxy"]:
-            print(f"\n{Fore.WHITE}Введите {Fore.LIGHTBLUE_EX}Прокси {Fore.WHITE}в одном из форматов:")
-            print(f"  {Fore.LIGHTGREEN_EX}HTTP/HTTPS:{Fore.WHITE}")
-            print(f"    · ip:port:user:password")
-            print(f"    · user:password@ip:port")
-            print(f"    · ip:port (без авторизации)")
-            print(f"  {Fore.LIGHTMAGENTA_EX}SOCKS5:{Fore.WHITE}")
-            print(f"    · socks5://user:password@ip:port")
-            print(f"    · socks5://ip:port (без авторизации)")
-            print(f"\n  {Fore.WHITE}Пример HTTP: {Fore.LIGHTWHITE_EX}91.221.39.249:63880:KSbmS3e4:PXHYZPbB")
-            print(f"  {Fore.WHITE}Пример SOCKS5: {Fore.LIGHTWHITE_EX}socks5://KSbmS3e4:PXHYZPbB@91.221.39.249:63880")
-            print(f"\n  {Fore.YELLOW}Если не хотите использовать прокси - нажмите Enter.")
-            proxy = input(f"\n  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
-            if not proxy:
-                print(f"\n{Fore.WHITE}Вы пропустили ввод прокси.")
-                break
-            if is_proxy_valid(proxy):
-                normalized = normalize_proxy(proxy)
-                config["playerok"]["api"]["proxy"] = normalized
-                sett.set("config", config)
-                print(f"\n{Fore.GREEN}Прокси успешно сохранён в конфиг.")
-
-                # Проверяем прокси сразу после ввода
-                proxy_works = is_proxy_working(normalized)
-
-                if not proxy_works:
-                    print(f"\n{Fore.WHITE}Хотите:")
-                    print(f"  1 - Использовать этот прокси (может быть медленный, но рабочий)")
-                    print(f"  2 - Ввести другой прокси")
-                    print(f"  3 - Продолжить без прокси")
-                    choice = input(f"\n  {Fore.WHITE}> Ваш выбор (1/2/3): {Fore.LIGHTWHITE_EX}").strip()
-
-                    if choice == "1":
-                        print(f"\n{Fore.GREEN}Прокси будет использован в работе бота.")
-                        break  # Выходим из цикла ввода прокси
-                    elif choice == "2":
-                        # Очищаем прокси и продолжаем цикл для нового ввода
-                        config["playerok"]["api"]["proxy"] = ""
-                        sett.set("config", config)
-                        continue
-                    elif choice == "3":
-                        config["playerok"]["api"]["proxy"] = ""
-                        sett.set("config", config)
-                        print(f"\n{Fore.WHITE}Продолжаем без прокси.")
-                        break
-                    else:
-                        print(f"\n{Fore.LIGHTRED_EX}Неверный выбор. Используем текущий прокси.")
-                        break
-                else:
-                    break  # Прокси работает, выходим из цикла
-            else:
-                print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный Прокси. Убедитесь, что он соответствует формату и попробуйте ещё раз.")
-
     # Проверка Telegram бота только при первичном вводе токена
     tg_token_is_new = not config["telegram"]["api"]["token"]
     tg_proxy_is_empty = not (config["telegram"]["api"].get("proxy") or "").strip()
@@ -759,13 +678,6 @@ def check_and_configure_config():
         else:
             print(f"\n{Fore.LIGHTRED_EX}Ваш пароль не подходит. Убедитесь, что он соответствует формату и не является лёгким и попробуйте ещё раз.")
 
-    if not is_pl_account_working():
-        print(f"\n{Fore.LIGHTRED_EX}Не удалось подключиться к вашему Playerok аккаунту.")
-        print(f"{Fore.YELLOW}Бот продолжит работу. Измените настройки через Telegram бота если нужно.")
-        logger.warning(f"{Fore.YELLOW}Проверка Playerok аккаунта не прошла, но продолжаем запуск...")
-    else:
-        logger.info(f"{Fore.WHITE}Playerok аккаунт успешно авторизован.")
-
     # if is_pl_account_banned():
     #     print(f"{Fore.LIGHTRED_EX}\nВаш Playerok аккаунт забанен! Увы, я не могу запустить бота на заблокированном аккаунте...")
     #     config["playerok"]["api"]["token"] = ""
@@ -784,7 +696,6 @@ if __name__ == "__main__":
         core_utils.install_requirements('requirements.txt')
         patch_requests()
         setup_logger()
-
         set_title(f"Seal Playerok Bot v{VERSION}")
         print(f"""
 {Fore.CYAN}    ～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～～
@@ -900,13 +811,10 @@ if __name__ == "__main__":
                 notification_text = (
                     "🚨 <b>CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ!</b>\n\n"
                     "❌ Бот не может выполнять запросы к Playerok API.\n\n"
-                    "🛠 <b>Инструкция по исправлению:</b>\n"
-                    "1\ufe0f⃣ Перезайдите на playerok.com в браузере\n"
-                    "2\ufe0f⃣ Скопируйте новый токен (Cookie: token=...)\n"
-                    "3\ufe0f⃣ Смените токен через этот бот:\n"
-                    "   • 🔧 <b>Настройки</b> → <b>🔑 Аккаунт</b> → <b>🎫 Токен</b>\n"
-                    "4\ufe0f⃣ При необходимости смените прокси и user-agent\n"
-                    "5\ufe0f⃣ Перезапустите бота\n\n"
+                    f"{COOKIE_SUPPORTED_INPUTS_TEXT}\n\n"
+                    f"{COOKIE_COLLECTION_GUIDE_TEXT}\n\n"
+                    "После отправки cookies при необходимости смените прокси и User-Agent,\n"
+                    "затем перезапустите бота.\n\n"
                     "⚠️ <b>Бот остановлен.</b> Настройки сохранены.\n"
                     "Измените данные через этот бот и перезапустите."
                 )
@@ -930,12 +838,13 @@ if __name__ == "__main__":
         print(f"{Fore.LIGHTRED_EX}❌ CLOUDFLARE ЗАБЛОКИРОВАЛ ЗАПРОСЫ!")
         print(f"{Fore.LIGHTRED_EX}{'='*60}")
         print(f"\n{Fore.YELLOW}Требуется смена данных для доступа к API:")
-        print(f"{Fore.WHITE}  1. Перезайдите на playerok.com в браузере")
-        print(f"{Fore.WHITE}  2. Скопируйте новый токен (Cookie: token=...)")
-        print(f"{Fore.WHITE}  3. Смените токен через Telegram бот:")
-        print(f"{Fore.LIGHTWHITE_EX}     🔧 Настройки → 🔑 Аккаунт → 🎫 Токен")
-        print(f"{Fore.WHITE}  4. При необходимости смените прокси и user-agent")
-        print(f"{Fore.WHITE}  5. Перезапустите бота")
+        print(f"{Fore.WHITE}  {COOKIE_SUPPORTED_INPUTS_TEXT}")
+        print("")
+        for guide_line in COOKIE_COLLECTION_GUIDE_TEXT.splitlines():
+            print(f"{Fore.WHITE}  {guide_line}")
+        print("")
+        print(f"{Fore.WHITE}  После отправки cookies при необходимости смените прокси и User-Agent.")
+        print(f"{Fore.WHITE}  Перезапустите бота.")
         print(f"\n{Fore.GREEN}✅ Настройки сохранены. Измените через TG и перезапустите.")
         print(f"{Fore.LIGHTRED_EX}{'='*60}\n")
 
@@ -960,3 +869,4 @@ if __name__ == "__main__":
     # Если run_forever() остановился через shutdown() - нормальный выход
     logger.info(f"{Fore.LIGHTCYAN_EX}🦭 Бот корректно завершил работу. 🌊")
     raise SystemExit(0)  # Нормальный выход (код 0)
+

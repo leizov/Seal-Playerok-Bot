@@ -9,8 +9,9 @@ def account_text():
     config = sett.get("config")
     
     # Токен с маскировкой
-    token = config["playerok"]["api"]["token"]
+    token = str(config["playerok"]["api"].get("token") or "")
     token_display = f"{token[:5]}{'*' * (len(token) - 5) if len(token) > 5 else ''}" if token else "❌ Не задан"
+    cookies_status = "Привязаны" if str(config["playerok"]["api"].get("cookies") or "").strip() else "❌ Не заданы"
     
     # User-Agent
     user_agent = config["playerok"]["api"]["user_agent"] or "❌ Не задан"
@@ -25,6 +26,7 @@ def account_text():
         👤 <b>Управление аккаунтом</b>
 
         <b>Текущие настройки:</b>
+        ┣ Cookies: <b>{cookies_status}</b>
         ┣ Токен: <code>{token_display}</code>
         ┣ User-Agent: <code>{user_agent}</code>
         ┣ Прокси: <code>{proxy}</code>
@@ -39,7 +41,7 @@ def account_kb():
     rows = [
         [
             InlineKeyboardButton(
-                text="🔑 Изменить токен",
+                text="🍪 Изменить cookies",
                 callback_data=calls.AccountAction(action="change_token").pack()
             )
         ],

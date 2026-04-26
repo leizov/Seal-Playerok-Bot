@@ -9,6 +9,9 @@ import email.utils
 import tempfile
 import shutil
 import hashlib
+import re
+import uuid
+from urllib.parse import urlsplit
 from datetime import datetime
 from curl_cffi.requests import Session as CurlSession, Response as CurlResponse, exceptions as curl_exceptions
 from curl_cffi import CurlMime
@@ -18,6 +21,7 @@ from . import types
 from .exceptions import *
 from .parser import *
 from .enums import *
+import websocket
 
 try:
     from core.error_stats import (
@@ -252,7 +256,9 @@ class Account:
             proxy: str = None,
             requests_timeout: int = 10,
             request_max_retries: int = 7,
-            auid: str = None
+            auid: str = None,
+            cookies: str = "",
+            cookie_persist_debounce_seconds: int = 30,
         ):
         if hasattr(self, "_initialized"):
             # Singleton Account может остаться в полусозданном состоянии
@@ -261,9 +267,18 @@ class Account:
             self.token = token
             self.user_agent = user_agent
             self.auid = auid
+            self.cookie_persist_debounce_seconds = max(5, int(cookie_persist_debounce_seconds or 30))
             self.requests_timeout = requests_timeout
             self.proxy = proxy
             self.base_url = "https://playerok.com"
+            if not hasattr(self, "_cookie_header"):
+                self._cookie_header = ""
+            if not hasattr(self, "cookies"):
+                self.cookies = {}
+            if not hasattr(self, "_last_cookie_persist_ts"):
+                self._last_cookie_persist_ts = 0.0
+            if not hasattr(self, "_last_persisted_cookie_header"):
+                self._last_persisted_cookie_header = ""
 
             if self.proxy:
                 if self.proxy.startswith("socks5://") or self.proxy.startswith("socks4://"):
@@ -274,6 +289,7 @@ class Account:
             else:
                 self.__proxy_string = None
 
+            self._prepare_playwright_runtime_paths()
             self.request_max_retries = request_max_retries
             if not hasattr(self, "id"):
                 self.id = None
@@ -288,6 +304,7 @@ class Account:
 
             if not hasattr(self, "_Account__logger"):
                 self.__logger = getLogger("playerokapi")
+            self._apply_cookie_header(cookies, persist=False)
             self._prepare_runtime_cert_file()
 
             try:
@@ -305,11 +322,16 @@ class Account:
         self.user_agent = user_agent
         """ Юзер-агент браузера. """
         self.auid = auid
+        self.cookie_persist_debounce_seconds = max(5, int(cookie_persist_debounce_seconds or 30))
         self.requests_timeout = requests_timeout
         """ Таймаут ожидания ответов на запросы. """
         self.proxy = proxy
         """ Прокси. """
         self.base_url = "https://playerok.com"
+        self._cookie_header = ""
+        self.cookies: dict[str, str] = {}
+        self._last_cookie_persist_ts = 0.0
+        self._last_persisted_cookie_header = ""
         """ Базовый URL для всех запросов. """
         # Обработка разных типов прокси
         if self.proxy:
@@ -324,6 +346,8 @@ class Account:
             self.__proxy_string = None
         """ Строка прокси. """
 
+        self._prepare_playwright_runtime_paths()
+        self._apply_cookie_header(cookies, persist=False)
         self.request_max_retries = request_max_retries
         """ Максимальное количество повторных попыток отправки запроса. """
 
@@ -389,6 +413,10 @@ class Account:
                     verify=verify_path,
                 )
                 self._runtime_cert_path = verify_path
+                try:
+                    self._apply_cookie_header(self._build_default_cookie_header(), persist=False)
+                except Exception:
+                    pass
                 return
             except Exception as session_error:
                 last_session_error = session_error
@@ -402,6 +430,697 @@ class Account:
             proxy=self.__proxy_string,
             timeout=self.requests_timeout,
         )
+
+        try:
+            self._apply_cookie_header(self._build_default_cookie_header(), persist=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _parse_cookie_header(cookie_header: str | None) -> dict[str, str]:
+        parsed: dict[str, str] = {}
+        raw = str(cookie_header or "").strip()
+        if not raw:
+            return parsed
+
+        for part in raw.split(";"):
+            chunk = part.strip()
+            if not chunk or "=" not in chunk:
+                continue
+            key, value = chunk.split("=", 1)
+            key = key.strip()
+            if not key:
+                continue
+            parsed[key] = value.strip()
+        return parsed
+
+    @staticmethod
+    def _normalize_cookie_map(cookie_map: Mapping[str, Any] | None) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        if not isinstance(cookie_map, Mapping):
+            return normalized
+        for key, value in cookie_map.items():
+            cookie_key = str(key or "").strip()
+            if not cookie_key:
+                continue
+            normalized[cookie_key] = str(value or "").strip()
+        return normalized
+
+    def _serialize_cookie_map(self, cookie_map: Mapping[str, Any] | None) -> str:
+        normalized = self._normalize_cookie_map(cookie_map)
+        if not normalized:
+            return ""
+
+        ordered_keys: list[str] = []
+        if "token" in normalized:
+            ordered_keys.append("token")
+        if "auid" in normalized and "auid" not in ordered_keys:
+            ordered_keys.append("auid")
+
+        for key in sorted(normalized.keys()):
+            if key not in ordered_keys:
+                ordered_keys.append(key)
+
+        return "; ".join(f"{key}={normalized[key]}" for key in ordered_keys)
+
+    def _build_default_cookie_header(self) -> str:
+        cookie_map = self._normalize_cookie_map(getattr(self, "cookies", None))
+        if self.token and not cookie_map.get("token"):
+            cookie_map["token"] = str(self.token)
+        if self.auid and not cookie_map.get("auid"):
+            cookie_map["auid"] = str(self.auid)
+        return self._serialize_cookie_map(cookie_map)
+
+    def _persist_cookie_state_if_needed(self, force: bool = False) -> None:
+        cookie_header = self._build_default_cookie_header()
+        if not cookie_header:
+            return
+
+        now_ts = time.time()
+        if not force:
+            if cookie_header == str(getattr(self, "_last_persisted_cookie_header", "") or ""):
+                return
+            debounce_seconds = max(5, int(getattr(self, "cookie_persist_debounce_seconds", 30) or 30))
+            last_ts = float(getattr(self, "_last_cookie_persist_ts", 0.0) or 0.0)
+            if now_ts - last_ts < debounce_seconds:
+                return
+
+        try:
+            from settings import Settings as sett
+
+            config = sett.get("config") or {}
+            playerok_cfg = config.setdefault("playerok", {})
+            api_cfg = playerok_cfg.setdefault("api", {})
+
+            changed = False
+            if str(api_cfg.get("cookies") or "") != cookie_header:
+                api_cfg["cookies"] = cookie_header
+                changed = True
+
+            token_value = str(self.token or "").strip()
+            if token_value and str(api_cfg.get("token") or "") != token_value:
+                api_cfg["token"] = token_value
+                changed = True
+
+            if changed:
+                sett.set("config", config)
+                self._last_cookie_persist_ts = now_ts
+                self._last_persisted_cookie_header = cookie_header
+        except Exception as persist_error:
+            self.__logger.debug(f"Не удалось сохранить cookies в config: {persist_error}")
+
+    def _apply_cookie_header(self, cookie_header: str | None, persist: bool = False) -> None:
+        parsed = self._parse_cookie_header(cookie_header)
+        if self.token and not parsed.get("token"):
+            parsed["token"] = str(self.token)
+        if self.auid and not parsed.get("auid"):
+            parsed["auid"] = str(self.auid)
+
+        self.cookies = parsed
+        self._cookie_header = self._serialize_cookie_map(parsed)
+
+        token_value = str(parsed.get("token") or "").strip()
+        if token_value:
+            self.token = token_value
+
+        auid_value = str(parsed.get("auid") or "").strip()
+        if auid_value:
+            self.auid = auid_value
+
+        session_obj = getattr(self, "_Account__curl_session", None)
+        cookie_jar = getattr(session_obj, "cookies", None)
+        if cookie_jar is not None:
+            for key, value in parsed.items():
+                if not value:
+                    continue
+                try:
+                    cookie_jar.set(key, value, domain=".playerok.com", path="/")
+                except Exception:
+                    try:
+                        cookie_jar.set(key, value)
+                    except Exception:
+                        pass
+
+        if persist:
+            self._persist_cookie_state_if_needed(force=True)
+
+    def apply_external_cookie_header(self, cookie_header: str) -> None:
+        """
+        Применяет cookies, синхронизирует token/auid и сохраняет изменения в config.
+        """
+        self._apply_cookie_header(cookie_header, persist=True)
+
+    def _sync_cookies_from_response(self, response: CurlResponse | None) -> None:
+        merged = self._normalize_cookie_map(getattr(self, "cookies", None))
+
+        def _merge_cookie_container(container: Any) -> None:
+            if container is None:
+                return
+            try:
+                iterator = iter(container)
+            except Exception:
+                iterator = []
+            for cookie in iterator:
+                name = str(getattr(cookie, "name", "") or "").strip()
+                if not name:
+                    continue
+                value = str(getattr(cookie, "value", "") or "").strip()
+                if not value:
+                    continue
+                merged[name] = value
+
+        try:
+            _merge_cookie_container(getattr(response, "cookies", None))
+        except Exception:
+            pass
+
+        try:
+            session_obj = getattr(self, "_Account__curl_session", None)
+            _merge_cookie_container(getattr(session_obj, "cookies", None))
+        except Exception:
+            pass
+
+        if self.token and not merged.get("token"):
+            merged["token"] = str(self.token)
+        if self.auid and not merged.get("auid"):
+            merged["auid"] = str(self.auid)
+
+        new_cookie_header = self._serialize_cookie_map(merged)
+        if not new_cookie_header:
+            return
+
+        if new_cookie_header != str(getattr(self, "_cookie_header", "") or ""):
+            self.cookies = merged
+            self._cookie_header = new_cookie_header
+            if merged.get("token"):
+                self.token = str(merged["token"])
+            if merged.get("auid"):
+                self.auid = str(merged["auid"])
+
+        self._persist_cookie_state_if_needed(force=False)
+
+    def _prepare_playwright_runtime_paths(self) -> None:
+        auid_seed = str(self.auid or "")
+        ua_seed = str(self.user_agent or "")
+        proxy_seed = str(getattr(self, "_Account__proxy_string", "") or "")
+        identity_seed = f"{auid_seed}|{ua_seed}|{proxy_seed}|{self.base_url}"
+        digest = hashlib.sha256(identity_seed.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+        runtime_dir = os.path.join(tempfile.gettempdir(), "sealplayerokbot", "playwright", digest)
+        self.playwright_runtime_dir = runtime_dir
+        self.user_data_dir = os.path.join(runtime_dir, "user-data")
+        self.storage_state_path = os.path.join(runtime_dir, "storage-state.json")
+
+        try:
+            os.makedirs(self.user_data_dir, exist_ok=True)
+        except Exception:
+            pass
+
+    def request_email_auth_code(self, email: str) -> bool:
+        email_value = str(email or "").strip()
+        if not email_value:
+            raise ValueError("auth email is empty")
+
+        payload = {
+            "operationName": "getEmailAuthCode",
+            "variables": {"email": email_value},
+            "query": QUERIES.get("getEmailAuthCode"),
+        }
+        response = self.request(
+            "post",
+            f"{self.base_url}/graphql",
+            {"accept": "*/*"},
+            payload,
+        )
+        response_json = response.json() or {}
+        return bool((response_json.get("data") or {}).get("getEmailAuthCode"))
+
+    def verify_email_auth_code(self, email: str, code: str) -> dict[str, Any]:
+        email_value = str(email or "").strip()
+        code_value = re.sub(r"\D+", "", str(code or ""))
+        if not email_value:
+            raise ValueError("auth email is empty")
+        if not code_value:
+            raise ValueError("otp code is empty")
+
+        payload = {
+            "operationName": "checkEmailAuthCode",
+            "variables": {"input": {"email": email_value, "code": code_value}},
+            "query": QUERIES.get("checkEmailAuthCode"),
+        }
+        response = self.request(
+            "post",
+            f"{self.base_url}/graphql",
+            {"accept": "*/*"},
+            payload,
+        )
+        response_json = response.json() or {}
+        viewer_data = (response_json.get("data") or {}).get("checkEmailAuthCode")
+        if not isinstance(viewer_data, dict):
+            raise UnauthorizedError()
+        return viewer_data
+
+    @staticmethod
+    def _detect_antibot_vendor_from_html(text: str | None) -> str | None:
+        if not text:
+            return None
+        text_l = text.lower()
+
+        ddos_guard_signatures = (
+            "<title>ddos-guard</title>",
+            "/.well-known/ddos-guard/js-challenge/",
+            "check.ddos-guard.net/check.js",
+            "подождите несколько секунд",
+        )
+        cloudflare_signatures = (
+            "<title>just a moment...</title>",
+            "window._cf_chl_opt",
+            "cf-browser-verification",
+            "cloudflare ray id",
+            "enable javascript and cookies to continue",
+        )
+
+        if any(sig in text_l for sig in ddos_guard_signatures):
+            return "ddos_guard"
+        if any(sig in text_l for sig in cloudflare_signatures):
+            return "cloudflare"
+        return None
+
+    def _build_playwright_proxy_config(self) -> dict[str, str] | None:
+        proxy_string = str(self.__proxy_string or "").strip()
+        if not proxy_string:
+            return None
+        try:
+            parsed = urlsplit(proxy_string)
+            if not parsed.scheme or not parsed.hostname:
+                return {"server": proxy_string}
+
+            server = f"{parsed.scheme}://{parsed.hostname}"
+            if parsed.port:
+                server = f"{server}:{parsed.port}"
+
+            proxy_cfg: dict[str, str] = {"server": server}
+            if parsed.username:
+                proxy_cfg["username"] = parsed.username
+            if parsed.password:
+                proxy_cfg["password"] = parsed.password
+            return proxy_cfg
+        except Exception:
+            return {"server": proxy_string}
+
+    def fetch_browser_snapshot_via_playwright(
+        self,
+        url: str | None = None,
+        wait_seconds: float = 3.0,
+        timeout_seconds: float = 45.0,
+        force_disable_proxy: bool = False,
+        fallback_without_proxy: bool = False,
+        ignore_https_errors: bool = False,
+        storage_state_path: str | None = None,
+        user_data_dir: str | None = None,
+        use_persistent_context: bool = True,
+        persist_state: bool = True,
+        return_empty_on_antibot: bool = False,
+        max_antibot_checks: int = 10,
+    ) -> dict[str, Any]:
+        """
+        Запускает Chromium через Playwright и возвращает снимок страницы:
+        запрос, ответ, cookies и HTML.
+        """
+        target_url = str(url or self.base_url).strip() or self.base_url
+        wait_ms = max(0, int(float(wait_seconds) * 1000))
+        timeout_ms = max(1000, int(float(timeout_seconds) * 1000))
+        antibot_checks = max(1, int(max_antibot_checks))
+
+        effective_storage_state_path = str(
+            storage_state_path or getattr(self, "storage_state_path", "") or ""
+        ).strip()
+        effective_user_data_dir = str(
+            user_data_dir or getattr(self, "user_data_dir", "") or ""
+        ).strip()
+        if not effective_user_data_dir:
+            effective_user_data_dir = os.path.join(
+                tempfile.gettempdir(),
+                "sealplayerokbot",
+                "playwright",
+                "default-user-data",
+            )
+
+        self.__logger.info(
+            "Playwright: запускаю браузер для получения cookies "
+            f"(mode={'persistent' if use_persistent_context else 'ephemeral'}, "
+            f"proxy_disabled={force_disable_proxy}, ignore_https_errors={ignore_https_errors})."
+        )
+
+        try:
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+            from playwright.sync_api import sync_playwright
+        except Exception as import_error:
+            self.__logger.warning(f"Playwright: модуль недоступен ({import_error}).")
+            return {
+                "ok": False,
+                "reason": "playwright_import_error",
+                "vendor": None,
+                "error": str(import_error),
+                "url": {"requested": target_url, "final": ""},
+                "title": "",
+                "response": {"headers": {}, "text": ""},
+                "cookies": {"list": [], "map": {}, "header": ""},
+                "meta": {
+                    "user_agent": self.user_agent or "",
+                    "proxy": "" if force_disable_proxy else (self.__proxy_string or ""),
+                    "proxy_disabled": bool(force_disable_proxy),
+                    "ignore_https_errors": bool(ignore_https_errors),
+                    "context_mode": "persistent" if use_persistent_context else "ephemeral",
+                    "user_data_dir": effective_user_data_dir if use_persistent_context else "",
+                    "storage_state_path": effective_storage_state_path,
+                    "timestamp": int(time.time()),
+                },
+            }
+
+        browser = None
+        context = None
+        page = None
+
+        try:
+            with sync_playwright() as playwright:
+                proxy_cfg = None if force_disable_proxy else self._build_playwright_proxy_config()
+
+                if use_persistent_context:
+                    try:
+                        os.makedirs(effective_user_data_dir, exist_ok=True)
+                    except Exception:
+                        pass
+
+                    persistent_kwargs: dict[str, Any] = {
+                        "user_data_dir": effective_user_data_dir,
+                        "headless": False,
+                        "channel": "chromium",
+                        "ignore_https_errors": ignore_https_errors,
+                        "locale": "ru-RU",
+                        "timezone_id": "Europe/Moscow",
+                        "viewport": {"width": 1366, "height": 768},
+                    }
+                    if self.user_agent:
+                        persistent_kwargs["user_agent"] = self.user_agent
+                    if proxy_cfg:
+                        persistent_kwargs["proxy"] = proxy_cfg
+
+                    context = playwright.chromium.launch_persistent_context(**persistent_kwargs)
+                    page = context.pages[0] if context.pages else context.new_page()
+                else:
+                    launch_kwargs: dict[str, Any] = {
+                        "headless": False,
+                        "channel": "chromium",
+                    }
+                    if proxy_cfg:
+                        launch_kwargs["proxy"] = proxy_cfg
+                    browser = playwright.chromium.launch(**launch_kwargs)
+
+                    context_kwargs: dict[str, Any] = {
+                        "ignore_https_errors": ignore_https_errors,
+                        "locale": "ru-RU",
+                        "timezone_id": "Europe/Moscow",
+                        "viewport": {"width": 1366, "height": 768},
+                    }
+                    if self.user_agent:
+                        context_kwargs["user_agent"] = self.user_agent
+                    if effective_storage_state_path and os.path.exists(effective_storage_state_path):
+                        context_kwargs["storage_state"] = effective_storage_state_path
+
+                    context = browser.new_context(**context_kwargs)
+                    page = context.new_page()
+
+                initial_cookies: list[dict[str, Any]] = []
+                if self.token:
+                    initial_cookies.append({
+                        "name": "token",
+                        "value": str(self.token),
+                        "domain": ".playerok.com",
+                        "path": "/",
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "Lax",
+                    })
+                if self.auid:
+                    initial_cookies.append({
+                        "name": "auid",
+                        "value": str(self.auid),
+                        "domain": ".playerok.com",
+                        "path": "/",
+                        "secure": True,
+                        "sameSite": "Lax",
+                    })
+                if initial_cookies:
+                    try:
+                        context.add_cookies(initial_cookies)
+                    except Exception:
+                        pass
+
+                latest_main_response: dict[str, Any] = {}
+
+                def _extract_headers(obj: Any) -> dict[str, str]:
+                    try:
+                        return dict(obj.all_headers() or {})
+                    except Exception:
+                        return dict(getattr(obj, "headers", {}) or {})
+
+                def _remember_main_document_response(resp_obj: Any) -> None:
+                    try:
+                        req_obj = getattr(resp_obj, "request", None)
+                        if req_obj is None:
+                            return
+
+                        req_resource_type = str(
+                            getattr(req_obj, "resource_type", "") or ""
+                        ).lower()
+                        if req_resource_type != "document":
+                            return
+
+                        req_frame = getattr(req_obj, "frame", None)
+                        try:
+                            main_frame = page.main_frame if page is not None else None
+                        except Exception:
+                            main_frame = None
+                        if req_frame is not None and main_frame is not None and req_frame != main_frame:
+                            return
+
+                        latest_main_response["status"] = int(
+                            getattr(resp_obj, "status", 0) or 0
+                        ) or None
+                        latest_main_response["url"] = str(
+                            getattr(resp_obj, "url", "") or ""
+                        )
+                        latest_main_response["headers"] = _extract_headers(resp_obj)
+                        latest_main_response["request"] = {
+                            "url": str(getattr(req_obj, "url", "") or target_url),
+                            "method": str(getattr(req_obj, "method", "GET") or "GET"),
+                            "headers": _extract_headers(req_obj),
+                            "post_data": getattr(req_obj, "post_data", None),
+                            "resource_type": str(
+                                getattr(req_obj, "resource_type", "") or "document"
+                            ),
+                        }
+                    except Exception:
+                        return
+
+                page.on("response", _remember_main_document_response)
+
+                navigation_response = page.goto(
+                    target_url,
+                    wait_until="domcontentloaded",
+                    timeout=timeout_ms,
+                )
+                if navigation_response is not None:
+                    _remember_main_document_response(navigation_response)
+                if wait_ms > 0:
+                    page.wait_for_timeout(wait_ms)
+
+                page_html = ""
+                antibot_vendor: str | None = None
+                for attempt in range(1, antibot_checks + 1):
+                    page_html = page.content()
+                    antibot_vendor = self._detect_antibot_vendor_from_html(page_html)
+                    if antibot_vendor is None:
+                        break
+                    vendor_title = "DDoS-Guard" if antibot_vendor == "ddos_guard" else "Cloudflare"
+                    self.__logger.warning(
+                        f"Playwright: обнаружена антибот-страница {vendor_title}. "
+                        f"Попытка {attempt}/{antibot_checks}."
+                    )
+                    if attempt < antibot_checks:
+                        page.wait_for_timeout(2000)
+
+                request_info: dict[str, Any] = {
+                    "url": target_url,
+                    "method": "GET",
+                    "headers": {},
+                    "post_data": None,
+                    "resource_type": "document",
+                }
+                response_headers: dict[str, str] = dict(
+                    latest_main_response.get("headers", {}) or {}
+                )
+                response_status: int | None = latest_main_response.get("status")
+                response_url = str(latest_main_response.get("url") or page.url)
+
+                if isinstance(latest_main_response.get("request"), dict):
+                    request_info = dict(latest_main_response.get("request") or request_info)
+
+                browser_cookies = context.cookies()
+                cookies_map: dict[str, str] = {}
+                for cookie in browser_cookies:
+                    name = str(cookie.get("name") or "")
+                    if not name:
+                        continue
+                    cookies_map[name] = str(cookie.get("value") or "")
+
+                try:
+                    page_title = page.title()
+                except Exception:
+                    page_title = ""
+
+                cookie_header = "; ".join(f"{k}={v}" for k, v in cookies_map.items())
+                ok = antibot_vendor is None
+                reason = None if ok else "antibot_detected"
+
+                if persist_state and effective_storage_state_path:
+                    try:
+                        os.makedirs(os.path.dirname(effective_storage_state_path), exist_ok=True)
+                        context.storage_state(path=effective_storage_state_path)
+                    except Exception as save_state_error:
+                        self.__logger.warning(
+                            f"Playwright: не удалось сохранить storage_state ({save_state_error})."
+                        )
+
+                result: dict[str, Any] = {
+                    "ok": ok,
+                    "reason": reason,
+                    "vendor": antibot_vendor,
+                    "url": {
+                        "requested": target_url,
+                        "final": response_url,
+                    },
+                    "status_code": response_status,
+                    "title": page_title,
+                    "request": request_info,
+                    "response": {
+                        "headers": response_headers,
+                        "text": page_html,
+                    },
+                    "cookies": {
+                        "list": browser_cookies,
+                        "map": cookies_map,
+                        "header": cookie_header,
+                    },
+                    "meta": {
+                        "user_agent": self.user_agent or "",
+                        "proxy": "" if force_disable_proxy else (self.__proxy_string or ""),
+                        "proxy_disabled": bool(force_disable_proxy),
+                        "ignore_https_errors": bool(ignore_https_errors),
+                        "context_mode": "persistent" if use_persistent_context else "ephemeral",
+                        "user_data_dir": effective_user_data_dir if use_persistent_context else "",
+                        "storage_state_path": effective_storage_state_path,
+                        "timestamp": int(time.time()),
+                    },
+                }
+
+                if not ok and return_empty_on_antibot:
+                    return {}
+                self.__logger.info(
+                    f"Playwright: данные страницы получены, cookies={len(browser_cookies)}, ok={ok}."
+                )
+                return result
+
+        except PlaywrightTimeoutError:
+            self.__logger.warning("Playwright: таймаут при открытии страницы.")
+            return {
+                "ok": False,
+                "reason": "timeout",
+                "vendor": None,
+                "url": {"requested": target_url, "final": ""},
+                "title": "",
+                "response": {"headers": {}, "text": ""},
+                "cookies": {"list": [], "map": {}, "header": ""},
+                "meta": {
+                    "user_agent": self.user_agent or "",
+                    "proxy": "" if force_disable_proxy else (self.__proxy_string or ""),
+                    "proxy_disabled": bool(force_disable_proxy),
+                    "ignore_https_errors": bool(ignore_https_errors),
+                    "context_mode": "persistent" if use_persistent_context else "ephemeral",
+                    "user_data_dir": effective_user_data_dir if use_persistent_context else "",
+                    "storage_state_path": effective_storage_state_path,
+                    "timestamp": int(time.time()),
+                },
+            }
+        except Exception as browser_error:
+            error_text = str(browser_error or "")
+            low_error = error_text.lower()
+            can_fallback_without_proxy = (
+                fallback_without_proxy
+                and not force_disable_proxy
+                and bool(self.__proxy_string)
+                and (
+                    "err_connection_closed" in low_error
+                    or "err_tunnel_connection_failed" in low_error
+                    or "err_proxy_connection_failed" in low_error
+                )
+            )
+
+            if can_fallback_without_proxy:
+                self.__logger.warning("Playwright: ошибка через прокси, повторяю попытку без прокси.")
+                return self.fetch_browser_snapshot_via_playwright(
+                    url=target_url,
+                    wait_seconds=wait_seconds,
+                    timeout_seconds=timeout_seconds,
+                    force_disable_proxy=True,
+                    fallback_without_proxy=False,
+                    ignore_https_errors=ignore_https_errors,
+                    storage_state_path=effective_storage_state_path,
+                    user_data_dir=effective_user_data_dir,
+                    use_persistent_context=use_persistent_context,
+                    persist_state=persist_state,
+                    return_empty_on_antibot=return_empty_on_antibot,
+                    max_antibot_checks=antibot_checks,
+                )
+
+            self.__logger.warning(f"Playwright: ошибка браузера ({browser_error}).")
+            return {
+                "ok": False,
+                "reason": "browser_error",
+                "vendor": None,
+                "error": error_text,
+                "url": {"requested": target_url, "final": ""},
+                "title": "",
+                "response": {"headers": {}, "text": ""},
+                "cookies": {"list": [], "map": {}, "header": ""},
+                "meta": {
+                    "user_agent": self.user_agent or "",
+                    "proxy": "" if force_disable_proxy else (self.__proxy_string or ""),
+                    "proxy_disabled": bool(force_disable_proxy),
+                    "ignore_https_errors": bool(ignore_https_errors),
+                    "context_mode": "persistent" if use_persistent_context else "ephemeral",
+                    "user_data_dir": effective_user_data_dir if use_persistent_context else "",
+                    "storage_state_path": effective_storage_state_path,
+                    "timestamp": int(time.time()),
+                },
+            }
+        finally:
+            try:
+                if page is not None and not page.is_closed():
+                    page.close()
+            except Exception:
+                pass
+            try:
+                if context is not None:
+                    context.close()
+            except Exception:
+                pass
+            try:
+                if browser is not None:
+                    browser.close()
+            except Exception:
+                pass
 
     def update_proxy(self, proxy: str | None):
         """
@@ -420,9 +1139,599 @@ class Account:
         else:
             self.__proxy_string = None
 
+        self._prepare_playwright_runtime_paths()
         # Пересоздаём клиенты с новым прокси
         self._refresh_clients()
         self.__logger.info(f"Прокси обновлён: {self.__proxy_string or 'отключён'}")
+
+    @staticmethod
+    def _build_ws_subscription_id(subscription_id: str | None = None) -> str:
+        prepared_id = str(subscription_id or "").strip()
+        return prepared_id if prepared_id else str(uuid.uuid4())
+
+    @staticmethod
+    def _normalize_ws_path(path: str) -> str:
+        prepared = str(path or "").strip()
+        if not prepared:
+            return "/"
+        if not prepared.startswith("/"):
+            return f"/{prepared}"
+        return prepared
+
+    def _resolve_ws_user_id(self, user_id: str | None = None) -> str:
+        resolved_user_id = str(user_id or self.id or "").strip()
+        if not resolved_user_id:
+            raise ValueError("Websocket Data: требуется user_id.")
+        return resolved_user_id
+
+    @staticmethod
+    def _resolve_ws_chat_id(chat_id: str | None = None) -> str:
+        resolved_chat_id = str(chat_id or "").strip()
+        if not resolved_chat_id:
+            raise ValueError("Websocket Data: требуется chat_id.")
+        return resolved_chat_id
+
+    def build_ws_connection_init_data(
+        self,
+        gql_path: str | None = None,
+        profile_username: str | None = None,
+        timezone_offset: int = -180,
+    ) -> dict[str, Any]:
+        """
+        Собирает payload websocket-пакета `connection_init`.
+
+        Если `gql_path` не указан, путь формируется автоматически:
+        `/profile/<username>/products`, когда известен username, иначе `/`.
+        """
+        resolved_path = str(gql_path or "").strip()
+        if not resolved_path:
+            resolved_username = str(profile_username or self.username or "").strip()
+            if resolved_username:
+                resolved_path = f"/profile/{resolved_username}/products"
+            else:
+                resolved_path = "/"
+
+        return {
+            "type": "connection_init",
+            "payload": {
+                "x-gql-op": "ws-subscription",
+                "x-gql-path": self._normalize_ws_path(resolved_path),
+                "x-timezone-offset": int(timezone_offset),
+            },
+        }
+
+    def build_ws_subscribe_data(
+        self,
+        operation_name: str,
+        variables: dict[str, Any] | None = None,
+        subscription_id: str | None = None,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Собирает универсальный websocket-пакет `subscribe`
+        для GraphQL-подписок.
+        """
+        prepared_operation = str(operation_name or "").strip()
+        if not prepared_operation:
+            raise ValueError("Websocket Data: требуется operation_name.")
+
+        resolved_query = str(query or QUERIES.get(prepared_operation) or "").strip()
+        if not resolved_query:
+            raise ValueError(
+                f"Websocket Data: отсутствует GraphQL query для операции '{prepared_operation}'."
+            )
+
+        return {
+            "id": self._build_ws_subscription_id(subscription_id),
+            "type": "subscribe",
+            "payload": {
+                "variables": variables or {},
+                "extensions": {},
+                "operationName": prepared_operation,
+                "query": resolved_query,
+            },
+        }
+
+    def build_ws_chat_updated_data(
+        self,
+        user_id: str | None = None,
+        subscription_id: str | None = None,
+        show_forbidden_image: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Собирает Data-пакет подписки `chatUpdated`.
+        """
+        resolved_user_id = self._resolve_ws_user_id(user_id)
+        return self.build_ws_subscribe_data(
+            operation_name="chatUpdated",
+            variables={
+                "filter": {"userId": resolved_user_id},
+                "showForbiddenImage": bool(show_forbidden_image),
+            },
+            subscription_id=subscription_id,
+        )
+
+    def build_ws_chat_marked_as_read_data(
+        self,
+        user_id: str | None = None,
+        subscription_id: str | None = None,
+        show_forbidden_image: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Собирает Data-пакет подписки `chatMarkedAsRead`.
+        """
+        resolved_user_id = self._resolve_ws_user_id(user_id)
+        return self.build_ws_subscribe_data(
+            operation_name="chatMarkedAsRead",
+            variables={
+                "filter": {"userId": resolved_user_id},
+                "showForbiddenImage": bool(show_forbidden_image),
+            },
+            subscription_id=subscription_id,
+        )
+
+    def build_ws_user_updated_data(
+        self,
+        user_id: str | None = None,
+        subscription_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Собирает Data-пакет подписки `userUpdated`.
+        """
+        resolved_user_id = self._resolve_ws_user_id(user_id)
+        return self.build_ws_subscribe_data(
+            operation_name="userUpdated",
+            variables={"userId": resolved_user_id},
+            subscription_id=subscription_id,
+        )
+
+    def build_ws_chat_message_created_data(
+        self,
+        chat_id: str,
+        subscription_id: str | None = None,
+        show_forbidden_image: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Собирает Data-пакет подписки `chatMessageCreated`.
+        """
+        resolved_chat_id = self._resolve_ws_chat_id(chat_id)
+        return self.build_ws_subscribe_data(
+            operation_name="chatMessageCreated",
+            variables={
+                "filter": {"chatId": resolved_chat_id},
+                "showForbiddenImage": bool(show_forbidden_image),
+            },
+            subscription_id=subscription_id,
+        )
+
+    def build_ws_default_data(
+        self,
+        user_id: str | None = None,
+        chat_id: str | None = None,
+        profile_username: str | None = None,
+        timezone_offset: int = -180,
+        show_forbidden_image: bool = True,
+    ) -> list[dict[str, Any]]:
+        """
+        Собирает базовый набор websocket Data-пакетов:
+        - connection_init
+        - chatUpdated
+        - chatMarkedAsRead
+        - userUpdated
+        - опционально chatMessageCreated (если передан chat_id)
+        """
+        packets: list[dict[str, Any]] = [
+            self.build_ws_connection_init_data(
+                profile_username=profile_username,
+                timezone_offset=timezone_offset,
+            ),
+            self.build_ws_chat_updated_data(
+                user_id=user_id,
+                show_forbidden_image=show_forbidden_image,
+            ),
+            self.build_ws_chat_marked_as_read_data(
+                user_id=user_id,
+                show_forbidden_image=show_forbidden_image,
+            ),
+            self.build_ws_user_updated_data(user_id=user_id),
+        ]
+
+        if chat_id:
+            packets.append(
+                self.build_ws_chat_message_created_data(
+                    chat_id=chat_id,
+                    show_forbidden_image=show_forbidden_image,
+                )
+            )
+
+        return packets
+
+    def _resolve_websocket_cookie_header(self) -> str:
+        request_cookie_override = str(getattr(self, "_request_cookie_override", "") or "").strip()
+        if request_cookie_override:
+            return request_cookie_override
+        return self._build_default_cookie_header()
+
+    def _build_websocket_headers(self, extra_headers: dict[str, str] | None = None) -> list[str]:
+        headers = {
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "cache-control": "no-cache",
+            "connection": "Upgrade",
+            "origin": "https://playerok.com",
+            "pragma": "no-cache",
+            "sec-websocket-extensions": "permessage-deflate; client_max_window_bits",
+            "cookie": self._resolve_websocket_cookie_header(),
+            "user-agent": self.user_agent or "",
+        }
+        if extra_headers:
+            headers.update(extra_headers)
+
+        return [f"{k}: {v}" for k, v in headers.items() if str(v).strip()]
+
+    def _build_websocket_proxy_kwargs(self) -> dict[str, Any]:
+        proxy_raw = str(self.proxy or "").strip()
+        if not proxy_raw:
+            return {}
+
+        proxy_type = "http"
+        proxy_host = ""
+        proxy_port: int | str | None = None
+        proxy_auth: tuple[str, str] | None = None
+
+        try:
+            if "://" in proxy_raw:
+                parsed = urlsplit(proxy_raw)
+                proxy_host = str(parsed.hostname or "").strip()
+                proxy_port = parsed.port
+                scheme = str(parsed.scheme or "").lower()
+                if scheme.startswith("socks5"):
+                    proxy_type = "socks5"
+                elif scheme.startswith("socks4"):
+                    proxy_type = "socks4"
+                else:
+                    proxy_type = "http"
+
+                if parsed.username:
+                    proxy_auth = (str(parsed.username), str(parsed.password or ""))
+            elif "@" in proxy_raw:
+                auth_part, host_part = proxy_raw.rsplit("@", 1)
+                host_chunks = host_part.split(":")
+                if len(host_chunks) >= 2:
+                    proxy_host = str(host_chunks[0]).strip()
+                    port_raw = str(host_chunks[1]).strip()
+                    proxy_port = int(port_raw) if port_raw.isdigit() else port_raw
+
+                if ":" in auth_part:
+                    proxy_user, proxy_pass = auth_part.split(":", 1)
+                    proxy_auth = (str(proxy_user), str(proxy_pass))
+                else:
+                    proxy_auth = (str(auth_part), "")
+            else:
+                chunks = proxy_raw.split(":")
+                if len(chunks) == 4:
+                    proxy_host, port_raw, proxy_user, proxy_pass = chunks
+                    proxy_port = int(port_raw) if str(port_raw).isdigit() else str(port_raw)
+                    proxy_auth = (str(proxy_user), str(proxy_pass))
+                elif len(chunks) >= 2:
+                    proxy_host, port_raw = chunks[0], chunks[1]
+                    proxy_port = int(port_raw) if str(port_raw).isdigit() else str(port_raw)
+        except Exception:
+            return {}
+
+        if not proxy_host or proxy_port is None:
+            return {}
+
+        proxy_kwargs: dict[str, Any] = {
+            "http_proxy_host": proxy_host,
+            "http_proxy_port": proxy_port,
+            "proxy_type": proxy_type,
+        }
+        if proxy_auth:
+            proxy_kwargs["http_proxy_auth"] = proxy_auth
+        return proxy_kwargs
+
+    def create_webhook_connection(
+        self,
+        ws_url: str = "wss://ws.playerok.com/graphql",
+        timeout: float = 20.0,
+        extra_headers: dict[str, str] | None = None,
+        subprotocols: list[str] | None = None,
+    ) -> websocket.WebSocket:
+        """
+        Создаёт websocket-подключение к Playerok для webhook-подписок.
+        """
+        sslopt: dict[str, Any] = {}
+        try:
+            verify_candidates = self._build_verify_candidates()
+        except Exception:
+            verify_candidates = []
+
+        for cert_path in verify_candidates:
+            if self._is_usable_cert(cert_path):
+                sslopt["ca_certs"] = cert_path
+                break
+
+        ws = websocket.WebSocket(sslopt=sslopt) if sslopt else websocket.WebSocket()
+
+        connect_kwargs: dict[str, Any] = {
+            "url": str(ws_url).strip(),
+            "header": self._build_websocket_headers(extra_headers=extra_headers),
+            "subprotocols": subprotocols or ["graphql-transport-ws"],
+            "timeout": max(1.0, float(timeout)),
+        }
+        connect_kwargs.update(self._build_websocket_proxy_kwargs())
+
+        ws.connect(**connect_kwargs)
+        return ws
+
+    def wait_webhook_connection_ack(
+        self,
+        ws: websocket.WebSocket,
+        timeout: float = 15.0,
+    ) -> dict[str, Any]:
+        """
+        Ожидает `connection_ack` после отправки `connection_init`.
+        """
+        timeout_seconds = max(1.0, float(timeout))
+        deadline = time.time() + timeout_seconds
+
+        original_timeout = None
+        try:
+            original_timeout = ws.gettimeout()
+        except Exception:
+            original_timeout = None
+
+        try:
+            while time.time() < deadline:
+                remaining = max(0.2, deadline - time.time())
+                try:
+                    ws.settimeout(remaining)
+                except Exception:
+                    pass
+
+                raw_msg = ws.recv()
+                if raw_msg is None:
+                    continue
+
+                try:
+                    msg_data = json.loads(raw_msg)
+                except Exception:
+                    continue
+
+                msg_type = str(msg_data.get("type") or "").strip()
+                if msg_type == "connection_ack":
+                    return msg_data
+                if msg_type == "ping":
+                    try:
+                        ws.send(json.dumps({"type": "pong"}, ensure_ascii=False))
+                    except Exception:
+                        pass
+                    continue
+                if msg_type == "connection_error":
+                    raise RuntimeError(f"Websocket Data: сервер вернул connection_error: {msg_data}")
+
+            raise TimeoutError("Websocket Data: не дождались connection_ack.")
+        finally:
+            try:
+                ws.settimeout(original_timeout)
+            except Exception:
+                pass
+
+    def init_webhook_connection(
+        self,
+        ws: websocket.WebSocket,
+        gql_path: str | None = None,
+        profile_username: str | None = None,
+        timezone_offset: int = -180,
+        wait_connection_ack: bool = True,
+        ack_timeout: float = 15.0,
+    ) -> dict[str, Any] | None:
+        """
+        Отправляет `connection_init` и, при необходимости, ждёт `connection_ack`.
+        """
+        init_data = self.build_ws_connection_init_data(
+            gql_path=gql_path,
+            profile_username=profile_username,
+            timezone_offset=timezone_offset,
+        )
+        ws.send(json.dumps(init_data, ensure_ascii=False))
+
+        if not wait_connection_ack:
+            return None
+        return self.wait_webhook_connection_ack(ws=ws, timeout=ack_timeout)
+
+    def subscribe_webhook_chat_updated(
+        self,
+        ws: websocket.WebSocket,
+        user_id: str | None = None,
+        subscription_id: str | None = None,
+        show_forbidden_image: bool = True,
+    ) -> str:
+        """
+        Создаёт подписку webhook `chatUpdated` и возвращает её `id`.
+        """
+        payload = self.build_ws_chat_updated_data(
+            user_id=user_id,
+            subscription_id=subscription_id,
+            show_forbidden_image=show_forbidden_image,
+        )
+        ws.send(json.dumps(payload, ensure_ascii=False))
+        return str(payload["id"])
+
+    def subscribe_webhook_chat_marked_as_read(
+        self,
+        ws: websocket.WebSocket,
+        user_id: str | None = None,
+        subscription_id: str | None = None,
+        show_forbidden_image: bool = True,
+    ) -> str:
+        """
+        Создаёт подписку webhook `chatMarkedAsRead` и возвращает её `id`.
+        """
+        payload = self.build_ws_chat_marked_as_read_data(
+            user_id=user_id,
+            subscription_id=subscription_id,
+            show_forbidden_image=show_forbidden_image,
+        )
+        ws.send(json.dumps(payload, ensure_ascii=False))
+        return str(payload["id"])
+
+    def subscribe_webhook_user_updated(
+        self,
+        ws: websocket.WebSocket,
+        user_id: str | None = None,
+        subscription_id: str | None = None,
+    ) -> str:
+        """
+        Создаёт подписку webhook `userUpdated` и возвращает её `id`.
+        """
+        payload = self.build_ws_user_updated_data(
+            user_id=user_id,
+            subscription_id=subscription_id,
+        )
+        ws.send(json.dumps(payload, ensure_ascii=False))
+        return str(payload["id"])
+
+    def subscribe_webhook_chat_message_created(
+        self,
+        ws: websocket.WebSocket,
+        chat_id: str,
+        subscription_id: str | None = None,
+        show_forbidden_image: bool = True,
+    ) -> str:
+        """
+        Создаёт подписку webhook `chatMessageCreated` и возвращает её `id`.
+        """
+        payload = self.build_ws_chat_message_created_data(
+            chat_id=chat_id,
+            subscription_id=subscription_id,
+            show_forbidden_image=show_forbidden_image,
+        )
+        ws.send(json.dumps(payload, ensure_ascii=False))
+        return str(payload["id"])
+
+    def create_default_webhooks(
+        self,
+        ws: websocket.WebSocket,
+        user_id: str | None = None,
+        chat_id: str | None = None,
+        show_forbidden_image: bool = True,
+    ) -> dict[str, str]:
+        """
+        Создаёт базовые webhook-подписки и возвращает карту
+        `{operationName: subscription_id}`.
+        """
+        subscription_ids: dict[str, str] = {
+            "chatUpdated": self.subscribe_webhook_chat_updated(
+                ws=ws,
+                user_id=user_id,
+                show_forbidden_image=show_forbidden_image,
+            ),
+            "chatMarkedAsRead": self.subscribe_webhook_chat_marked_as_read(
+                ws=ws,
+                user_id=user_id,
+                show_forbidden_image=show_forbidden_image,
+            ),
+            "userUpdated": self.subscribe_webhook_user_updated(
+                ws=ws,
+                user_id=user_id,
+            ),
+        }
+
+        if chat_id:
+            subscription_ids["chatMessageCreated"] = self.subscribe_webhook_chat_message_created(
+                ws=ws,
+                chat_id=chat_id,
+                show_forbidden_image=show_forbidden_image,
+            )
+
+        return subscription_ids
+
+    def open_webhook_session(
+        self,
+        ws_url: str = "wss://ws.playerok.com/graphql",
+        user_id: str | None = None,
+        chat_id: str | None = None,
+        gql_path: str | None = None,
+        profile_username: str | None = None,
+        timezone_offset: int = -180,
+        show_forbidden_image: bool = True,
+        connect_timeout: float = 20.0,
+        ack_timeout: float = 15.0,
+    ) -> tuple[websocket.WebSocket, dict[str, Any], dict[str, str]]:
+        """
+        Полный цикл инициализации webhook-сессии:
+        1. websocket connect
+        2. connection_init + connection_ack
+        3. создание базовых подписок
+        """
+        ws = self.create_webhook_connection(
+            ws_url=ws_url,
+            timeout=connect_timeout,
+        )
+        ack_data = self.init_webhook_connection(
+            ws=ws,
+            gql_path=gql_path,
+            profile_username=profile_username,
+            timezone_offset=timezone_offset,
+            wait_connection_ack=True,
+            ack_timeout=ack_timeout,
+        ) or {}
+
+        subscription_ids = self.create_default_webhooks(
+            ws=ws,
+            user_id=user_id,
+            chat_id=chat_id,
+            show_forbidden_image=show_forbidden_image,
+        )
+        return ws, ack_data, subscription_ids
+
+    @staticmethod
+    def recv_webhook_message(
+        ws: websocket.WebSocket,
+        timeout: float | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Получает одно websocket-сообщение и пытается распарсить JSON.
+        """
+        original_timeout = None
+        try:
+            original_timeout = ws.gettimeout()
+        except Exception:
+            original_timeout = None
+
+        try:
+            if timeout is not None:
+                try:
+                    ws.settimeout(max(0.1, float(timeout)))
+                except Exception:
+                    pass
+
+            raw_msg = ws.recv()
+            if raw_msg is None:
+                return None
+            try:
+                return json.loads(raw_msg)
+            except Exception:
+                return {"type": "raw", "raw": raw_msg}
+        finally:
+            try:
+                ws.settimeout(original_timeout)
+            except Exception:
+                pass
+
+    @staticmethod
+    def close_webhook_connection(ws: websocket.WebSocket | None) -> None:
+        """
+        Закрывает websocket-подключение webhook.
+        """
+        if ws is None:
+            return
+        try:
+            ws.close()
+        except Exception:
+            pass
 
     def request(self, method: Literal["get", "post"], url: str, headers: dict[str, str],
                 payload: dict[str, str] | None = None, files: dict | None = None,
@@ -499,7 +1808,15 @@ class Account:
             "x-timezone-offset": "-180",
         }
 
-        headers["cookie"] = f"token={self.token}"
+        request_cookie_override = str(getattr(self, "_request_cookie_override", "") or "").strip()
+        if request_cookie_override:
+            headers["cookie"] = request_cookie_override
+        else:
+            resolved_cookie_header = self._build_default_cookie_header()
+            if resolved_cookie_header:
+                headers["cookie"] = resolved_cookie_header
+            elif self.token:
+                headers["cookie"] = f"token={self.token}"
         # if self.auid:
         #     headers['cookie'] += f'; auid={self.auid}'
         headers["user-agent"] = user_agent
@@ -551,6 +1868,23 @@ class Account:
             "cf-browser-verification",
             "Cloudflare Ray ID",
         ]
+        ddos_guard_signatures = [
+            "<title>DDoS-Guard</title>",
+            "/.well-known/ddos-guard/js-challenge/",
+            "check.ddos-guard.net/check.js",
+            'data-ddg-origin="true"',
+            'data-ddg-l10n="true"',
+        ]
+
+        def _detect_antibot_vendor(text: str | None) -> str | None:
+            if not text:
+                return None
+            if any(sig in text for sig in ddos_guard_signatures):
+                return "ddos_guard"
+            if any(sig in text for sig in cloudflare_signatures):
+                return "cloudflare"
+            return None
+
         max_delay = 3.0
         max_attempts = max(1, int(self.request_max_retries))
         session_refresh_attempts = {2, 4, 7}
@@ -694,14 +2028,17 @@ class Account:
                 time.sleep(delay)
                 continue
 
-            if any(sig in resp.text for sig in cloudflare_signatures):
+            antibot_vendor = _detect_antibot_vendor(resp.text)
+            if antibot_vendor is not None:
                 last_cloudflare_response = resp
+                vendor_title = "DDoS-Guard" if antibot_vendor == "ddos_guard" else "Cloudflare"
+                error_code = "DDOS_GUARD" if antibot_vendor == "ddos_guard" else "CLOUDFLARE"
                 retry_exhausted = attempt >= max_attempts
                 _record_error(
                     kind="cloudflare",
-                    error_text="Cloudflare challenge detected",
+                    error_text=f"{vendor_title} challenge detected",
                     status_code=_to_int(resp.status_code),
-                    error_code="CLOUDFLARE",
+                    error_code=error_code,
                     attempt=attempt,
                     retryable=True,
                     retry_exhausted=retry_exhausted,
@@ -710,14 +2047,14 @@ class Account:
 
                 if retry_exhausted:
                     self.__logger.error(
-                        f"❌ Cloudflare заблокировал все {max_attempts} попыток! "
+                        f"❌ {vendor_title} заблокировал все {max_attempts} попыток! "
                         f"Требуется смена токена/прокси/user-agent."
                     )
                     raise CloudflareDetectedException(resp)
 
                 delay = _retry_delay(attempt)
                 self.__logger.warning(
-                    f"⚠️ Cloudflare Detected (попытка {attempt}/{max_attempts}), "
+                    f"⚠️ {vendor_title} challenge detected (попытка {attempt}/{max_attempts}), "
                     f"повтор через {delay:.1f} сек..."
                 )
                 time.sleep(delay)
@@ -839,6 +2176,10 @@ class Account:
                 self.__logger.info(
                     f"✅ Запрос восстановлен после ретраев (recovered=true, attempt={attempt}/{max_attempts}, url={url})"
                 )
+            try:
+                self._sync_cookies_from_response(resp)
+            except Exception as cookie_sync_error:
+                self.__logger.debug(f"Не удалось синхронизировать cookies после успешного запроса: {cookie_sync_error}")
             _record_success()
             return resp
 

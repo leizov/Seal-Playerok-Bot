@@ -263,6 +263,7 @@ def _probe_playerok_account(config: dict):
     api_cfg = (config or {}).get("playerok", {}).get("api", {})
     return Account(
         token=api_cfg.get("token", ""),
+        cookies=api_cfg.get("cookies", ""),
         user_agent=api_cfg.get("user_agent", ""),
         requests_timeout=api_cfg.get("requests_timeout", 10),
         proxy=api_cfg.get("proxy") or None,

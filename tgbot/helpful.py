@@ -60,27 +60,58 @@ async def throw_float_message(state: FSMContext, message: Message, text: str,
     :type send: `bool`
     """
     from .telegrambot import get_telegram_bot
+    bot = None
+    mess = None
+    accent_message_id = None
+    target_chat_id = None
     try:
-        bot = get_telegram_bot().bot
+        tg_bot = get_telegram_bot()
+        if tg_bot is None:
+            return None
+        bot = tg_bot.bot
+
+        if message is None and callback is not None:
+            message = callback.message
+        if message is None:
+            return None
+
         data = await state.get_data()
-        accent_message_id = message.message_id
-        if message.from_user and message.from_user.id != bot.id:
+        message_chat = getattr(message, "chat", None)
+        target_chat_id = getattr(message_chat, "id", None)
+        if target_chat_id is None and callback and callback.from_user:
+            target_chat_id = callback.from_user.id
+
+        current_message_id = getattr(message, "message_id", None)
+        message_from_user_id = getattr(getattr(message, "from_user", None), "id", None)
+
+        accent_message_id = current_message_id
+        if message_from_user_id is not None and message_from_user_id != bot.id:
             accent_message_id = data.get("accent_message_id")
-        mess = None
         new_mess_cond = False
 
         if not send:
-            if message.text is not None:
-                new_mess_cond = message.from_user.id != bot.id and message.text.startswith('/')
+            message_text = getattr(message, "text", None)
+            if message_text is not None:
+                new_mess_cond = (
+                    message_from_user_id is not None
+                    and message_from_user_id != bot.id
+                    and message_text.startswith('/')
+                )
 
             if accent_message_id is not None and not new_mess_cond:
                 try:
-                    if message.from_user.id != bot.id and delete_user_message:
-                        await bot.delete_message(message.chat.id, message.message_id)
+                    if (
+                        message_from_user_id is not None
+                        and message_from_user_id != bot.id
+                        and delete_user_message
+                        and target_chat_id is not None
+                        and current_message_id is not None
+                    ):
+                        await bot.delete_message(target_chat_id, current_message_id)
                     mess = await bot.edit_message_text(
                         text=text,
                         reply_markup=reply_markup, 
-                        chat_id=message.chat.id, 
+                        chat_id=target_chat_id, 
                         message_id=accent_message_id, 
                         parse_mode="HTML"
                     )
@@ -88,11 +119,12 @@ async def throw_float_message(state: FSMContext, message: Message, text: str,
                     if "message to edit not found" in e.message.lower():
                         accent_message_id = None
                     elif "message is not modified" in e.message.lower():
-                        await bot.answer_callback_query(
-                            callback_query_id=callback.id, 
-                            show_alert=False, 
-                            cache_time=0
-                        )
+                        if callback:
+                            await bot.answer_callback_query(
+                                callback_query_id=callback.id,
+                                show_alert=False,
+                                cache_time=0
+                            )
                         pass
                     elif "query is too old" in e.message.lower():
                         return
@@ -104,29 +136,38 @@ async def throw_float_message(state: FSMContext, message: Message, text: str,
                 show_alert=False, 
                 cache_time=0
             )
-        if accent_message_id is None or new_mess_cond or send:
+        if (accent_message_id is None or new_mess_cond or send) and target_chat_id is not None:
             mess = await bot.send_message(
-                chat_id=message.chat.id, 
+                chat_id=target_chat_id, 
                 text=text, 
                 reply_markup=reply_markup, 
                 parse_mode="HTML"
             )
     except Exception as e:
         try:
-            mess = await bot.edit_message_text(
-                chat_id=message.chat.id, 
-                reply_markup=templ.destroy_kb(),
-                text=templ.error_text(e), 
-                message_id=accent_message_id, 
-                parse_mode="HTML"
-            )
+            if bot is not None and accent_message_id is not None and target_chat_id is not None:
+                mess = await bot.edit_message_text(
+                    chat_id=target_chat_id,
+                    reply_markup=templ.destroy_kb(),
+                    text=templ.error_text(e),
+                    message_id=accent_message_id,
+                    parse_mode="HTML"
+                )
+            elif bot is not None and target_chat_id is not None:
+                mess = await bot.send_message(
+                    chat_id=target_chat_id,
+                    reply_markup=templ.destroy_kb(),
+                    text=templ.error_text(e),
+                    parse_mode="HTML"
+                )
         except Exception as e:
-            mess = await bot.send_message(
-                chat_id=message.chat.id, 
-                reply_markup=templ.destroy_kb(),
-                text=templ.error_text(e), 
-                parse_mode="HTML"
-            )
+            if bot is not None and target_chat_id is not None:
+                mess = await bot.send_message(
+                    chat_id=target_chat_id,
+                    reply_markup=templ.destroy_kb(),
+                    text=templ.error_text(e),
+                    parse_mode="HTML"
+                )
     finally:
         if mess: await state.update_data(accent_message_id=mess.message_id)
     return mess

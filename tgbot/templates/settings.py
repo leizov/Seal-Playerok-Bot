@@ -8,12 +8,15 @@ from .. import callback_datas as calls
 
 def settings_text():
     config = sett.get("config")
-    token = config["playerok"]["api"]["token"][:5] + ("*" * 10) or "❌ Не задано"
+    token_raw = str(config["playerok"]["api"].get("token") or "")
+    token = token_raw[:5] + ("*" * 10) if token_raw else "❌ Не задано"
+    cookies_status = "Привязаны" if str(config["playerok"]["api"].get("cookies") or "").strip() else "❌ Не заданы"
     user_agent = config["playerok"]["api"]["user_agent"] or "❌ Не задано"
     txt = textwrap.dedent(f"""
         ⚙️ <b>Настройки</b>
 
         <b>Основные настройки:</b>
+        ┣ Cookies: <b>{cookies_status}</b>
         ┣ Токен: <b>{token}</b>
         ┗ User-Agent: <b>{user_agent}</b>
 

@@ -8,6 +8,7 @@ from settings import Settings as sett
 from .. import templates as templ
 from .. import callback_datas as calls
 from .. import states as states
+from ..cookie_guide import build_cookie_collection_instruction
 from ..helpful import throw_float_message
 from .navigation import *
 
@@ -19,12 +20,13 @@ router = Router()
 async def callback_enter_token(callback: CallbackQuery, state: FSMContext):
     await state.set_state(states.SettingsStates.waiting_for_token)
     await throw_float_message(
-        state=state, 
-        message=callback.message, 
-        text=templ.settings_account_float_text(f"🔐 Введите новый <b>токен</b> вашего аккаунта ↓"), 
+        state=state,
+        message=callback.message,
+        text=templ.settings_account_float_text(
+            build_cookie_collection_instruction("🍪 Отправьте новые <b>cookies</b>.")
+        ),
         reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
     )
-
 
 @router.callback_query(F.data == "enter_user_agent")
 async def callback_enter_user_agent(callback: CallbackQuery, state: FSMContext):
@@ -412,3 +414,4 @@ async def callback_enter_tg_logging_chat_id(callback: CallbackQuery, state: FSMC
         text=templ.settings_notifications_float_text(f"💬 Введите новый <b>ID чата для уведомлений</b> (вы можете указать как цифровой ID, так и юзернейм чата) ↓\n┗ Текущее: <code>{tg_logging_chat_id}</code>"), 
         reply_markup=templ.back_kb(calls.SettingsNavigation(to="notifications").pack())
     )
+

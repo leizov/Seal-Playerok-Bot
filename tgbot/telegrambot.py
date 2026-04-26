@@ -3,10 +3,12 @@ import asyncio
 import textwrap
 import logging
 import random
+import threading
+from html import escape as html_escape
 from colorama import Fore
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.types import BotCommand, InlineKeyboardMarkup
+from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError, TelegramForbiddenError, TelegramAPIError
 import re
 
@@ -18,6 +20,7 @@ from core.handlers import call_bot_event
 
 from . import router as main_router
 from . import templates as templ
+from .cookie_guide import build_cookie_collection_instruction
 
 
 logger = logging.getLogger("seal.telegram")
@@ -115,6 +118,14 @@ class TelegramBot:
                 logger.error(f"✗ Ошибка при регистрации роутеров плагина {plugin.meta.name}: {e}")
                 logger.info(f"Бот продолжит работу без роутеров плагина {plugin.meta.name}")
         self.dp.include_router(main_router)
+        self._startup_status_message_ids: dict[int, int] = self._load_startup_status_message_ids()
+        self._startup_status_last_text: dict[int, str] = {}
+        self._startup_status_lock = asyncio.Lock()
+        self._playerok_startup_active: bool = False
+        self._playerok_startup_details: str = "TG запущен, ожидаю активацию Playerok."
+        self._playerok_activation_prompt_sent: bool = False
+        self._recovery_dialog_lock = threading.Lock()
+        self._active_recovery_dialog_users: set[int] = set()
 
     def _build_bot_from_config(self, config: dict | None = None) -> Bot:
         config = config or sett.get("config")
@@ -299,7 +310,221 @@ class TelegramBot:
             await self.bot.set_my_description(description=description)
         except Exception:
             pass
-    
+
+    def _build_playerok_startup_status_text(self, active: bool, details: str | None = None) -> str:
+        base_details = str(details or "").strip()
+        if not base_details:
+            base_details = "Аккаунт активен и готов к работе." if active else "TG запущен, ожидаю активацию Playerok."
+        safe_details = html_escape(base_details)
+
+        playerok_line = "✅ <b>Playerok:</b> аккаунт активен" if active else "⏳ <b>Playerok:</b> ожидаю активацию"
+        return (
+            "📍 <b>Статус запуска</b>\n\n"
+            "✅ <b>Telegram:</b> запущен\n"
+            f"{playerok_line}\n\n"
+            f"{safe_details}"
+        )
+
+    @staticmethod
+    def _load_startup_status_message_ids() -> dict[int, int]:
+        config = sett.get("config")
+        raw = config.get("telegram", {}).get("bot", {}).get("startup_status_message_ids", {})
+        if not isinstance(raw, dict):
+            return {}
+
+        parsed: dict[int, int] = {}
+        for raw_user_id, raw_message_id in raw.items():
+            try:
+                user_id = int(raw_user_id)
+                message_id = int(raw_message_id)
+            except Exception:
+                continue
+            if user_id <= 0 or message_id <= 0:
+                continue
+            parsed[user_id] = message_id
+        return parsed
+
+    @staticmethod
+    def _persist_startup_status_message_ids(ids: dict[int, int]) -> None:
+        config = sett.get("config")
+        telegram_bot_cfg = config.setdefault("telegram", {}).setdefault("bot", {})
+        telegram_bot_cfg["startup_status_message_ids"] = {str(uid): int(mid) for uid, mid in ids.items()}
+        sett.set("config", config)
+
+    @staticmethod
+    def _get_unique_signed_user_ids(config: dict | None) -> list[int]:
+        cfg = config or {}
+        raw_users = cfg.get("telegram", {}).get("bot", {}).get("signed_users", [])
+        if not isinstance(raw_users, list):
+            return []
+
+        unique_ids: list[int] = []
+        seen: set[int] = set()
+        for raw_user_id in raw_users:
+            try:
+                user_id = int(raw_user_id)
+            except Exception:
+                continue
+            if user_id in seen:
+                continue
+            seen.add(user_id)
+            unique_ids.append(user_id)
+        return unique_ids
+
+    async def _upsert_startup_status_message(self, user_id: int, text: str) -> None:
+        if not isinstance(user_id, int):
+            return
+
+        async with self._startup_status_lock:
+            prev_text = self._startup_status_last_text.get(user_id)
+            if prev_text == text:
+                return
+
+            stored_message_id = self._startup_status_message_ids.get(user_id)
+            if stored_message_id:
+                try:
+                    await self.bot.edit_message_text(
+                        chat_id=user_id,
+                        message_id=stored_message_id,
+                        text=text,
+                        parse_mode="HTML",
+                    )
+                    self._startup_status_last_text[user_id] = text
+                    return
+                except Exception:
+                    pass
+
+            sent_message = await self.bot.send_message(
+                chat_id=user_id,
+                text=text,
+                parse_mode="HTML",
+            )
+            self._startup_status_message_ids[user_id] = sent_message.message_id
+            self._startup_status_last_text[user_id] = text
+            try:
+                self._persist_startup_status_message_ids(self._startup_status_message_ids)
+            except Exception as e:
+                logger.debug(f"Не удалось сохранить startup_status_message_ids: {e}")
+
+    async def ensure_startup_status_for_user(self, user_id: int) -> None:
+        text = self._build_playerok_startup_status_text(
+            active=self._playerok_startup_active,
+            details=self._playerok_startup_details,
+        )
+        try:
+            await self._upsert_startup_status_message(user_id, text)
+        except Exception as e:
+            logger.debug(f"Не удалось отправить startup-статус user_id={user_id}: {e}")
+
+    def set_playerok_recovery_dialog_active(self, user_id: int | None = None, active: bool = True) -> None:
+        with self._recovery_dialog_lock:
+            if user_id is None:
+                if active:
+                    signed_users = sett.get("config").get("telegram", {}).get("bot", {}).get("signed_users", [])
+                    normalized_users: set[int] = set()
+                    if isinstance(signed_users, list):
+                        for raw_user_id in signed_users:
+                            try:
+                                normalized_users.add(int(raw_user_id))
+                            except Exception:
+                                continue
+                    self._active_recovery_dialog_users = normalized_users
+                else:
+                    self._active_recovery_dialog_users.clear()
+                return
+
+            try:
+                normalized_user_id = int(user_id)
+            except Exception:
+                return
+
+            if active:
+                self._active_recovery_dialog_users.add(normalized_user_id)
+            else:
+                self._active_recovery_dialog_users.discard(normalized_user_id)
+
+    def is_playerok_recovery_dialog_active(self) -> bool:
+        with self._recovery_dialog_lock:
+            return bool(self._active_recovery_dialog_users)
+
+    async def update_playerok_startup_status(self, active: bool, details: str | None = None) -> None:
+        self._playerok_startup_active = bool(active)
+        self._playerok_startup_details = str(details or "").strip()
+
+        config = sett.get("config")
+        signed_user_ids = self._get_unique_signed_user_ids(config)
+        if not signed_user_ids:
+            return
+
+        status_text = self._build_playerok_startup_status_text(
+            active=self._playerok_startup_active,
+            details=self._playerok_startup_details,
+        )
+        for user_id in signed_user_ids:
+            try:
+                await self._upsert_startup_status_message(user_id, status_text)
+            except Exception as e:
+                logger.debug(f"Не удалось обновить startup-статус user_id={user_id}: {e}")
+
+    @staticmethod
+    def _is_playerok_onboarding_required(config: dict | None) -> bool:
+        cfg = config or {}
+        api_cfg = cfg.get("playerok", {}).get("api", {})
+        cookies = str(api_cfg.get("cookies") or "").strip()
+        user_agent = str(api_cfg.get("user_agent") or "").strip()
+        return not cookies or not user_agent
+
+    async def _ensure_startup_status_and_playerok_prompt(self) -> None:
+        config = sett.get("config")
+        signed_user_ids = self._get_unique_signed_user_ids(config)
+        if not signed_user_ids:
+            return
+
+        await self.update_playerok_startup_status(
+            active=self._playerok_startup_active,
+            details=self._playerok_startup_details,
+        )
+
+        if not self._is_playerok_onboarding_required(config):
+            self._playerok_activation_prompt_sent = False
+            return
+
+        if self._playerok_activation_prompt_sent:
+            return
+
+        if self.is_playerok_recovery_dialog_active():
+            return
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📥 Отправить cookies", callback_data="playerok_recovery_open")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="playerok_recovery_cancel")],
+            ]
+        )
+        text = (
+            build_cookie_collection_instruction(
+                "⚠️ <b>Playerok пока не активирован</b>\n\n"
+                "Не хватает cookies и/или User-Agent для запуска аккаунта.\n"
+                "Нажмите кнопку ниже и отправьте cookies."
+            )
+        )
+
+        sent_any = False
+        for user_id in signed_user_ids:
+            try:
+                await self.bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=kb,
+                    parse_mode="HTML",
+                )
+                sent_any = True
+            except Exception as e:
+                logger.debug(f"Не удалось отправить prompt активации Playerok user_id={user_id}: {e}")
+
+        if sent_any:
+            self._playerok_activation_prompt_sent = True
+
 
     async def run_bot(self):
         # Миграция старого прокси в новую систему (выполняется один раз)
@@ -335,11 +560,13 @@ class TelegramBot:
                     logger.debug("Не удалось прогреть кэш стартового баннера при инициализации: %s", e)
 
                 await call_bot_event("ON_TELEGRAM_BOT_INIT", [self])
-                
+
+                try:
+                    await self._ensure_startup_status_and_playerok_prompt()
+                except Exception as e:
+                    logger.debug(f"Не удалось отправить startup-статус/activation prompt: {e}")
+                 
                 logger.info(f"{ACCENT_COLOR}Telegram бот {Fore.LIGHTCYAN_EX}@{me.username} {ACCENT_COLOR}запущен и активен")
-                
-                # Отправляем уведомление о запуске
-                await self.send_startup_notification()
                 
                 # Запускаем систему объявлений
                 try:

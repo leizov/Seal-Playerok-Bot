@@ -23,6 +23,9 @@ CONFIG = SettingsFile(
         "playerok": {
             "api": {
                 "token": "",
+                "cookies": "",
+                "user_id": "",
+                "username": "",
                 "user_agent": "",
                 "proxy": "",
                 "requests_timeout": 10,

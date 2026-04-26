@@ -637,7 +637,7 @@ install_python_deps() {
     else
         log_warning "requirements.txt не найден!"
     fi
-    
+
     log_success "Зависимости установлены"
 }
 

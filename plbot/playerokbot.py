@@ -11,7 +11,9 @@ from urllib.parse import quote
 from threading import Thread
 import textwrap
 import shutil
+from typing import Any, Awaitable
 from colorama import Fore
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from playerokapi.account import Account
 from playerokapi import exceptions as plapi_exceptions
@@ -86,10 +88,43 @@ class PlayerokBot:
         self._listener_task = None
         self._auto_raise_items_task = None
         self._auto_reminder_task = None
+        self._background_loops_started = False
+        self._event_handlers_registered = False
+        self._last_antibot_prompt_ts = 0.0
+        self._antibot_prompt_cooldown_seconds = 600
 
-        self._try_connect()
+        if self._is_playerok_api_ready():
+            self._try_connect()
+        else:
+            self.connection_error = (
+                "Ожидаю активацию Playerok: заполните cookies и User-Agent через Telegram."
+            )
 
         self.__saved_chats: dict[str, Chat] = {}
+
+    @staticmethod
+    def _extract_token_from_cookie_header(cookie_header: str | None) -> str:
+        raw = str(cookie_header or "").strip()
+        if not raw:
+            return ""
+        if raw.lower().startswith("cookie:"):
+            raw = raw.split(":", 1)[1].strip()
+        for part in raw.split(";"):
+            chunk = part.strip()
+            if not chunk or "=" not in chunk:
+                continue
+            key, value = chunk.split("=", 1)
+            if key.strip().lower() == "token":
+                return value.strip()
+        return ""
+
+    def _is_playerok_api_ready(self) -> bool:
+        api_cfg = self.config.get("playerok", {}).get("api", {})
+        cookies = str(api_cfg.get("cookies") or "").strip()
+        user_agent = str(api_cfg.get("user_agent") or "").strip()
+        token = str(api_cfg.get("token") or "").strip()
+        cookie_token = self._extract_token_from_cookie_header(cookies)
+        return bool(cookies and user_agent and (token or cookie_token))
 
     def _start_daemon_thread(self, target, args: tuple = (), name: str | None = None):
         thread = Thread(target=target, args=args, daemon=True, name=name)
@@ -237,19 +272,136 @@ class PlayerokBot:
         profile_link = f"https://playerok.com/profile/{quote(username_slug, safe='')}"
         return f'<b>{emoji} Покупатель:</b> <a href="{profile_link}">{safe_username}</a>'
 
-    def _try_connect(self) -> bool:
+    def _schedule_telegram_coroutine(self, coro: Awaitable[Any]) -> None:
+        tg_loop = get_telegram_bot_loop()
+        if tg_loop is None:
+            return
         try:
+            asyncio.run_coroutine_threadsafe(coro, tg_loop)
+        except Exception as e:
+            self.logger.debug(f"Не удалось поставить Telegram-корутины в очередь: {e}")
+
+    def _notify_startup_status(self, active: bool, details: str) -> None:
+        tg_bot = get_telegram_bot()
+        if tg_bot is None:
+            return
+        try:
+            tg_bot._playerok_startup_active = bool(active)
+            tg_bot._playerok_startup_details = str(details or "").strip()
+        except Exception:
+            pass
+
+        self._schedule_telegram_coroutine(
+            tg_bot.update_playerok_startup_status(active=active, details=details)
+        )
+
+    @staticmethod
+    def _detect_antibot_connect_error(error: Exception) -> tuple[bool, str]:
+        if isinstance(error, plapi_exceptions.CloudflareDetectedException):
+            vendor_title = str(getattr(error, "vendor_title", "") or "").strip() or "Cloudflare"
+            return True, vendor_title
+
+        lower_text = str(error).lower()
+        if "ddos-guard" in lower_text:
+            return True, "DDoS-Guard"
+        if "cloudflare" in lower_text:
+            return True, "Cloudflare"
+        return False, ""
+
+    def _prompt_cookie_recovery(self, vendor_title: str) -> None:
+        if not self._is_playerok_api_ready():
+            return
+
+        tg_bot = get_telegram_bot()
+        if tg_bot is None:
+            return
+
+        try:
+            if tg_bot._is_playerok_onboarding_required(sett.get("config")):
+                return
+        except Exception:
+            pass
+
+        try:
+            if tg_bot.is_playerok_recovery_dialog_active():
+                return
+        except Exception:
+            pass
+
+        signed_users = (
+            sett.get("config")
+            .get("telegram", {})
+            .get("bot", {})
+            .get("signed_users", [])
+        )
+        if not isinstance(signed_users, list) or not signed_users:
+            return
+
+        now_ts = time.time()
+        if now_ts - self._last_antibot_prompt_ts < float(self._antibot_prompt_cooldown_seconds):
+            return
+        self._last_antibot_prompt_ts = now_ts
+
+        recovery_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📥 Отправить cookies", callback_data="playerok_recovery_open")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="playerok_recovery_cancel")],
+            ]
+        )
+
+        details = "Нужны новые cookies от аккаунта Playerok для восстановления подключения."
+        notify_text = (
+            f"⚠️ Обнаружена защита {vendor_title} при подключении к Playerok.\n\n"
+            "Нужно обновить cookies аккаунта через Telegram и повторить подключение."
+        )
+
+        self._notify_startup_status(active=False, details=details)
+        self._schedule_telegram_coroutine(
+            tg_bot.log_event(
+                text=log_text(title="⚠️ Требуется обновление cookies", text=notify_text),
+                kb=recovery_kb,
+            )
+        )
+
+    def _try_connect(self) -> bool:
+        self.config = sett.get("config")
+        if not self._is_playerok_api_ready():
+            self.connection_error = "Ожидаю активацию Playerok: задайте cookies и User-Agent в Telegram."
+            self.is_connected = False
+            self.account = None
+            self.playerok_account = None
+            return False
+
+        try:
+            api_cfg = self.config["playerok"]["api"]
+            cookies_value = str(api_cfg.get("cookies") or "").strip()
+            token_value = str(api_cfg.get("token") or "").strip()
+            if not token_value:
+                token_value = self._extract_token_from_cookie_header(cookies_value)
+
             self.account = Account(
-                token=self.config["playerok"]["api"]["token"],
-                user_agent=self.config["playerok"]["api"]["user_agent"],
-                requests_timeout=self.config["playerok"]["api"]["requests_timeout"],
-                proxy=self.config["playerok"]["api"]["proxy"] or None
+                token=token_value,
+                cookies=cookies_value,
+                user_agent=api_cfg["user_agent"],
+                requests_timeout=api_cfg["requests_timeout"],
+                proxy=api_cfg["proxy"] or None,
             ).get()
             self.playerok_account = self.account
             self.is_connected = True
             self.connection_error = None
+            self._last_antibot_prompt_ts = 0.0
+
+            tg_bot = get_telegram_bot()
+            if tg_bot is not None:
+                try:
+                    tg_bot.set_playerok_recovery_dialog_active(user_id=None, active=False)
+                except Exception:
+                    pass
+
             proxy_status = "с прокси" if self.config["playerok"]["api"]["proxy"] else "без прокси"
             self.logger.info(f"{Fore.GREEN}✅ Подключено к Playerok ({proxy_status})")
+            active_details = f"Аккаунт Playerok активен: @{self.account.username}"
+            self._notify_startup_status(active=True, details=active_details)
             return True
         except Exception as e:
             self.logger.error(f"{Fore.LIGHTRED_EX}❌ Не удалось подключиться к Playerok: {e}")
@@ -257,6 +409,9 @@ class PlayerokBot:
             self.is_connected = False
             self.account = None
             self.playerok_account = None
+            is_antibot_error, vendor_title = self._detect_antibot_connect_error(e)
+            if is_antibot_error:
+                self._prompt_cookie_recovery(vendor_title)
             return False
 
     def get_chat_by_id(self, chat_id: str) -> Chat:
@@ -280,24 +435,6 @@ class PlayerokBot:
 
         self.config = sett.get("config")
 
-        if self._listener_task:
-            try:
-                self._listener_task.cancel()
-            except:
-                pass
-
-        if self._auto_raise_items_task:
-            try:
-                self._auto_raise_items_task.cancel()
-            except:
-                pass
-
-        if self._auto_reminder_task:
-            try:
-                self._auto_reminder_task.cancel()
-            except:
-                pass
-
         success = self._try_connect()
 
         if success:
@@ -307,6 +444,8 @@ class PlayerokBot:
             return False, f"❌ Не удалось переподключиться: {self.connection_error}"
 
     def _start_listener(self):
+        if self._background_loops_started:
+            return
         async def listener_loop():
             listener = None
             while True:
@@ -476,10 +615,15 @@ class PlayerokBot:
                 get_config_callback=lambda: self.config
             )
 
-        run_async_in_thread(self.playerok_bot_start)
-        self._listener_task = run_async_in_thread(listener_loop)
-        self._auto_raise_items_task = run_async_in_thread(auto_raise_items_loop)
-        self._auto_reminder_task = run_async_in_thread(auto_reminder_loop)
+        self._background_loops_started = True
+        try:
+            run_async_in_thread(self.playerok_bot_start)
+            run_async_in_thread(listener_loop)
+            run_async_in_thread(auto_raise_items_loop)
+            run_async_in_thread(auto_reminder_loop)
+        except Exception:
+            self._background_loops_started = False
+            raise
 
     def _should_send_greeting(self, chat_id: str, current_message_id: str = None) -> bool:
         """
@@ -1923,17 +2067,20 @@ class PlayerokBot:
 
     async def run_bot(self):
         started_in_recovery_mode = False
+        playerok_api_ready = self._is_playerok_api_ready()
 
-        if not self.is_connected or self.account is None or self.playerok_account is None:
+        if playerok_api_ready and (not self.is_connected or self.account is None or self.playerok_account is None):
             started_in_recovery_mode = True
-            self.logger.warning(f"{Fore.YELLOW}⚠️ Не удалось подключиться к Playerok аккаунту при запуске")
-            self.logger.warning(f"{Fore.YELLOW}⚠️ Запускаю слушатель в режиме восстановления")
-            self.logger.warning(f"{Fore.YELLOW}⚠️ После восстановления доступа события начнут обрабатываться автоматически")
+            self.logger.warning(f"{Fore.YELLOW}⚠️ Playerok недоступен на старте.")
+            self._notify_startup_status(
+                active=False,
+                details="Telegram запущен, ожидаю активацию Playerok. Проверьте cookies и User-Agent.",
+            )
 
             try:
                 mark_playerok_startup_fatal_incident()
             except Exception as e:
-                self.logger.debug(f"Не удалось установить стартовый фатальный маркер health: {e}")
+                self.logger.debug(f"Не удалось обновить health-флаг старта Playerok: {e}")
 
             try:
                 tg_bot = get_telegram_bot()
@@ -1941,16 +2088,10 @@ class PlayerokBot:
                     asyncio.run_coroutine_threadsafe(
                         tg_bot.log_event(
                             text=log_text(
-                                title="⚠️ Бот запущен, но Playerok пока недоступен",
+                                title="⚠️ Playerok недоступен при старте",
                                 text=(
-                                    "Не удалось подключиться к Playerok аккаунту на старте.\n"
-                                    "Слушатель запущен в режиме восстановления и будет продолжать попытки подключения.\n"
-                                    "После восстановления доступности Playerok/токена работа продолжится автоматически.\n"
-                                    "Когда подключение будет восстановлено, вам придёт уведомление.\n\n"
-                                    "Проверьте текущий статус командой:\n"
-                                    "/playerok_status\n\n"
-                                    "Проверьте токен/прокси/user-agent в:\n"
-                                    "⚙️ Настройки → 🔑 Аккаунт"
+                                    "Не удалось подключиться к Playerok при запуске.\n"
+                                    "Telegram-бот уже запущен и продолжит попытки восстановления."
                                 ),
                             )
                         ),
@@ -1958,89 +2099,37 @@ class PlayerokBot:
                     )
             except Exception:
                 pass
-        else:
-            self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-            self.logger.info(f"{ACCENT_COLOR}Информация об аккаунте:")
-            self.logger.info(f" · ID: {Fore.LIGHTWHITE_EX}{self.account.id}")
-            self.logger.info(f" · Никнейм: {Fore.LIGHTWHITE_EX}{self.account.username}")
-            if self.playerok_account.profile.balance:
-                self.logger.info(f" · Баланс: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.value}₽")
-                self.logger.info(f"   · Доступно: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.available}₽")
-                self.logger.info(f"   · В ожидании: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.pending_income}₽")
-                self.logger.info(f"   · Заморожено: {Fore.LIGHTWHITE_EX}{self.account.profile.balance.frozen}₽")
-            self.logger.info(
-                f" · Активные продажи: {Fore.LIGHTWHITE_EX}"
-                f"{self.account.profile.stats.deals.outgoing.total - self.account.profile.stats.deals.outgoing.finished}"
+        elif not playerok_api_ready:
+            self._notify_startup_status(
+                active=False,
+                details="Telegram запущен, ожидаю активацию Playerok. Отправьте cookies и User-Agent в Telegram.",
             )
-            self.logger.info(
-                f" · Активные покупки: {Fore.LIGHTWHITE_EX}"
-                f"{self.account.profile.stats.deals.incoming.total - self.account.profile.stats.deals.incoming.finished}"
-            )
-            self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-            self.logger.info("")
-
-            if self.config["playerok"]["api"]["proxy"]:
-                try:
-                    proxy_str = self.config["playerok"]["api"]["proxy"]
-
-                    # Удаляем протокол (socks5://, socks4://, http://, https://)
-                    if "://" in proxy_str:
-                        protocol, proxy_str = proxy_str.split("://", 1)
-
-                    if "@" in proxy_str:
-                        # Формат: user:password@host:port
-                        auth_part, server_part = proxy_str.split("@", 1)
-                        auth_parts = auth_part.split(":", 1)
-                        user = auth_parts[0] if len(auth_parts) > 0 else "Без авторизации"
-                        password = auth_parts[1] if len(auth_parts) > 1 else "Без авторизации"
-
-                        server_parts = server_part.rsplit(":", 1)
-                        ip = server_parts[0] if len(server_parts) > 0 else "unknown"
-                        port = server_parts[1] if len(server_parts) > 1 else "unknown"
-                    else:
-                        # Формат: host:port (без авторизации)
-                        user = "Без авторизации"
-                        password = "Без авторизации"
-                        server_parts = proxy_str.rsplit(":", 1)
-                        ip = server_parts[0] if len(server_parts) > 0 else "unknown"
-                        port = server_parts[1] if len(server_parts) > 1 else "unknown"
-
-                    # Маскируем IP
-                    if "." in ip:
-                        ip = ".".join([("*" * len(nums)) if i >= 3 else nums for i, nums in enumerate(ip.split("."), start=1)])
-                    else:
-                        ip = f"{ip[:3]}***" if len(ip) > 3 else ip
-
-                    # Маскируем данные
-                    port = f"{port[:3]}**" if len(str(port)) > 3 else str(port)
-                    user = f"{user[:3]}*****" if user != "Без авторизации" and len(user) > 3 else user
-                    password = f"{password[:3]}*****" if password != "Без авторизации" and len(password) > 3 else password
-
-                    self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-                    self.logger.info(f"{ACCENT_COLOR}Информация о прокси:")
-                    self.logger.info(f" · IP: {Fore.LIGHTWHITE_EX}{ip}:{port}")
-                    self.logger.info(f" · Юзер: {Fore.LIGHTWHITE_EX}{user}")
-                    self.logger.info(f" · Пароль: {Fore.LIGHTWHITE_EX}{password}")
-                    self.logger.info(f"{ACCENT_COLOR}───────────────────────────────────────")
-                    self.logger.info("")
-                except Exception as e:
-                    self.logger.warning(f"{Fore.YELLOW}Не удалось распарсить информацию о прокси: {e}")
-
-        add_playerok_event_handler(EventTypes.NEW_MESSAGE, PlayerokBot._on_new_message, 0)
-        add_playerok_event_handler(EventTypes.DEAL_HAS_PROBLEM, PlayerokBot._on_new_problem, 0)
-        add_playerok_event_handler(EventTypes.NEW_DEAL, PlayerokBot._on_new_deal, 0)
-        add_playerok_event_handler(EventTypes.NEW_REVIEW, PlayerokBot._on_new_review, 0)
-        add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_paid, 0)
-        # add_playerok_event_handler(EventTypes.DEAL_STATUS_CHANGED, PlayerokBot._on_deal_status_changed, 0)
-        add_playerok_event_handler(EventTypes.DEAL_CONFIRMED, PlayerokBot._on_deal_confirmed, 0)
-        add_playerok_event_handler(EventTypes.DEAL_ROLLED_BACK, PlayerokBot._on_deal_rolled_back, 0)
-        add_playerok_event_handler(EventTypes.DEAL_PROBLEM_RESOLVED, PlayerokBot._on_deal_problem_resolved, 0)
-        add_playerok_event_handler(EventTypes.ITEM_SENT, PlayerokBot._on_item_sent, 0)
-        add_playerok_event_handler(EventTypes.DEAL_CONFIRMED_AUTOMATICALLY, PlayerokBot._on_deal_confirmed_automatically, 0)
-
-        self._start_listener()
-
-        if started_in_recovery_mode:
-            self.logger.warning(f"{Fore.YELLOW}⚠️ Фоновые задачи запущены в режиме восстановления: listener")
+            self.logger.info(f"{Fore.YELLOW}⏳ Playerok ещё не активирован: ожидаю cookies и User-Agent.")
         else:
-            self.logger.info(f"{SUCCESS_COLOR}✅ Фоновые задачи запущены: listener")
+            self._notify_startup_status(
+                active=True,
+                details=f"Аккаунт Playerok активен: @{self.account.username}",
+            )
+            self.logger.info(f"{SUCCESS_COLOR}✅ Аккаунт Playerok активен: @{self.account.username}")
+
+        if not getattr(self, "_event_handlers_registered", False):
+            add_playerok_event_handler(EventTypes.NEW_MESSAGE, PlayerokBot._on_new_message, 0)
+            add_playerok_event_handler(EventTypes.DEAL_HAS_PROBLEM, PlayerokBot._on_new_problem, 0)
+            add_playerok_event_handler(EventTypes.NEW_DEAL, PlayerokBot._on_new_deal, 0)
+            add_playerok_event_handler(EventTypes.NEW_REVIEW, PlayerokBot._on_new_review, 0)
+            add_playerok_event_handler(EventTypes.ITEM_PAID, PlayerokBot._on_item_paid, 0)
+            add_playerok_event_handler(EventTypes.DEAL_CONFIRMED, PlayerokBot._on_deal_confirmed, 0)
+            add_playerok_event_handler(EventTypes.DEAL_ROLLED_BACK, PlayerokBot._on_deal_rolled_back, 0)
+            add_playerok_event_handler(EventTypes.DEAL_PROBLEM_RESOLVED, PlayerokBot._on_deal_problem_resolved, 0)
+            add_playerok_event_handler(EventTypes.ITEM_SENT, PlayerokBot._on_item_sent, 0)
+            add_playerok_event_handler(EventTypes.DEAL_CONFIRMED_AUTOMATICALLY, PlayerokBot._on_deal_confirmed_automatically, 0)
+            self._event_handlers_registered = True
+
+        if playerok_api_ready:
+            self._start_listener()
+            if started_in_recovery_mode:
+                self.logger.warning(f"{Fore.YELLOW}⚠️ Слушатель запущен в режиме восстановления.")
+            else:
+                self.logger.info(f"{SUCCESS_COLOR}✅ Слушатель событий запущен.")
+        else:
+            self.logger.info("ℹ️ Слушатель не запущен: Playerok пока не активирован.")

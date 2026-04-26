@@ -13,10 +13,14 @@ class CloudflareDetectedException(Exception):
         self.response = response
         self.status_code = self.response.status_code
         self.html_text = self.response.text
+        lower_text = (self.html_text or "").lower()
+        is_ddos_guard = "ddos-guard" in lower_text or "check.ddos-guard.net" in lower_text
+        self.vendor = "ddos_guard" if is_ddos_guard else "cloudflare"
+        self.vendor_title = "DDoS-Guard" if is_ddos_guard else "Cloudflare"
 
     def __str__(self):
         msg = (
-            f"Ошибка: CloudFlare заметил подозрительную активность при отправке запроса на сайт Playerok."
+            f"Ошибка: {self.vendor_title} заметил подозрительную активность при отправке запроса на сайт Playerok."
             f"\nКод ошибки: {self.status_code}"
             f"\nОтвет: {self.html_text}"
         )

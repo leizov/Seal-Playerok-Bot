@@ -17,6 +17,7 @@ MAX_EVENTS_PER_DAY = 5000
 MAX_TEXT_SAMPLE_LEN = 300
 PLAYEROK_HEALTH_WINDOW_SECONDS = 10 * 60
 PLAYEROK_HEALTH_FATAL_STREAK_THRESHOLD = 5
+PLAYEROK_HEALTH_RECOVERY_SUCCESS_STREAK = 10
 PLAYEROK_HEALTH_MAX_ERRORS = 2000
 PLAYEROK_HEALTH_VERSION = 1
 
@@ -68,6 +69,7 @@ def _default_playerok_health_payload(now: datetime | None = None) -> dict[str, A
         "window_seconds": PLAYEROK_HEALTH_WINDOW_SECONDS,
         "errors": [],
         "fatal_streak": 0,
+        "success_streak": 0,
         "incident_active": False,
         "updated_at": ts,
     }
@@ -122,6 +124,7 @@ def _load_playerok_health(now: datetime | None = None) -> dict[str, Any]:
     payload["version"] = PLAYEROK_HEALTH_VERSION
     payload["window_seconds"] = PLAYEROK_HEALTH_WINDOW_SECONDS
     payload["fatal_streak"] = max(0, _safe_int(payload.get("fatal_streak")) or 0)
+    payload["success_streak"] = max(0, _safe_int(payload.get("success_streak")) or 0)
     payload["incident_active"] = bool(payload.get("incident_active"))
     _prune_health_errors(payload, now)
     return payload
@@ -162,12 +165,15 @@ def _health_snapshot(payload: dict[str, Any], now: datetime | None = None) -> di
     _prune_health_errors(payload, now)
     errors_10m = len(payload.get("errors", []))
     fatal_streak = max(0, _safe_int(payload.get("fatal_streak")) or 0)
+    success_streak = max(0, _safe_int(payload.get("success_streak")) or 0)
     incident_active = bool(payload.get("incident_active"))
     level = _health_level(errors_10m, incident_active)
     return {
         "window_minutes": int(PLAYEROK_HEALTH_WINDOW_SECONDS / 60),
         "errors_10m": errors_10m,
         "fatal_streak": fatal_streak,
+        "success_streak": success_streak,
+        "recovery_success_streak_target": PLAYEROK_HEALTH_RECOVERY_SUCCESS_STREAK,
         "incident_active": incident_active,
         "level": level,
         "circles": _health_circles(level),
@@ -354,6 +360,7 @@ def _record_playerok_health_error(*, now: datetime, retry_exhausted: bool) -> No
     if retry_exhausted:
         payload["fatal_streak"] = max(0, _safe_int(payload.get("fatal_streak")) or 0) + 1
 
+    payload["success_streak"] = 0
     payload["incident_active"] = bool(payload.get("incident_active")) or (
         max(0, _safe_int(payload.get("fatal_streak")) or 0) >= PLAYEROK_HEALTH_FATAL_STREAK_THRESHOLD
     )
@@ -482,15 +489,21 @@ def record_playerok_request_success() -> None:
     with _LOCK:
         try:
             payload = _load_playerok_health(now)
-            payload["fatal_streak"] = 0
-            payload["incident_active"] = False
+            payload["success_streak"] = max(0, _safe_int(payload.get("success_streak")) or 0) + 1
+
+            if bool(payload.get("incident_active")):
+                if payload["success_streak"] >= PLAYEROK_HEALTH_RECOVERY_SUCCESS_STREAK:
+                    payload["incident_active"] = False
+                    payload["fatal_streak"] = 0
+            else:
+                payload["fatal_streak"] = 0
+
             payload["updated_at"] = now.isoformat(timespec="seconds")
             _prune_health_errors(payload, now)
             _save_playerok_health(payload)
         except Exception:
-            # Не прерываем основной workflow из-за метрик стабильности.
+            # ������� �� ��������� �������� workflow ��-�� ������ ������������.
             pass
-
 
 def mark_playerok_startup_fatal_incident() -> None:
     now = _now()
@@ -506,6 +519,7 @@ def mark_playerok_startup_fatal_incident() -> None:
                 PLAYEROK_HEALTH_FATAL_STREAK_THRESHOLD,
                 max(0, _safe_int(payload.get("fatal_streak")) or 0),
             )
+            payload["success_streak"] = 0
             payload["incident_active"] = True
             payload["updated_at"] = now.isoformat(timespec="seconds")
             _prune_health_errors(payload, now)
@@ -589,3 +603,4 @@ def get_error_stats_by_date(day: str) -> dict[str, Any]:
             "errors": errors_list,
             "recent_events": recent_events,
         }
+

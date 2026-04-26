@@ -22,11 +22,13 @@ def _get_connected_playerok_username() -> str:
 
 def settings_account_text():
     config = sett.get("config")
-    token_raw = config["playerok"]["api"]["token"]
-    if token_raw:
-        token_status = 'Привязан'
+    token_raw = str(config["playerok"]["api"].get("token") or "").strip()
+    cookies_raw = str(config["playerok"]["api"].get("cookies") or "").strip()
+    if cookies_raw:
+        cookies_status = "Привязаны"
     else:
-        token_status = 'Отсутствует'
+        cookies_status = "Отсутствуют"
+    token_status = "Привязан" if token_raw else "Отсутствует"
 
     user_agent = config["playerok"]["api"]["user_agent"] or "❌ Не задан"
     proxy = config["playerok"]["api"]["proxy"] or "❌ Не задан"
@@ -36,6 +38,7 @@ def settings_account_text():
         👤 <b>Аккаунт</b>
 
         <b>Авторизация:</b>
+        ┣ 🍪 Cookies: <b>{cookies_status}</b>
         ┣ 🔐 Токен: <b>{token_status}</b>
         ┣ 🪪 Ник аккаунта: <b>{connected_username}</b>
         ┗ 🎩 User-Agent: <b>{user_agent}</b>
@@ -52,7 +55,7 @@ def settings_account_kb():
     config = sett.get("config")
     
     rows = [
-        [InlineKeyboardButton(text="🔐 Изменить токен", callback_data="enter_token")],
+        [InlineKeyboardButton(text="🍪 Изменить cookies", callback_data="enter_token")],
         [InlineKeyboardButton(text="🎩 Изменить User-Agent", callback_data="enter_user_agent")],
     ]
     

@@ -1,5 +1,6 @@
 import re
 import asyncio
+import json
 from logging import getLogger
 from aiogram import types, Router, F
 from aiogram.fsm.context import FSMContext
@@ -11,12 +12,25 @@ from core.utils import restart
 from .. import templates as templ
 from .. import states
 from .. import callback_datas as calls
+from ..cookie_guide import build_cookie_parse_error_text
 from ..helpful import throw_float_message
 
 logger = getLogger("seal.settings")
 
 
 router = Router()
+
+_SET_COOKIE_ATTRS = {
+    "path",
+    "domain",
+    "expires",
+    "max-age",
+    "secure",
+    "httponly",
+    "samesite",
+    "priority",
+    "partitioned",
+}
 
 
 def is_eng_str(str: str):
@@ -30,7 +44,7 @@ def normalize_proxy_format(proxy: str) -> str:
     Поддерживаемые форматы:
     - ip:port → ip:port (без изменений)
     - user:password@ip:port → user:password@ip:port (без изменений)
-    - ip:port:user:password → user:password@ip:port
+    - ip:port:user:password в†’ user:password@ip:port
     """
     ip_pattern = r'(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)'
     # Формат: ip:port:user:password
@@ -47,35 +61,233 @@ def normalize_proxy_format(proxy: str) -> str:
     return proxy
 
 
-@router.message(states.SettingsStates.waiting_for_token, F.text)
-async def handler_waiting_for_token(message: types.Message, state: FSMContext):
-    try:
-        await state.set_state(None)
-        if len(message.text.strip()) <= 3 or len(message.text.strip()) >= 500:
-            raise Exception("❌ Слишком короткое или длинное значение")
+def _parse_cookie_header(cookie_header: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    raw = str(cookie_header or "").strip()
+    if not raw:
+        return parsed
 
-        config = sett.get("config")
-        old_token = config["playerok"]["api"]["token"]
-        new_token = message.text.strip()
-        config["playerok"]["api"]["token"] = new_token
+    if raw.lower().startswith("cookie:"):
+        raw = raw.split(":", 1)[1].strip()
+
+    for separator in ("\n", "\r", "\t"):
+        raw = raw.replace(separator, ";")
+
+    for part in raw.split(";"):
+        chunk = part.strip()
+        if not chunk or "=" not in chunk:
+            continue
+        key, value = chunk.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        if key.lower() in _SET_COOKIE_ATTRS:
+            continue
+        parsed[key] = value.strip()
+    return parsed
+
+
+def _serialize_cookie_map(cookie_map: dict[str, str]) -> str:
+    if not cookie_map:
+        return ""
+    ordered_keys: list[str] = []
+    if "token" in cookie_map:
+        ordered_keys.append("token")
+    if "auid" in cookie_map and "auid" not in ordered_keys:
+        ordered_keys.append("auid")
+    for key in sorted(cookie_map.keys()):
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+    return "; ".join(f"{key}={cookie_map[key]}" for key in ordered_keys)
+
+
+def _parse_cookie_json_payload(payload: object) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+
+    def _add_cookie(name: object, value: object) -> None:
+        key = str(name or "").strip()
+        if not key:
+            return
+        if key.lower() in _SET_COOKIE_ATTRS:
+            return
+        parsed[key] = str(value or "").strip()
+
+    def _walk(node: object) -> None:
+        if node is None:
+            return
+
+        if isinstance(node, str):
+            for key, value in _parse_cookie_header(node).items():
+                _add_cookie(key, value)
+            return
+
+        if isinstance(node, dict):
+            name = node.get("name")
+            if name is not None and "value" in node:
+                _add_cookie(name, node.get("value"))
+
+            for container_key in ("cookies", "cookie", "items", "data", "result"):
+                if container_key in node:
+                    _walk(node.get(container_key))
+
+            for key, value in node.items():
+                if isinstance(value, (dict, list, tuple, set)):
+                    continue
+                key_l = str(key or "").strip().lower()
+                if key_l in _SET_COOKIE_ATTRS or key_l in {"name", "value"}:
+                    continue
+                _add_cookie(key, value)
+
+            for value in node.values():
+                if isinstance(value, (dict, list, tuple)):
+                    _walk(value)
+            return
+
+        if isinstance(node, (list, tuple, set)):
+            for item in node:
+                _walk(item)
+
+    _walk(payload)
+    return parsed
+
+
+def _decode_file_bytes(raw_bytes: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "cp1251"):
+        try:
+            return raw_bytes.decode(encoding)
+        except Exception:
+            continue
+    return raw_bytes.decode("utf-8", errors="replace")
+
+
+async def _extract_cookie_map_from_message(message: types.Message) -> tuple[dict[str, str], str]:
+    if message.text:
+        raw_value = message.text.strip()
+        if len(raw_value) <= 3 or len(raw_value) >= 20000:
+            return {}, "❌ Слишком короткое или длинное значение"
+        parsed = _parse_cookie_header(raw_value)
+        if parsed:
+            return parsed, ""
+        return {}, ""
+
+    document = message.document
+    if document is None:
+        return {}, "Отправьте cookies текстом, .txt или .json файлом."
+
+    file_name = str(document.file_name or "").strip()
+    file_name_l = file_name.lower()
+    is_txt_file = bool(file_name_l) and file_name_l.endswith(".txt")
+    is_json_file = bool(file_name_l) and file_name_l.endswith(".json")
+    if file_name and not (is_json_file or is_txt_file):
+        return {}, "Поддерживаются только .txt и .json файлы с cookies."
+
+    file_size = int(document.file_size or 0)
+    if file_size > 2 * 1024 * 1024:
+        return {}, "Файл с cookies слишком большой (максимум 2 МБ)."
+
+    try:
+        file_info = await message.bot.get_file(document.file_id)
+        downloaded_file = await message.bot.download_file(file_info.file_path)
+        if isinstance(downloaded_file, bytes):
+            raw_bytes = downloaded_file
+        else:
+            raw_bytes = downloaded_file.read()
+    except Exception:
+        return {}, "Не удалось скачать файл с cookies."
+
+    try:
+        payload_text = _decode_file_bytes(raw_bytes)
+    except Exception:
+        return {}, "Не удалось прочитать файл с cookies."
+
+    if is_txt_file:
+        cookie_map = _parse_cookie_header(payload_text)
+        if cookie_map:
+            return cookie_map, ""
+        return {}, "В .txt файле не найдено валидных cookies."
+
+    cookie_map: dict[str, str] = {}
+    try:
+        payload = json.loads(payload_text)
+        cookie_map = _parse_cookie_json_payload(payload)
+    except Exception:
+        cookie_map = {}
+
+    if not cookie_map:
+        cookie_map = _parse_cookie_header(payload_text)
+
+    if cookie_map:
+        return cookie_map, ""
+    return {}, "В .json файле не найдено валидных cookies."
+
+
+async def _handle_waiting_for_token_input(message: types.Message, state: FSMContext):
+    raw_value = message.text.strip() if message.text else ""
+    cookie_map, parse_error = await _extract_cookie_map_from_message(message)
+    if parse_error and not raw_value:
+        raise Exception(build_cookie_parse_error_text(parse_error))
+
+    config = sett.get("config")
+    api_cfg = config["playerok"]["api"]
+
+    if cookie_map:
+        cookie_header = _serialize_cookie_map(cookie_map)
+        if not cookie_header:
+            raise Exception("❌ Не удалось извлечь валидные cookies из данных.")
+
+        api_cfg["cookies"] = cookie_header
+        token_from_cookie = str(cookie_map.get("token") or "").strip()
+        token_hint = "🔐 Токен взят из cookies и синхронизирован."
+        if token_from_cookie:
+            api_cfg["token"] = token_from_cookie
+        else:
+            token_hint = "ℹ️ В cookies не найден token, оставил текущее значение token из конфига."
+
         sett.set("config", config)
-        
-        logger.info(f"🎫 Токен изменён через Telegram")
+        logger.info("🍪 Cookies изменены через Telegram")
 
         await throw_float_message(
             state=state,
             message=message,
             text=templ.settings_account_float_text(
-                f"✅ <b>Токен</b> успешно изменён!\n\n"
-                f"⏳ Применяется автоматически через 3 секунды..."
+                "✅ <b>Cookies</b> успешно обновлены!\n\n"
+                f"{token_hint}\n\n"
+                "⏳ Применяется автоматически через 3 секунды..."
             ),
             reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
         )
+        return
+
+    if len(raw_value) <= 3 or len(raw_value) >= 20000:
+        raise Exception("❌ Слишком короткое или длинное значение")
+
+    api_cfg["token"] = raw_value
+    sett.set("config", config)
+    logger.info("🎫 Токен изменён через Telegram")
+
+    await throw_float_message(
+        state=state,
+        message=message,
+        text=templ.settings_account_float_text(
+            "✅ <b>Токен</b> успешно изменён!\n\n"
+            "ℹ️ Можно отправлять cookies текстом, .txt файлом или .json файлом.\n\n"
+            "⏳ Применяется автоматически через 3 секунды..."
+        ),
+        reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
+    )
+
+
+@router.message(states.SettingsStates.waiting_for_token, F.text)
+@router.message(states.SettingsStates.waiting_for_token, F.document)
+async def handler_waiting_for_token(message: types.Message, state: FSMContext):
+    try:
+        await state.set_state(None)
+        await _handle_waiting_for_token_input(message, state)
     except Exception as e:
         await throw_float_message(
             state=state,
             message=message,
-            text=templ.settings_account_float_text(e), 
+            text=templ.settings_account_float_text(e),
             reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
         )
 
@@ -259,9 +471,9 @@ async def handler_waiting_for_watermark_value(message: types.Message, state: FSM
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
 # ОБРАБОТЧИК ПЕРЕЗАПУСКА БОТА
-# ═══════════════════════════════════════════════════════════════════════════════
+# в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
 
 @router.callback_query(F.data == "restart_bot_confirm")
 async def callback_restart_bot(callback: types.CallbackQuery, state: FSMContext):
@@ -286,3 +498,4 @@ async def callback_restart_bot(callback: types.CallbackQuery, state: FSMContext)
     except Exception as e:
         logger.error(f"Ошибка при перезапуске бота: {e}")
         await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
+
