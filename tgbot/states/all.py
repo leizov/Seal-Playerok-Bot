@@ -11,6 +11,7 @@ class SystemStates(StatesGroup):
     waiting_for_playerok_recovery_cookies = State()
     waiting_for_playerok_recovery_choose_user_agent = State()
     waiting_for_playerok_recovery_user_agent = State()
+    waiting_for_playerok_recovery_proxy = State()
 
 
 class ActionsStates(StatesGroup):

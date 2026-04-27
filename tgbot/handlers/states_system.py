@@ -26,6 +26,7 @@ logger = logging.getLogger("seal.auth")
 
 
 ONBOARDING_CANCEL_CB = "playerok_onboarding_cancel"
+ONBOARDING_SETUP_LATER_CB = "playerok_onboarding_setup_later"
 ONBOARDING_ENTER_PROXY_CB = "playerok_onboarding_enter_proxy"
 ONBOARDING_SKIP_PROXY_CB = "playerok_onboarding_skip_proxy"
 ONBOARDING_ENTER_UA_CB = "playerok_onboarding_enter_ua"
@@ -33,8 +34,11 @@ ONBOARDING_SKIP_UA_CB = "playerok_onboarding_skip_ua"
 
 RECOVERY_OPEN_CB = "playerok_recovery_open"
 RECOVERY_CANCEL_CB = "playerok_recovery_cancel"
+RECOVERY_SETUP_LATER_CB = "playerok_recovery_setup_later"
 RECOVERY_ENTER_UA_CB = "playerok_recovery_enter_ua"
 RECOVERY_SKIP_UA_CB = "playerok_recovery_skip_ua"
+RECOVERY_ENTER_PROXY_CB = "playerok_recovery_enter_proxy"
+RECOVERY_SKIP_PROXY_CB = "playerok_recovery_skip_proxy"
 
 _SET_COOKIE_ATTRS = {
     "path",
@@ -249,6 +253,14 @@ def _onboarding_cancel_kb() -> InlineKeyboardMarkup:
     )
 
 
+def _onboarding_cookie_input_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏱ Настрою позже", callback_data=ONBOARDING_SETUP_LATER_CB)],
+        ]
+    )
+
+
 def _onboarding_proxy_choice_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -288,11 +300,36 @@ def _recovery_ua_choice_kb() -> InlineKeyboardMarkup:
     )
 
 
+def _recovery_proxy_choice_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🌐 Указать прокси", callback_data=RECOVERY_ENTER_PROXY_CB)],
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data=RECOVERY_SKIP_PROXY_CB)],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=RECOVERY_CANCEL_CB)],
+        ]
+    )
+
+
 def _recovery_cancel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отмена", callback_data=RECOVERY_CANCEL_CB)],
         ]
+    )
+
+
+def _recovery_cookie_input_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏱ Настрою позже", callback_data=RECOVERY_SETUP_LATER_CB)],
+        ]
+    )
+
+
+def _setup_later_hint_text() -> str:
+    return (
+        "ℹ️ Настройте позже.\n\n"
+        "Для настройки пропишите /start -> Главное меню -> Аккаунт -> Cookie"
     )
 
 
@@ -306,7 +343,7 @@ def _onboarding_cookies_instruction_text() -> str:
             "🧭 <b>Пошаговый мастер активации Playerok</b>\n\n"
             "Шаг 1/3: отправьте <b>cookies</b>."
         )
-        + "\n\nПосле cookies я предложу шаг с User-Agent и проверю авторизацию тестовым запросом."
+        + "\n\nПосле cookies я предложу шаги с User-Agent и прокси, затем проверю авторизацию тестовым запросом."
     )
 
 
@@ -402,7 +439,7 @@ async def _start_playerok_onboarding(message: types.Message, state: FSMContext) 
         state=state,
         message=message,
         text=_onboarding_cookies_instruction_text(),
-        reply_markup=_onboarding_cancel_kb(),
+        reply_markup=_onboarding_cookie_input_kb(),
     )
 
 
@@ -444,17 +481,19 @@ async def _run_onboarding_probe_and_continue(
         message: types.Message,
         state: FSMContext,
         chosen_user_agent: str | None,
+        chosen_proxy: str,
         prefer_random_user_agent: bool = False,
 ) -> None:
     state_data = await state.get_data()
     cookie_header = str(state_data.get("onboarding_cookie_header") or "").strip()
     if not cookie_header:
         await state.set_state(states.SystemStates.waiting_for_playerok_onboarding_cookies)
+        await state.set_data({})
         await throw_float_message(
             state=state,
             message=message,
             text=build_cookie_collection_instruction("⚠️ Не найдены cookies для проверки. Отправьте их снова."),
-            reply_markup=_onboarding_cancel_kb(),
+            reply_markup=_onboarding_cookie_input_kb(),
         )
         return
 
@@ -477,12 +516,12 @@ async def _run_onboarding_probe_and_continue(
         candidate_user_agent = _pick_random_user_agent()
 
     requests_timeout = int(api_cfg.get("requests_timeout") or 10)
-    proxy_value = ""
+    proxy_value = str(chosen_proxy or "").strip()
 
     await throw_float_message(
         state=state,
         message=message,
-        text="⏳ Проверяю cookies тестовым запросом...",
+        text="⏳ Проверяю cookies и прокси тестовым запросом...",
         reply_markup=templ.destroy_kb(),
     )
 
@@ -500,8 +539,12 @@ async def _run_onboarding_probe_and_continue(
         await throw_float_message(
             state=state,
             message=message,
-            text=_build_probe_error_text(probe_message),
-            reply_markup=_onboarding_cancel_kb(),
+            text=(
+                "❌ <b>Проверка cookies не пройдена</b>\n\n"
+                f"Техническая причина: <code>{html.escape(probe_message or 'неизвестно')}</code>\n\n"
+                f"{_onboarding_cookies_instruction_text()}"
+            ),
+            reply_markup=_onboarding_cookie_input_kb(),
         )
         return
 
@@ -510,19 +553,14 @@ async def _run_onboarding_probe_and_continue(
     if token_from_cookie:
         api_cfg["token"] = token_from_cookie
     api_cfg["user_agent"] = candidate_user_agent
+    api_cfg["proxy"] = proxy_value
     sett.set("config", config)
 
     await state.set_data({})
-    await state.set_state(states.SystemStates.waiting_for_playerok_onboarding_proxy)
-    await throw_float_message(
-        state=state,
+    await _finalize_onboarding(
         message=message,
-        text=(
-            f"✅ <b>{html.escape(probe_message)}</b>\n\n"
-            "Шаг 3/3: хотите добавить прокси для Playerok?\n"
-            "Этот шаг можно пропустить."
-        ),
-        reply_markup=_onboarding_proxy_choice_kb(),
+        state=state,
+        actor_user_id=message.from_user.id,
     )
 
 
@@ -530,17 +568,19 @@ async def _run_recovery_auth_attempt(
         message: types.Message,
         state: FSMContext,
         chosen_user_agent: str | None,
+        chosen_proxy: str,
         actor_user_id: int,
 ) -> None:
     state_data = await state.get_data()
     cookie_header = str(state_data.get("recovery_cookie_header") or "").strip()
     if not cookie_header:
         await state.set_state(states.SystemStates.waiting_for_playerok_recovery_cookies)
+        await state.set_data({})
         await throw_float_message(
             state=state,
             message=message,
             text=build_cookie_collection_instruction("⚠️ Не найдены cookies для проверки. Отправьте их снова."),
-            reply_markup=_recovery_cancel_kb(),
+            reply_markup=_recovery_cookie_input_kb(),
         )
         return
 
@@ -561,12 +601,12 @@ async def _run_recovery_auth_attempt(
         candidate_user_agent = _pick_random_user_agent()
 
     requests_timeout = int(api_cfg.get("requests_timeout") or 10)
-    proxy_value = str(api_cfg.get("proxy") or "").strip()
+    proxy_value = str(chosen_proxy or "").strip()
 
     await throw_float_message(
         state=state,
         message=message,
-        text="⏳ Проверяю авторизацию с новыми cookies...",
+        text="⏳ Проверяю авторизацию с новыми cookies и прокси...",
         reply_markup=templ.destroy_kb(),
     )
 
@@ -580,11 +620,16 @@ async def _run_recovery_auth_attempt(
     )
     if not probe_ok:
         await state.set_state(states.SystemStates.waiting_for_playerok_recovery_cookies)
+        await state.set_data({})
         await throw_float_message(
             state=state,
             message=message,
-            text=_build_probe_error_text(probe_message),
-            reply_markup=_recovery_cancel_kb(),
+            text=(
+                "❌ <b>Проверка cookies не пройдена</b>\n\n"
+                f"Техническая причина: <code>{html.escape(probe_message or 'неизвестно')}</code>\n\n"
+                f"{_recovery_instruction_text()}"
+            ),
+            reply_markup=_recovery_cookie_input_kb(),
         )
         return
 
@@ -593,6 +638,7 @@ async def _run_recovery_auth_attempt(
     if token_from_cookie:
         api_cfg["token"] = token_from_cookie
     api_cfg["user_agent"] = candidate_user_agent
+    api_cfg["proxy"] = proxy_value
     sett.set("config", config)
 
     await state.set_state(None)
@@ -616,16 +662,17 @@ async def _run_recovery_auth_attempt(
         return
 
     await state.set_state(states.SystemStates.waiting_for_playerok_recovery_cookies)
+    await state.set_data({})
     fail_text = (
         "❌ <b>Переподключение пока не удалось</b>\n\n"
         f"{html.escape(reconnect_message or 'Неизвестная ошибка')}\n\n"
-        f"{build_cookie_collection_instruction('Отправьте новые cookies ещё раз.')}"
+        f"{_recovery_instruction_text()}"
     )
     await throw_float_message(
         state=state,
         message=message,
         text=fail_text,
-        reply_markup=_recovery_cancel_kb(),
+        reply_markup=_recovery_cookie_input_kb(),
     )
 
 
@@ -751,10 +798,25 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
 @router.callback_query(F.data == ONBOARDING_CANCEL_CB)
 async def callback_onboarding_cancel(callback: types.CallbackQuery, state: FSMContext):
     current_state = await state.get_state()
+    # Если пользователь находился на вводе прокси, возвращаем его к выбору прокси (меню с кнопками)
+    if current_state == states.SystemStates.waiting_for_playerok_onboarding_proxy.state:
+        await state.set_state(states.SystemStates.waiting_for_playerok_onboarding_proxy)
+        _set_recovery_dialog_active(callback.from_user.id, True)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            callback=callback,
+            text=(
+                "Шаг 3/3: укажите прокси для проверки cookies.\n"
+                "Можно пропустить шаг и проверить без прокси."
+            ),
+            reply_markup=_onboarding_proxy_choice_kb(),
+        )
+        return
+
     onboarding_ua_choice_states = {
         states.SystemStates.waiting_for_playerok_onboarding_choose_user_agent.state,
         states.SystemStates.waiting_for_playerok_onboarding_user_agent.state,
-        states.SystemStates.waiting_for_playerok_onboarding_proxy.state,
     }
     if current_state in onboarding_ua_choice_states:
         await state.set_state(states.SystemStates.waiting_for_playerok_onboarding_choose_user_agent)
@@ -783,6 +845,20 @@ async def callback_onboarding_cancel(callback: types.CallbackQuery, state: FSMCo
     )
 
 
+@router.callback_query(F.data == ONBOARDING_SETUP_LATER_CB)
+async def callback_onboarding_setup_later(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(None)
+    await state.set_data({})
+    _set_recovery_dialog_active(callback.from_user.id, False)
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        callback=callback,
+        text=_setup_later_hint_text(),
+        reply_markup=templ.menu_kb(page=0),
+    )
+
+
 async def _handle_onboarding_cookies_input(message: types.Message, state: FSMContext) -> None:
     cookie_map, parse_error = await _extract_cookie_map_from_message(message)
     cookie_header = _serialize_cookie_map(cookie_map)
@@ -792,7 +868,7 @@ async def _handle_onboarding_cookies_input(message: types.Message, state: FSMCon
             state=state,
             message=message,
             text=build_cookie_parse_error_text(safe_parse_error),
-            reply_markup=_onboarding_cancel_kb(),
+            reply_markup=_onboarding_cookie_input_kb(),
         )
         return
 
@@ -841,18 +917,21 @@ async def callback_onboarding_enter_ua(callback: types.CallbackQuery, state: FSM
     F.data == ONBOARDING_SKIP_UA_CB,
 )
 async def callback_onboarding_skip_ua(callback: types.CallbackQuery, state: FSMContext):
+    await state.update_data(
+        onboarding_user_agent="",
+        onboarding_prefer_random_user_agent=True,
+    )
+    await state.set_state(states.SystemStates.waiting_for_playerok_onboarding_proxy)
     await throw_float_message(
         state=state,
         message=callback.message,
         callback=callback,
-        text="⏭ Подставляю случайный User-Agent.",
-        reply_markup=templ.destroy_kb(),
-    )
-    await _run_onboarding_probe_and_continue(
-        message=callback.message,
-        state=state,
-        chosen_user_agent=None,
-        prefer_random_user_agent=True,
+        text=(
+            "⏭ Будет использован случайный User-Agent.\n\n"
+            "Шаг 3/3: укажите прокси для проверки cookies.\n"
+            "Можно пропустить шаг и проверить без прокси."
+        ),
+        reply_markup=_onboarding_proxy_choice_kb(),
     )
 
 
@@ -868,10 +947,20 @@ async def handler_onboarding_user_agent(message: types.Message, state: FSMContex
         )
         return
 
-    await _run_onboarding_probe_and_continue(
-        message=message,
+    await state.update_data(
+        onboarding_user_agent=user_agent,
+        onboarding_prefer_random_user_agent=False,
+    )
+    await state.set_state(states.SystemStates.waiting_for_playerok_onboarding_proxy)
+    await throw_float_message(
         state=state,
-        chosen_user_agent=user_agent,
+        message=message,
+        text=(
+            "✅ User-Agent принят.\n\n"
+            "Шаг 3/3: укажите прокси для проверки cookies.\n"
+            "Можно пропустить шаг и проверить без прокси."
+        ),
+        reply_markup=_onboarding_proxy_choice_kb(),
     )
 
 
@@ -890,7 +979,9 @@ async def callback_onboarding_enter_proxy(callback: types.CallbackQuery, state: 
             "• <code>ip:port</code>\n"
             "• <code>user:pass@ip:port</code>\n"
             "• <code>socks5://user:pass@ip:port</code>\n\n"
-            "Если хотите пропустить, отправьте <code>-</code>."
+            "<i>Если вы ставите бота на хост/VDS, обязательно подключите прокси для Playerok "
+            "(<b>желательно RU региона</b>).</i>\n"
+            "Купить: <a href=\"https://proxyline.net?ref=448587\">proxyline.net</a>"
         ),
         reply_markup=_onboarding_cancel_kb(),
     )
@@ -901,35 +992,38 @@ async def callback_onboarding_enter_proxy(callback: types.CallbackQuery, state: 
     F.data == ONBOARDING_SKIP_PROXY_CB,
 )
 async def callback_onboarding_skip_proxy(callback: types.CallbackQuery, state: FSMContext):
-    config = sett.get("config")
-    config["playerok"]["api"]["proxy"] = ""
-    sett.set("config", config)
-
+    state_data = await state.get_data()
+    chosen_user_agent = str(state_data.get("onboarding_user_agent") or "").strip() or None
+    prefer_random_user_agent = bool(state_data.get("onboarding_prefer_random_user_agent"))
     await throw_float_message(
         state=state,
         message=callback.message,
         callback=callback,
-        text="⏭ Шаг с прокси пропущен. Прокси отключён.",
+        text="⏭ Проверяю cookies без прокси.",
         reply_markup=templ.destroy_kb(),
     )
-    await _finalize_onboarding(
+    await _run_onboarding_probe_and_continue(
         message=callback.message,
         state=state,
-        actor_user_id=callback.from_user.id,
+        chosen_user_agent=chosen_user_agent,
+        chosen_proxy="",
+        prefer_random_user_agent=prefer_random_user_agent,
     )
 
 
 @router.message(states.SystemStates.waiting_for_playerok_onboarding_proxy, F.text)
 async def handler_onboarding_proxy(message: types.Message, state: FSMContext):
     proxy_value = message.text.strip()
+    state_data = await state.get_data()
+    chosen_user_agent = str(state_data.get("onboarding_user_agent") or "").strip() or None
+    prefer_random_user_agent = bool(state_data.get("onboarding_prefer_random_user_agent"))
     if not proxy_value or proxy_value in {"-", "skip", "пропустить", "Пропустить"}:
-        config = sett.get("config")
-        config["playerok"]["api"]["proxy"] = ""
-        sett.set("config", config)
-        await _finalize_onboarding(
+        await _run_onboarding_probe_and_continue(
             message=message,
             state=state,
-            actor_user_id=message.from_user.id,
+            chosen_user_agent=chosen_user_agent,
+            chosen_proxy="",
+            prefer_random_user_agent=prefer_random_user_agent,
         )
         return
 
@@ -945,13 +1039,12 @@ async def handler_onboarding_proxy(message: types.Message, state: FSMContext):
         )
         return
 
-    config = sett.get("config")
-    config["playerok"]["api"]["proxy"] = normalized_proxy
-    sett.set("config", config)
-    await _finalize_onboarding(
+    await _run_onboarding_probe_and_continue(
         message=message,
         state=state,
-        actor_user_id=message.from_user.id,
+        chosen_user_agent=chosen_user_agent,
+        chosen_proxy=normalized_proxy,
+        prefer_random_user_agent=prefer_random_user_agent,
     )
 
 
@@ -965,13 +1058,28 @@ async def callback_recovery_open(callback: types.CallbackQuery, state: FSMContex
         message=callback.message,
         callback=callback,
         text=_recovery_instruction_text(),
-        reply_markup=_recovery_cancel_kb(),
+        reply_markup=_recovery_cookie_input_kb(),
     )
 
 
 @router.callback_query(F.data == RECOVERY_CANCEL_CB)
 async def callback_recovery_cancel(callback: types.CallbackQuery, state: FSMContext):
     current_state = await state.get_state()
+    # Если пользователь находился на вводе прокси, возвращаем его к выбору прокси (меню с кнопками)
+    if current_state == states.SystemStates.waiting_for_playerok_recovery_proxy.state:
+        await state.set_state(states.SystemStates.waiting_for_playerok_recovery_proxy)
+        _set_recovery_dialog_active(callback.from_user.id, True)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            callback=callback,
+            text=(
+                "Укажите прокси для проверки cookies или пропустите шаг."
+            ),
+            reply_markup=_recovery_proxy_choice_kb(),
+        )
+        return
+
     recovery_ua_choice_states = {
         states.SystemStates.waiting_for_playerok_recovery_choose_user_agent.state,
         states.SystemStates.waiting_for_playerok_recovery_user_agent.state,
@@ -1003,6 +1111,20 @@ async def callback_recovery_cancel(callback: types.CallbackQuery, state: FSMCont
     )
 
 
+@router.callback_query(F.data == RECOVERY_SETUP_LATER_CB)
+async def callback_recovery_setup_later(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(None)
+    await state.set_data({})
+    _set_recovery_dialog_active(callback.from_user.id, False)
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        callback=callback,
+        text=_setup_later_hint_text(),
+        reply_markup=templ.menu_kb(page=0),
+    )
+
+
 async def _handle_recovery_cookies_input(message: types.Message, state: FSMContext) -> None:
     cookie_map, parse_error = await _extract_cookie_map_from_message(message)
     if not cookie_map:
@@ -1011,7 +1133,7 @@ async def _handle_recovery_cookies_input(message: types.Message, state: FSMConte
             state=state,
             message=message,
             text=build_cookie_parse_error_text(safe_parse_error),
-            reply_markup=_recovery_cancel_kb(),
+            reply_markup=_recovery_cookie_input_kb(),
         )
         return
 
@@ -1021,7 +1143,7 @@ async def _handle_recovery_cookies_input(message: types.Message, state: FSMConte
             state=state,
             message=message,
             text="❌ После парсинга не осталось валидных cookies. Попробуйте снова.",
-            reply_markup=_recovery_cancel_kb(),
+            reply_markup=_recovery_cookie_input_kb(),
         )
         return
 
@@ -1070,18 +1192,19 @@ async def callback_recovery_enter_ua(callback: types.CallbackQuery, state: FSMCo
     F.data == RECOVERY_SKIP_UA_CB,
 )
 async def callback_recovery_skip_ua(callback: types.CallbackQuery, state: FSMContext):
+    await state.update_data(
+        recovery_user_agent="",
+    )
+    await state.set_state(states.SystemStates.waiting_for_playerok_recovery_proxy)
     await throw_float_message(
         state=state,
         message=callback.message,
         callback=callback,
-        text="⏭ Использую текущий User-Agent, а если он пустой — подставлю случайный.",
-        reply_markup=templ.destroy_kb(),
-    )
-    await _run_recovery_auth_attempt(
-        message=callback.message,
-        state=state,
-        chosen_user_agent=None,
-        actor_user_id=callback.from_user.id,
+        text=(
+            "⏭ Будет использован текущий/случайный User-Agent.\n\n"
+            "Укажите прокси для проверки cookies или пропустите шаг."
+        ),
+        reply_markup=_recovery_proxy_choice_kb(),
     )
 
 
@@ -1097,9 +1220,99 @@ async def handler_recovery_user_agent(message: types.Message, state: FSMContext)
         )
         return
 
+    await state.update_data(
+        recovery_user_agent=user_agent,
+    )
+    await state.set_state(states.SystemStates.waiting_for_playerok_recovery_proxy)
+    await throw_float_message(
+        state=state,
+        message=message,
+        text=(
+            "✅ User-Agent принят.\n\n"
+            "Укажите прокси для проверки cookies или пропустите шаг."
+        ),
+        reply_markup=_recovery_proxy_choice_kb(),
+    )
+
+
+@router.callback_query(
+    states.SystemStates.waiting_for_playerok_recovery_proxy,
+    F.data == RECOVERY_ENTER_PROXY_CB,
+)
+async def callback_recovery_enter_proxy(callback: types.CallbackQuery, state: FSMContext):
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        callback=callback,
+        text=(
+            "🌐 Отправьте прокси для Playerok.\n\n"
+            "Поддерживаемые форматы:\n"
+            "• <code>ip:port</code>\n"
+            "• <code>user:pass@ip:port</code>\n"
+            "• <code>socks5://user:pass@ip:port</code>\n\n"
+            "<i>Если вы ставите бота на хост/VDS, обязательно подключите прокси для Playerok "
+            "(<b>желательно RU региона</b>).</i>\n"
+            "Купить: <a href=\"https://proxyline.net?ref=448587\">proxyline.net</a>"
+        ),
+        reply_markup=_recovery_cancel_kb(),
+    )
+
+
+@router.callback_query(
+    states.SystemStates.waiting_for_playerok_recovery_proxy,
+    F.data == RECOVERY_SKIP_PROXY_CB,
+)
+async def callback_recovery_skip_proxy(callback: types.CallbackQuery, state: FSMContext):
+    state_data = await state.get_data()
+    chosen_user_agent = str(state_data.get("recovery_user_agent") or "").strip() or None
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        callback=callback,
+        text="⏭ Проверяю cookies без прокси.",
+        reply_markup=templ.destroy_kb(),
+    )
+    await _run_recovery_auth_attempt(
+        message=callback.message,
+        state=state,
+        chosen_user_agent=chosen_user_agent,
+        chosen_proxy="",
+        actor_user_id=callback.from_user.id,
+    )
+
+
+@router.message(states.SystemStates.waiting_for_playerok_recovery_proxy, F.text)
+async def handler_recovery_proxy(message: types.Message, state: FSMContext):
+    proxy_value = message.text.strip()
+    state_data = await state.get_data()
+    chosen_user_agent = str(state_data.get("recovery_user_agent") or "").strip() or None
+
+    if not proxy_value or proxy_value in {"-", "skip", "пропустить", "Пропустить"}:
+        await _run_recovery_auth_attempt(
+            message=message,
+            state=state,
+            chosen_user_agent=chosen_user_agent,
+            chosen_proxy="",
+            actor_user_id=message.from_user.id,
+        )
+        return
+
+    try:
+        validate_proxy(proxy_value)
+        normalized_proxy = normalize_proxy(proxy_value)
+    except Exception as e:
+        await throw_float_message(
+            state=state,
+            message=message,
+            text=f"❌ Некорректный прокси: {html.escape(str(e))}",
+            reply_markup=_recovery_cancel_kb(),
+        )
+        return
+
     await _run_recovery_auth_attempt(
         message=message,
         state=state,
-        chosen_user_agent=user_agent,
+        chosen_user_agent=chosen_user_agent,
+        chosen_proxy=normalized_proxy,
         actor_user_id=message.from_user.id,
     )
