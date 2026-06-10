@@ -12,7 +12,8 @@ def item_card_kb(
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     status_name = str(item_status or "").upper()
-    can_publish = status_name in {"DRAFT", "EXPIRED"}
+    can_restore = status_name in {"SOLD", "EXPIRED"}
+    can_publish = status_name == "DRAFT" or can_restore
 
     if is_owner:
         delete_button = InlineKeyboardButton(
@@ -27,7 +28,9 @@ def item_card_kb(
                 [
                     InlineKeyboardButton(
                         text=(
-                            "\U0001F4E4 \u041E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u0442\u044C \u0442\u043E\u0432\u0430\u0440"
+                            "\u267B\uFE0F \u0412\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0442\u043E\u0432\u0430\u0440"
+                            if can_restore
+                            else "\U0001F4E4 \u041E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u0442\u044C \u0442\u043E\u0432\u0430\u0440"
                             if can_publish
                             else "\U0001F4C8 \u041F\u043E\u0434\u043D\u044F\u0442\u044C \u0442\u043E\u0432\u0430\u0440"
                         ),

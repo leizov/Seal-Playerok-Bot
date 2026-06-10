@@ -601,7 +601,11 @@ async def callback_items_actions(
             if not card_payload.get("is_owner"):
                 await callback.answer("\u041f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c \u0442\u043e\u0432\u0430\u0440 \u043c\u043e\u0436\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446", show_alert=True)
                 return
-            if str(card_payload.get("item_status") or "").upper() not in {"DRAFT", "EXPIRED"}:
+            item_status_now = str(card_payload.get("item_status") or "").upper()
+            is_restore = item_status_now in {"SOLD", "EXPIRED"}
+            confirm_title = ("\u267b\ufe0f \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435" if is_restore else "\U0001F4E4 \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044e")
+            confirm_type = ("\u0440\u0430\u0437\u043c\u0435\u0449\u0435\u043d\u0438\u044f" if is_restore else "\u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438")
+            if item_status_now not in {"DRAFT", "EXPIRED", "SOLD"}:
                 await callback.answer("\u041f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e \u0434\u043b\u044f \u0447\u0435\u0440\u043d\u043e\u0432\u0438\u043a\u043e\u0432 \u0438 \u0438\u0441\u0442\u0451\u043a\u0448\u0438\u0445 \u0442\u043e\u0432\u0430\u0440\u043e\u0432", show_alert=True)
                 return
 
@@ -620,6 +624,7 @@ async def callback_items_actions(
                     "kind": "publish",
                     "item_id": item_id,
                     "item_name": getattr(full_item, "name", None),
+                    "is_restore": is_restore,
                     "variants": {
                         "DEFAULT": {
                             "priority_status_id": str(getattr(default_status, "id", "")) if default_status else "",
@@ -637,8 +642,8 @@ async def callback_items_actions(
                 state=state,
                 message=callback.message,
                 text=templ.do_action_text(
-                    f"\U0001F4E4 \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044e \u0442\u043e\u0432\u0430\u0440\u0430 <b>{getattr(full_item, 'name', '\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f')}</b>\n"
-                    "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043f \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438 \u043d\u0438\u0436\u0435:"
+                    f"{confirm_title} \u0442\u043e\u0432\u0430\u0440\u0430 <b>{getattr(full_item, 'name', '\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f')}</b>\n"
+                    f"\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043f {confirm_type} \u043d\u0438\u0436\u0435:"
                 ),
                 reply_markup=templ.item_publish_confirm_kb(
                     has_default=default_status is not None,
@@ -690,7 +695,8 @@ async def callback_items_actions(
                 callback=callback,
             )
             if callback.message is not None:
-                await callback.message.answer(f"\u2705 \u0422\u043e\u0432\u0430\u0440 \u0443\u0441\u043f\u0435\u0448\u043d\u043e \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d: {item_name}")
+                done_word = "\u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d" if item_action.get("is_restore") else "\u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d"
+                await callback.message.answer(f"\u2705 \u0422\u043e\u0432\u0430\u0440 \u0443\u0441\u043f\u0435\u0448\u043d\u043e {done_word}: {item_name}")
         except Exception as e:
             await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c \u0442\u043e\u0432\u0430\u0440: {e}", show_alert=True)
         return
