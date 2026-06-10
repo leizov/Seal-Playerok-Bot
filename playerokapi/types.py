@@ -342,19 +342,15 @@ class UserProfile:
         :return: Страница профилей предметов.
         :rtype: `PlayerokAPI.types.ItemProfileList`
         """
-        payload_status = [] if statuses else None
         if statuses:
-            for status in statuses:
-                payload_status.append(status.name)
-        headers = {
-            "Accept": "*/*",
-            "Content-Type": "application/json",
-            "Origin": self.__account.base_url
-        }
+            payload_status = [status.name for status in statuses]
+        else:
+            payload_status = [status.name for status in ItemStatuses]
+        headers = {"accept": "*/*"}
 
         payload = {
             "operationName": "items",
-            "variables": json.dumps({"pagination": {"first": count, "after": after_cursor}, "filter": {"userId": self.id, "status": payload_status}, "showForbiddenImage": False}, ensure_ascii=False),
+            "variables": json.dumps({"pagination": {"first": count, "after": after_cursor}, "filter": {"userId": self.id, "status": payload_status, "withOfficial": False}, "showForbiddenImage": True}, ensure_ascii=False),
             "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get('items')}}, ensure_ascii=False)
         }
         r = self.__account.request("get", f"{self.__account.base_url}/graphql", headers, payload).json()
@@ -403,11 +399,7 @@ class UserProfile:
         :return: Страница отзывов.
         :rtype: `PlayerokAPI.types.ReviewList`
         """
-        headers = {
-            "Accept": "*/*",
-            "Content-Type": "application/json",
-            "Origin": self.__account.base_url,
-        }
+        headers = {"accept": "*/*"}
 
         filters = {"userId": self.id, "status": [status.name] if status else None}
         if comment_required is not None:

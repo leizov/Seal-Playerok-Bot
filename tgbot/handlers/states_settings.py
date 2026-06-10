@@ -13,6 +13,7 @@ from .. import templates as templ
 from .. import states
 from .. import callback_datas as calls
 from ..cookie_guide import build_cookie_parse_error_text
+from .states_system import _probe_playerok_credentials, _build_probe_error_text
 from ..helpful import throw_float_message
 
 logger = getLogger("seal.settings")
@@ -235,6 +236,17 @@ async def _handle_waiting_for_token_input(message: types.Message, state: FSMCont
         if not cookie_header:
             raise Exception("❌ Не удалось извлечь валидные cookies из данных.")
 
+        probe_ok, probe_msg = await _probe_playerok_credentials(
+            cookie_header=cookie_header,
+            cookie_map=cookie_map,
+            user_agent=str(api_cfg.get("user_agent") or ""),
+            proxy=str(api_cfg.get("proxy") or ""),
+            fallback_token=str(api_cfg.get("token") or ""),
+            requests_timeout=int(api_cfg.get("requests_timeout") or 10),
+        )
+        if not probe_ok:
+            raise Exception(_build_probe_error_text(probe_msg))
+
         api_cfg["cookies"] = cookie_header
         token_from_cookie = str(cookie_map.get("token") or "").strip()
         token_hint = "🔐 Токен взят из cookies и синхронизирован."
@@ -260,6 +272,17 @@ async def _handle_waiting_for_token_input(message: types.Message, state: FSMCont
 
     if len(raw_value) <= 3 or len(raw_value) >= 20000:
         raise Exception("❌ Слишком короткое или длинное значение")
+
+    probe_ok, probe_msg = await _probe_playerok_credentials(
+        cookie_header=str(api_cfg.get("cookies") or ""),
+        cookie_map={"token": raw_value},
+        user_agent=str(api_cfg.get("user_agent") or ""),
+        proxy=str(api_cfg.get("proxy") or ""),
+        fallback_token=raw_value,
+        requests_timeout=int(api_cfg.get("requests_timeout") or 10),
+    )
+    if not probe_ok:
+        raise Exception(_build_probe_error_text(probe_msg))
 
     api_cfg["token"] = raw_value
     sett.set("config", config)

@@ -550,7 +550,7 @@ class PlayerokBot:
                     for item in my_items:
                         try:
                             # Проверяем что товар имеет премиум статус (priority != None)
-                            if not item.priority or item.priority == "DEFAULT":
+                            if not item.priority or item.priority == PriorityTypes.DEFAULT:
                                 continue
 
                             # Проверяем включения/исключения
@@ -962,11 +962,13 @@ class PlayerokBot:
         if not self.is_connected or self.account is None:
             return
         try:
+            profile = None
             for i in range(5):
                 try:
                     profile = self.account.get_user(id=self.account.id)
+                    break
                 except Exception as e:
-                    if i-1 == 5:
+                    if i == 4:
                         raise e
                     time.sleep(3)
 
@@ -993,11 +995,13 @@ class PlayerokBot:
                 item = _item[0]
 
 
+            priority_statuses = None
             for i in range(5):
                 try:
                     priority_statuses = self.account.get_item_priority_statuses(item.id, item.price)
+                    break
                 except Exception as e:
-                    if i-1 == 5:
+                    if i == 4:
                         raise e
                     time.sleep(3)
 
@@ -1007,7 +1011,8 @@ class PlayerokBot:
             try: priority_status = [status for status in priority_statuses if status.type is PriorityTypes.DEFAULT or status.price == 0][0]
             except IndexError: priority_status = [status for status in priority_statuses][0]
 
-            publish_attempts = 2
+            new_item = None
+            publish_attempts = 3
             publish_delay = 3
             for i in range(publish_attempts):
                 try:
@@ -1018,9 +1023,11 @@ class PlayerokBot:
                 except Exception as e:
                     self.logger.error(
                         f"{Fore.LIGHTRED_EX}Неудачная попытка востановления предмета {i+1}/{publish_attempts} «{item.name}» произошла ошибка: {Fore.WHITE}{e}")
-                    return
+                    time.sleep(publish_delay)
 
-            if new_item.status is ItemStatuses.PENDING_APPROVAL or new_item.status is ItemStatuses.APPROVED:
+            if new_item is None:
+                self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось восстановить предмет «{item.name}»: все попытки публикации не удались")
+            elif new_item.status is ItemStatuses.PENDING_APPROVAL or new_item.status is ItemStatuses.APPROVED:
                 self.logger.info(f"{Fore.LIGHTWHITE_EX}«{item.name}» {Fore.WHITE}— {Fore.YELLOW}товар восстановлен")
                 # Учитываем стоимость автовосстановления (если цена статуса доступна).
                 if getattr(priority_status, "price", None) is not None:
@@ -1057,6 +1064,7 @@ class PlayerokBot:
                 try:
                     # Получаем статусы приоритета
                     priority_statuses = self.account.get_item_priority_statuses(full_item.id, full_item.price)
+                    break
                 except Exception as e:
                     last_error = e
                     time.sleep(get_delay)
@@ -1118,7 +1126,7 @@ class PlayerokBot:
 
                 except Exception as e:
                     self.logger.error(
-                        f"{Fore.LIGHTRED_EX}Неудачная попытка поднятия товара {attempt+1}/2 «{full_item.name}»: {Fore.WHITE}{e}",
+                        f"{Fore.LIGHTRED_EX}Неудачная попытка поднятия товара {attempt+1}/{publish_attempts} «{full_item.name}»: {Fore.WHITE}{e}",
                         exc_info=True
                     )
                     if attempt != publish_attempts-1:  # Если это не последняя попытка

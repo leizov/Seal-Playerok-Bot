@@ -8,7 +8,7 @@ COOKIE_COLLECTION_GUIDE_TEXT = (
     "1) КАЧАЕМ РАСШИРЕНИЕ Cookie Manager\n"
     "https://chromewebstore.google.com/detail/cookie-manager/kbnfbcpkiaganjpcanopcgeoehkleeck\n\n"
     "2) ЗАХОДИМ НА PLAYEROK - АВТОРИЗУЕМСЯ В СВОЁМ АККАУНТЕ И ОБНОВЛЯЕМ СТРАНИЦУ\n\n"
-    "3) НАЖИМАЕТЕ НА ИКНОКУ РАСШИРЕНИЯ  НА КНОПКУ Export\n\n"
+    "3) НАЖИМАЕМ НА ИКОНКУ РАСШИРЕНИЯ И ЖМЁМ КНОПКУ Export\n\n"
     "ПОСЛЕ ЧЕГО У НАС СКАЧАЕТСЯ ФАЙЛ\n"
     "ЭТОТ ФАЙЛ МЫ И ОТПРАВЛЯЕМ БОТУ В ТГ!!!"
 )
