@@ -122,7 +122,7 @@ class TelegramBot:
         self._startup_status_last_text: dict[int, str] = {}
         self._startup_status_lock = asyncio.Lock()
         self._playerok_startup_active: bool = False
-        self._playerok_startup_details: str = "TG запущен, ожидаю активацию Playerok."
+        self._playerok_startup_details: str = "Запускаюсь, проверяю Playerok…"
         self._playerok_activation_prompt_sent: bool = False
         self._recovery_dialog_lock = threading.Lock()
         self._active_recovery_dialog_users: set[int] = set()
@@ -314,13 +314,18 @@ class TelegramBot:
     def _build_playerok_startup_status_text(self, active: bool, details: str | None = None) -> str:
         base_details = str(details or "").strip()
         if not base_details:
-            base_details = "Аккаунт активен и готов к работе." if active else "TG запущен, ожидаю активацию Playerok."
+            base_details = "Аккаунт активен и готов к работе." if active else "Жду активацию — отправь cookies, и оживлю аккаунт."
         safe_details = html_escape(base_details)
 
-        playerok_line = "✅ <b>Playerok:</b> аккаунт активен" if active else "⏳ <b>Playerok:</b> ожидаю активацию"
+        playerok_line = (
+            "┗ ✅ <b>Playerok</b> — аккаунт активен"
+            if active else
+            "┗ ⏳ <b>Playerok</b> — жду активацию"
+        )
         return (
-            "📍 <b>Статус запуска</b>\n\n"
-            "✅ <b>Telegram:</b> запущен\n"
+            f"🦭 <b>Seal Playerok Bot</b> <code>v{VERSION}</code> на связи!\n\n"
+            "<b>Статус запуска:</b>\n"
+            "┣ ✅ <b>Telegram</b> — запущен\n"
             f"{playerok_line}\n\n"
             f"{safe_details}"
         )
@@ -380,8 +385,11 @@ class TelegramBot:
             if prev_text == text:
                 return
 
+            # Правим только сообщение текущего запуска: id из конфига от прошлого запуска
+            # уехал вверх по истории — на него не редактируем, а шлём новое (видно внизу чата).
+            sent_this_run = user_id in self._startup_status_last_text
             stored_message_id = self._startup_status_message_ids.get(user_id)
-            if stored_message_id:
+            if sent_this_run and stored_message_id:
                 try:
                     await self.bot.edit_message_text(
                         chat_id=user_id,

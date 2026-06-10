@@ -349,7 +349,7 @@ class PlayerokBot:
             ]
         )
 
-        details = "Нужны новые cookies от аккаунта Playerok для восстановления подключения."
+        details = "🍪 Нужны свежие cookies — обнови, и переподключусь."
         notify_text = (
             f"⚠️ Обнаружена защита {vendor_title} при подключении к Playerok.\n\n"
             "Нужно обновить cookies аккаунта через Telegram и повторить подключение."
@@ -400,7 +400,7 @@ class PlayerokBot:
 
             proxy_status = "с прокси" if self.config["playerok"]["api"]["proxy"] else "без прокси"
             self.logger.info(f"{Fore.GREEN}✅ Подключено к Playerok ({proxy_status})")
-            active_details = f"Аккаунт Playerok активен: @{self.account.username}"
+            active_details = f"👤 @{self.account.username} — погнали работать! 🚀"
             self._notify_startup_status(active=True, details=active_details)
             return True
         except Exception as e:
@@ -2082,7 +2082,7 @@ class PlayerokBot:
             self.logger.warning(f"{Fore.YELLOW}⚠️ Playerok недоступен на старте.")
             self._notify_startup_status(
                 active=False,
-                details="Telegram запущен, ожидаю активацию Playerok. Проверьте cookies и User-Agent.",
+                details="🍪 Проверь cookies и User-Agent — переподключусь автоматически.",
             )
 
             try:
@@ -2110,13 +2110,13 @@ class PlayerokBot:
         elif not playerok_api_ready:
             self._notify_startup_status(
                 active=False,
-                details="Telegram запущен, ожидаю активацию Playerok. Отправьте cookies и User-Agent в Telegram.",
+                details="🍪 Отправь cookies и User-Agent в Telegram — и я оживлю аккаунт!",
             )
             self.logger.info(f"{Fore.YELLOW}⏳ Playerok ещё не активирован: ожидаю cookies и User-Agent.")
         else:
             self._notify_startup_status(
                 active=True,
-                details=f"Аккаунт Playerok активен: @{self.account.username}",
+                details=f"👤 @{self.account.username} — погнали работать! 🚀",
             )
             self.logger.info(f"{SUCCESS_COLOR}✅ Аккаунт Playerok активен: @{self.account.username}")
 
