@@ -16,6 +16,8 @@ BACKUP_VERSION = 1
 
 _BOT_SETTINGS_EXCLUDED_EXTENSIONS = {".py", ".pyc", ".pyo"}
 _PLUGIN_EXCLUDED_EXTENSIONS = {".log"}
+_CONFIG_REL_PATH = "config.json"
+_MACHINE_SPECIFIC_CONFIG_SECTIONS = ("telegram",)
 
 
 def _normalize_rel_path(path: str) -> str:
@@ -146,12 +148,38 @@ def _safe_remove_file(abs_path: str) -> None:
         os.remove(abs_path)
 
 
+def _strip_machine_specific_sections(entry: dict[str, str]) -> dict[str, str]:
+    config = json.loads(_decode_entry(entry).decode("utf-8"))
+    for section in _MACHINE_SPECIFIC_CONFIG_SECTIONS:
+        config.pop(section, None)
+    return {"encoding": "utf-8", "content": json.dumps(config, ensure_ascii=False, indent=4)}
+
+
+def _preserve_machine_specific_sections(entry: dict[str, str]) -> dict[str, str]:
+    incoming = json.loads(_decode_entry(entry).decode("utf-8"))
+    try:
+        with open(paths.CONFIG_FILE, "r", encoding="utf-8") as f:
+            current = json.load(f)
+    except (OSError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    for section in _MACHINE_SPECIFIC_CONFIG_SECTIONS:
+        if section in current:
+            incoming[section] = current[section]
+        else:
+            incoming.pop(section, None)
+    return {"encoding": "utf-8", "content": json.dumps(incoming, ensure_ascii=False, indent=4)}
+
+
 def create_backup_payload() -> dict[str, Any]:
     bot_settings: dict[str, dict[str, str]] = {}
     plugin_storage: dict[str, dict[str, dict[str, str]]] = {}
 
     for rel_path, abs_path in _iter_scope_files(paths.BOT_SETTINGS_DIR, _BOT_SETTINGS_EXCLUDED_EXTENSIONS):
         bot_settings[rel_path] = _serialize_file(abs_path)
+    if _CONFIG_REL_PATH in bot_settings:
+        bot_settings[_CONFIG_REL_PATH] = _strip_machine_specific_sections(bot_settings[_CONFIG_REL_PATH])
 
     plugins_root = os.path.join(paths.STORAGE_DIR, "plugins")
     os.makedirs(plugins_root, exist_ok=True)
@@ -303,6 +331,9 @@ def apply_backup_payload(payload: dict[str, Any]) -> None:
 
     bot_settings_payload: dict[str, dict[str, str]] = payload["bot_settings"]
     plugins_payload: dict[str, dict[str, dict[str, str]]] = payload["plugins_storage"]
+    if _CONFIG_REL_PATH in bot_settings_payload:
+        bot_settings_payload = dict(bot_settings_payload)
+        bot_settings_payload[_CONFIG_REL_PATH] = _preserve_machine_specific_sections(bot_settings_payload[_CONFIG_REL_PATH])
 
     # Sync bot_settings scope.
     bot_settings_root = paths.BOT_SETTINGS_DIR
