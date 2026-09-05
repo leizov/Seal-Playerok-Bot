@@ -185,11 +185,17 @@ async def _activate_plugin(plugin: Plugin) -> bool:
         playerok_handlers = sum(len(v or []) for v in (plugin.playerok_event_handlers or {}).values())
         tg_routers = len(plugin.telegram_bot_routers or [])
         bot_commands = len(plugin.bot_commands or [])
-        # logger.info(
-        #     f"Плагин активирован: {plugin.meta.name} | "
-        #     f"PlayerOK events={playerok_events}, handlers={playerok_handlers} | "
-        #     f"TG routers={tg_routers} | commands={bot_commands}"
-        # )
+        playerok_event_names = [
+            f"{type(event).__module__}.{type(event).__qualname__}."
+            f"{getattr(event, 'name', repr(event))}(value={getattr(event, 'value', None)!r})"
+            for event in (plugin.playerok_event_handlers or {})
+        ]
+        logger.info(
+            f"Плагин активирован: {plugin.meta.name} | "
+            f"PlayerOK events={playerok_events}, handlers={playerok_handlers}, "
+            f"event_keys={playerok_event_names} | "
+            f"TG routers={tg_routers} | commands={bot_commands}"
+        )
     except Exception:
         pass
 

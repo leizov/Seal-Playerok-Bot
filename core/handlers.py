@@ -208,8 +208,19 @@ async def call_playerok_event(event: EventTypes, args: list = []):
     :type args: `list`
     """
     handlers = get_playerok_event_handlers().get(event, [])
+    is_new_deal = event == EventTypes.NEW_DEAL
+    if is_new_deal:
+        handler_names = [
+            f"{getattr(handler, '__module__', '?')}.{getattr(handler, '__qualname__', repr(handler))}"
+            for handler in handlers
+        ]
+        logger.info(f"NEW_DEAL dispatch: handlers={len(handlers)}, registered={handler_names}")
+
     for handler in handlers:
+        handler_name = f"{getattr(handler, '__module__', '?')}.{getattr(handler, '__qualname__', repr(handler))}"
         try:
             await handler(*args)
+            if is_new_deal:
+                logger.info(f"NEW_DEAL handler completed: {handler_name}")
         except Exception as e:
-            logger.error(f"{Fore.LIGHTRED_EX}Ошибка при обработке хендлера «{handler.__module__}.{handler.__qualname__}» для ивента Playerok «{event.name}»: {Fore.WHITE}{e}")
+            logger.error(f"{Fore.LIGHTRED_EX}Ошибка при обработке хендлера «{handler_name}» для ивента Playerok «{event.name}»: {Fore.WHITE}{e}")

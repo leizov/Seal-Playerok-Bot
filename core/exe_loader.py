@@ -20,6 +20,7 @@ import os
 import sys
 import importlib.util
 import time
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
@@ -169,6 +170,16 @@ class PydPluginLoader:
         logger.info(f"Загрузка .pyd плагина: {display_name}")
         
         try:
+            resolved_path = plugin_path.resolve()
+            file_size = plugin_path.stat().st_size
+            file_sha256 = hashlib.sha256(plugin_path.read_bytes()).hexdigest()
+            logger.info(
+                f".pyd artifact: path={resolved_path}, size={file_size}, sha256={file_sha256}"
+            )
+        except Exception as e:
+            logger.warning(f"Unable to inspect .pyd artifact {plugin_path}: {e}")
+
+        try:
             # Загружаем модуль (используем module_name для импорта!)
             spec = importlib.util.spec_from_file_location(module_name, plugin_path)
             if spec is None or spec.loader is None:
@@ -200,6 +211,20 @@ class PydPluginLoader:
             # Обработчики бота
             if hasattr(module, 'BOT_EVENT_HANDLERS'):
                 info.bot_event_handlers = dict(module.BOT_EVENT_HANDLERS)
+
+            playerok_exports = []
+            for event_type, funcs in (info.playerok_event_handlers or {}).items():
+                handler_names = [
+                    f"{getattr(func, '__module__', '?')}.{getattr(func, '__qualname__', repr(func))}"
+                    for func in (funcs or [])
+                ]
+                playerok_exports.append({
+                    "event": getattr(event_type, "name", repr(event_type)),
+                    "event_type": f"{type(event_type).__module__}.{type(event_type).__qualname__}",
+                    "event_value": getattr(event_type, "value", None),
+                    "handlers": handler_names,
+                })
+            logger.info(f".pyd Playerok exports {display_name}: {playerok_exports}")
             
             # Команды
             if hasattr(module, 'BOT_COMMANDS'):
