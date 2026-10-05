@@ -3100,6 +3100,41 @@ class Account:
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return [transaction_provider(provider) for provider in r["data"]["transactionProviders"]]
 
+    def get_balance(self) -> types.AccountBalance:
+        """
+        Получает актуальный баланс аккаунта (лёгкий запрос `viewerBalance`).
+
+        :return: Баланс: общий, доступный, к выводу, замороженный, ожидаемый.
+        :rtype: `playerokapi.types.AccountBalance`
+        """
+        headers = {"accept": "*/*"}
+        payload = {
+            "operationName": "viewerBalance",
+            "variables": json.dumps({}, ensure_ascii=False),
+            "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get("viewerBalance")}}, ensure_ascii=False)
+        }
+        r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
+        return account_balance_from_viewer(r["data"])
+
+    def get_exchange_rate(self, pair: str = "USDT_RUB") -> float | None:
+        """
+        Получает курс обмена Playerok (используется при выводе в USDT).
+
+        :param pair: Валютная пара, по умолчанию `USDT_RUB`.
+        :type pair: `str`
+
+        :return: Курс (сколько рублей за 1 единицу валюты).
+        :rtype: `float` or `None`
+        """
+        headers = {"accept": "*/*"}
+        payload = {
+            "operationName": "getExchangeRates",
+            "variables": json.dumps({"pair": pair}, ensure_ascii=False),
+            "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get("getExchangeRates")}}, ensure_ascii=False)
+        }
+        r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
+        return r["data"].get("getExchangeRates")
+
     def get_transactions(self, count: int = 24, operation: TransactionOperations | None = None, min_value: int | None = None,
                          max_value: int | None = None, provider_id: TransactionProviderIds | None = None, status: TransactionStatuses | None = None,
                          after_cursor: str | None = None) -> TransactionList:

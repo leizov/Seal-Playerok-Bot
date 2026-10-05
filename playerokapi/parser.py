@@ -31,6 +31,28 @@ def sbp_bank_member(data: dict) -> "SBPBankMember":
     )
 
 
+def transaction_provider_account(data: dict) -> "TransactionProviderAccount":
+    from .types import TransactionProviderAccount
+
+    if not data:
+        return None
+    return TransactionProviderAccount(
+        id=data.get("id"),
+        value=data.get("value"),
+        user_id=data.get("userId"),
+        provider_id=data.get("providerId"),
+        payment_method_id=data.get("paymentMethodId"),
+    )
+
+
+def account_balance_from_viewer(data: dict) -> "AccountBalance":
+    """Парсит ответ `viewerBalance` (берёт `viewer.balance`)."""
+    if not data:
+        return None
+    viewer = data.get("viewer") if isinstance(data.get("viewer"), dict) else data
+    return account_balance(viewer.get("balance"))
+
+
 def transaction_payment_method(data: dict) -> "TransactionPaymentMethod":
     from .types import TransactionPaymentMethod
     from .parser import transaction_provider_props, transaction_provider_limits
@@ -41,8 +63,8 @@ def transaction_payment_method(data: dict) -> "TransactionPaymentMethod":
         id=TransactionPaymentMethodIds.__members__.get(data.get("id")),
         name=data.get("name"),
         fee=data.get("fee"),
-        provider_id=TransactionProviderIds.__members__.get(data.get("provider_id")),
-        account=account_profile(data.get("account")),
+        provider_id=TransactionProviderIds.__members__.get(data.get("providerId") or data.get("provider_id")),
+        account=transaction_provider_account(data.get("account")),
         props=transaction_provider_props(data.get("props")),
         limits=transaction_provider_limits(data.get("limits"))
     )
@@ -95,7 +117,6 @@ def transaction_provider_props(data: dict) -> "TransactionProviderProps":
 
 def transaction_provider(data: dict) -> "TransactionProvider":
     from .types import TransactionProvider
-    from .parser import account_profile
 
     if not data:
         return None
@@ -105,10 +126,10 @@ def transaction_provider(data: dict) -> "TransactionProvider":
         fee=data.get("fee"),
         min_fee_amount=data.get("minFeeAmount"),
         description=data.get("description"),
-        account=account_profile(data.get("account")),
+        account=transaction_provider_account(data.get("account")),
         props=transaction_provider_props(data.get("props")),
         limits=transaction_provider_limits(data.get("limits")),
-        payment_methods=[transaction_payment_method(method) for method in data.get("paymentMethods")]
+        payment_methods=[transaction_payment_method(method) for method in (data.get("paymentMethods") or [])]
     )
 
 
@@ -117,7 +138,12 @@ def transaction(data: dict) -> "Transaction":
 
     if not data:
         return None
+    props = data.get("props") if isinstance(data.get("props"), dict) else {}
+    payment_account = props.get("paymentAccount") if isinstance(props.get("paymentAccount"), dict) else {}
     return Transaction(
+        payment_account_value=payment_account.get("value"),
+        provider_fee_percent=props.get("fee"),
+        auto_claimed_at=data.get("autoClaimedAt"),
         id=data.get("id"),
         operation=TransactionOperations.__members__.get(data.get("operation")),
         direction=TransactionDirections.__members__.get(data.get("direction")),
@@ -131,13 +157,13 @@ def transaction(data: dict) -> "Transaction":
         value=data.get("value"),
         fee=data.get("fee"),
         created_at=data.get("createdAt"),
-        verified_at=data.get("verified_at"),
-        verified_by=data.get("verified_by"),
-        completed_at=data.get("completed_at"),
-        completed_by=data.get("completed_by"),
-        payment_method_id=data.get("paymentMethodId"), 
-        is_suspicious=data.get("is_suspicious"), 
-        sbp_bank_name=data.get("spb_bank_name")
+        verified_at=data.get("verifiedAt", data.get("verified_at")),
+        verified_by=user_profile(data.get("verifiedBy")),
+        completed_at=data.get("completedAt", data.get("completed_at")),
+        completed_by=user_profile(data.get("completedBy")),
+        payment_method_id=data.get("paymentMethodId"),
+        is_suspicious=data.get("isSuspicious", data.get("is_suspicious")),
+        sbp_bank_name=data.get("spbBankName", data.get("spb_bank_name")),
     )
 
 

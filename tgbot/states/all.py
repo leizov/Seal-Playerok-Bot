@@ -18,6 +18,12 @@ class ItemsStates(StatesGroup):
     waiting_for_name_query = State()
 
 
+class WithdrawStates(StatesGroup):
+    waiting_for_phone = State()
+    waiting_for_bank_query = State()
+    waiting_for_amount = State()
+
+
 class SettingsStates(StatesGroup):
     waiting_for_token = State()
     waiting_for_user_agent = State()

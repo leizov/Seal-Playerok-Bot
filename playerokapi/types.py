@@ -1808,6 +1808,39 @@ class SBPBankMember:
         """ URL иконки. """
 
 
+class TransactionProviderAccount:
+    """
+    Сохранённый реквизит для вывода (например, номер телефона для СБП).
+
+    :param id: ID реквизита.
+    :type id: `str`
+
+    :param value: Значение реквизита (номер телефона, кошелёк и т.п.).
+    :type value: `str`
+
+    :param user_id: ID владельца.
+    :type user_id: `str` or `None`
+
+    :param provider_id: ID провайдера, к которому привязан реквизит.
+    :type provider_id: `str` or `None`
+
+    :param payment_method_id: ID платёжного метода.
+    :type payment_method_id: `str` or `None`
+    """
+    def __init__(self, id: str, value: str, user_id: str | None = None,
+                 provider_id: str | None = None, payment_method_id: str | None = None):
+        self.id: str = id
+        """ ID реквизита. """
+        self.value: str = value
+        """ Значение реквизита (номер телефона, кошелёк и т.п.). """
+        self.user_id: str | None = user_id
+        """ ID владельца. """
+        self.provider_id: str | None = provider_id
+        """ ID провайдера, к которому привязан реквизит. """
+        self.payment_method_id: str | None = payment_method_id
+        """ ID платёжного метода. """
+
+
 class TransactionPaymentMethod:
     """
     Платёжный метод транзакции.
@@ -1834,7 +1867,7 @@ class TransactionPaymentMethod:
     :type limits: `playerokapi.types.TransactionProviderLimits`
     """
     def __init__(self, id: TransactionPaymentMethodIds, name: str, fee: int, provider_id: TransactionProviderIds,
-                 account: AccountProfile | None, props: TransactionProviderProps, limits: TransactionProviderLimits):
+                 account: TransactionProviderAccount | None, props: TransactionProviderProps, limits: TransactionProviderLimits):
         self.id: TransactionPaymentMethodIds = id
         """ ID метода. """
         self.name: str = name
@@ -1843,8 +1876,8 @@ class TransactionPaymentMethod:
         """ Комиссия метода. """
         self.provider_id: TransactionProviderIds = provider_id
         """ ID провайдера транзакции. """
-        self.account: AccountProfile | None = account
-        """ Аккаунт метода (?). """
+        self.account: TransactionProviderAccount | None = account
+        """ Сохранённый реквизит метода. """
         self.props: TransactionProviderProps = props
         """ Параметры провайдера транзакции. """
         self.limits: TransactionProviderLimits = limits
@@ -1958,7 +1991,7 @@ class TransactionProvider:
     :type payment_methods: `list` of `playerokapi.types.TransactionPaymentMethod`
     """
     def __init__(self, id: TransactionProviderIds, name: str, fee: int, min_fee_amount: int | None,
-                 description: str | None, account: AccountProfile | None, props: TransactionProviderProps,
+                 description: str | None, account: TransactionProviderAccount | None, props: TransactionProviderProps,
                  limits: TransactionProviderLimits, payment_methods: list[TransactionPaymentMethod]):
         self.id: TransactionProviderIds = id
         """ ID провайдера. """
@@ -1970,8 +2003,8 @@ class TransactionProvider:
         """ Минимальная комиссия. """
         self.description: str | None = description
         """ Описание провайдера. """
-        self.account: AccountProfile | None = account
-        """ Аккаунт провайдера (?). """
+        self.account: TransactionProviderAccount | None = account
+        """ Сохранённый реквизит для этого способа (например, телефон для СБП). """
         self.props: TransactionProviderProps = props
         """ Параметры провайдера. """
         self.limits: TransactionProviderLimits = limits
@@ -2047,7 +2080,15 @@ class Transaction:
     def __init__(self, id: str, operation: TransactionOperations, direction: TransactionDirections, provider_id: TransactionProviderIds,
                  provider: TransactionProvider, user: UserProfile, creator: UserProfile, status: TransactionStatuses, status_description: str | None,
                  status_expiration_date: str | None, value: int, fee: int, created_at: str, verified_at: str | None, verified_by: UserProfile | None,
-                 completed_at: str | None, completed_by: UserProfile | None, payment_method_id: str | None, is_suspicious: bool | None, sbp_bank_name: str | None):
+                 completed_at: str | None, completed_by: UserProfile | None, payment_method_id: str | None, is_suspicious: bool | None, sbp_bank_name: str | None,
+                 payment_account_value: str | None = None, provider_fee_percent: float | None = None,
+                 auto_claimed_at: str | None = None):
+        self.payment_account_value: str | None = payment_account_value
+        """ Маскированный реквизит, на который идёт вывод (например, «...1763»). """
+        self.provider_fee_percent: float | None = provider_fee_percent
+        """ Комиссия способа вывода в процентах (из props.fee). """
+        self.auto_claimed_at: str | None = auto_claimed_at
+        """ Дата автоматического зачисления. """
         self.id: str = id
         """ ID транзакции. """
         self.operation: TransactionOperations = operation

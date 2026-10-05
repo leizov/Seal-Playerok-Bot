@@ -64,6 +64,8 @@ def profile_text():
 
 
 def profile_kb():
-    rows = []
+    rows = [
+        [InlineKeyboardButton(text="💸 Вывод средств", callback_data=calls.WithdrawAction(action="open").pack())],
+    ]
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     return kb

@@ -46,6 +46,11 @@ class ReviewsAction(CallbackData, prefix="rvact"):
     action: str
 
 
+class WithdrawAction(CallbackData, prefix="wdr"):
+    action: str
+    value: str | None = None
+
+
 class DeleteIncludedRestoreItem(CallbackData, prefix="delinre"):
     index: int
 

@@ -234,8 +234,6 @@ def _my_item_flags_lines(item) -> str:
     lines = [f"♾ <b>Оставлять в продаже:</b> {_keep_in_sale_text(item)}\n"]
     deals_counter = getattr(item, "deals_counter", None)
     lines.append(f"🛒 <b>Продаж:</b> {_fmt_value(deals_counter if deals_counter is not None else 0)}\n")
-    if getattr(item, "is_automated", None):
-        lines.append("🤖 <b>Автовыдача Playerok:</b> да\n")
     if getattr(item, "may_be_published", None) is False:
         lines.append("⛔ <b>Повторная публикация:</b> запрещена Playerok\n")
     if getattr(item, "is_attachments_forbidden", None):
