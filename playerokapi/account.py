@@ -3178,7 +3178,7 @@ class Account:
             if max_value: payload["variables"]["filter"]["value"]["max"] = str(max_value)
         if provider_id: payload["variables"]["filter"]["providerId"] = [provider_id.name]
         if status: payload["variables"]["filter"]["status"] = [status.name]
-        payload["variables"] = json.dumps(payload["variables"], ensure_ascii=False),
+        payload["variables"] = json.dumps(payload["variables"], ensure_ascii=False)
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
         return transaction_list(r["data"]["transactions"])
 

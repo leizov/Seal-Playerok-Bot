@@ -90,6 +90,7 @@ def withdraw_main_kb(has_sbp: bool) -> InlineKeyboardMarkup:
     rows = []
     if has_sbp:
         rows.append([_btn("⚡ Вывести через СБП", "sbp")])
+    rows.append([_btn("📜 История транзакций", "history", "0")])
     rows.append([_btn("🔄 Обновить", "open")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.ProfileNavigation(to="main").pack())])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -205,6 +206,90 @@ def withdraw_result_kb(tx_id: str) -> InlineKeyboardMarkup:
         [_btn("🚫 Отменить заявку", "cancel_tx", tx_id)],
         [_btn("⬅️ К выводу", "open")],
     ])
+
+
+TX_OPERATION_LABELS = {
+    "DEPOSIT": "Пополнение",
+    "BUY": "Покупка",
+    "SELL": "Продажа",
+    "ITEM_DEFAULT_PRIORITY": "Стандартный приоритет",
+    "ITEM_PREMIUM_PRIORITY": "Премиум приоритет",
+    "WITHDRAW": "Вывод",
+    "MANUAL_BALANCE_INCREASE": "Зачисление",
+    "MANUAL_BALANCE_DECREASE": "Списание",
+    "REFERRAL_BONUS": "Реферальный бонус",
+    "STEAM_DEPOSIT": "Пополнение Steam",
+}
+
+TX_HISTORY_FILTERS = {
+    "all": "Все",
+    "WITHDRAW": "Выводы",
+    "SELL": "Продажи",
+    "BUY": "Покупки",
+}
+
+
+def _enum_name(value) -> str:
+    return getattr(value, "name", None) or (str(value) if value is not None else "")
+
+
+def _short_date(value) -> str:
+    text = str(value or "")
+    # 2026-10-05T14:46:26.000Z -> 05.10.2026 14:46
+    if len(text) >= 16 and text[4] == "-" and text[10] == "T":
+        return f"{text[8:10]}.{text[5:7]}.{text[0:4]} {text[11:16]}"
+    return html.escape(text) or "—"
+
+
+def transaction_line(tx) -> str:
+    operation = _enum_name(getattr(tx, "operation", None))
+    status = _enum_name(getattr(tx, "status", None))
+    direction = _enum_name(getattr(tx, "direction", None))
+    sign = "−" if direction == "OUT" else "+" if direction == "IN" else ""
+    label = TX_OPERATION_LABELS.get(operation, html.escape(operation or "Операция"))
+    status_label = TX_STATUS_LABELS.get(status, html.escape(status or "—"))
+    line = f"{sign}{_money(getattr(tx, 'value', None))} · <b>{label}</b> · {status_label}"
+    details = [_short_date(getattr(tx, "created_at", None))]
+    provider = getattr(getattr(tx, "provider", None), "name", None)
+    if operation == "WITHDRAW" and provider:
+        details.append(html.escape(str(provider)))
+    bank = getattr(tx, "sbp_bank_name", None)
+    if bank:
+        details.append(html.escape(str(bank)))
+    account_value = getattr(tx, "payment_account_value", None)
+    if account_value:
+        details.append(html.escape(str(account_value)))
+    return line + "\n<i>" + " · ".join(details) + "</i>"
+
+
+def transactions_text(transactions: list, page: int, total_count, filter_key: str) -> str:
+    title = f"📜 <b>История транзакций</b> — {TX_HISTORY_FILTERS.get(filter_key, 'Все')}"
+    if total_count is not None:
+        title += f" ({total_count})"
+    lines = [title, f"Страница {page + 1}", ""]
+    if not transactions:
+        lines.append("<i>Транзакций нет</i>")
+    else:
+        lines.append("\n\n".join(transaction_line(tx) for tx in transactions))
+    return "\n".join(lines)
+
+
+def transactions_kb(page: int, has_next: bool, filter_key: str, cancellable: list | None = None) -> InlineKeyboardMarkup:
+    rows = [[
+        _btn(("• " if key == filter_key else "") + label, "hist_filter", key)
+        for key, label in TX_HISTORY_FILTERS.items()
+    ]]
+    for tx in cancellable or []:
+        rows.append([_btn(f"🚫 Отменить вывод {_money(getattr(tx, 'value', None))}", "cancel_tx", str(tx.id))])
+    nav = []
+    if page > 0:
+        nav.append(_btn("⬅️", "history", str(page - 1)))
+    nav.append(_btn("🔄", "history", str(page)))
+    if has_next:
+        nav.append(_btn("➡️", "history", str(page + 1)))
+    rows.append(nav)
+    rows.append([_btn("⬅️ К выводу", "open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def withdraw_cancel_confirm_kb(tx_id: str) -> InlineKeyboardMarkup:

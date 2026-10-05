@@ -7,7 +7,7 @@ from .. import callback_datas as calls
 from ..templates.quick_replies import (
     settings_quick_replies_text, settings_quick_replies_kb, 
     quick_reply_select_kb, quick_reply_delete_kb,
-    quick_reply_edit_kb
+    quick_reply_edit_kb, find_quick_reply_name
 )
 from ..templates.main import do_action_text, back_kb
 from ..states.quick_replies import QuickReplyStates
@@ -78,14 +78,18 @@ async def callback_edit_quick_reply_select(callback: CallbackQuery, state: FSMCo
 @router.callback_query(calls.QuickReplyAction.filter(F.action == "confirm_edit"))
 async def callback_confirm_edit_quick_reply(callback: CallbackQuery, callback_data: calls.QuickReplyAction, state: FSMContext):
     """Активирует режим редактирования заготовки"""
-    await state.update_data(reply_name=callback_data.reply_name)
+    reply_name = find_quick_reply_name(callback_data.reply_name)
+    if reply_name is None:
+        await callback.answer("❌ Заготовка не найдена", show_alert=True)
+        return
+    await state.update_data(reply_name=reply_name)
     await state.set_state(QuickReplyStates.editing_text)
     
     quick_replies = sett.get("quick_replies")
-    current_text = quick_replies.get(callback_data.reply_name, "")
+    current_text = quick_replies.get(reply_name, "")
     
     await callback.message.edit_text(
-        do_action_text(f"✏️ <b>Редактирование заготовки '{callback_data.reply_name}'</b>\n\n<b>Текущий текст:</b>\n{current_text}\n\n📝 <b>Введите новый текст:</b>"),
+        do_action_text(f"✏️ <b>Редактирование заготовки '{reply_name}'</b>\n\n<b>Текущий текст:</b>\n{current_text}\n\n📝 <b>Введите новый текст:</b>"),
         reply_markup=back_kb(calls.SettingsNavigation(to="quick_replies").pack()),
         parse_mode="HTML"
     )
@@ -115,10 +119,11 @@ async def callback_delete_quick_reply_select(callback: CallbackQuery, state: FSM
 async def callback_confirm_delete_quick_reply(callback: CallbackQuery, callback_data: calls.QuickReplyAction, state: FSMContext):
     """Удаляет выбранную заготовку"""
     quick_replies = sett.get("quick_replies")
-    if callback_data.reply_name in quick_replies:
-        del quick_replies[callback_data.reply_name]
+    reply_name = find_quick_reply_name(callback_data.reply_name)
+    if reply_name is not None:
+        del quick_replies[reply_name]
         sett.set("quick_replies", quick_replies)
-        await callback.answer(f"✅ Заготовка '{callback_data.reply_name}' удалена!", show_alert=True)
+        await callback.answer(f"✅ Заготовка '{reply_name}' удалена!", show_alert=True)
     else:
         await callback.answer("❌ Заготовка не найдена", show_alert=True)
     
@@ -200,8 +205,9 @@ async def callback_cancel_send_quick_reply(callback: CallbackQuery, state: FSMCo
 @router.callback_query(calls.QuickReplySelect.filter())
 async def callback_send_quick_reply(callback: CallbackQuery, callback_data: calls.QuickReplySelect, state: FSMContext):
     """Отправляет выбранную заготовку пользователю"""
-    quick_replies = sett.get("quick_replies")
-    reply_text = quick_replies.get(callback_data.reply_name)
+    quick_replies = sett.get("quick_replies") or {}
+    reply_name = find_quick_reply_name(callback_data.reply_name)
+    reply_text = quick_replies.get(reply_name) if reply_name else None
     
     if not reply_text:
         await callback.answer("❌ Заготовка не найдена", show_alert=True)
@@ -218,7 +224,7 @@ async def callback_send_quick_reply(callback: CallbackQuery, callback_data: call
         await callback.answer(f"✅ Отправлено пользователю {callback_data.username}", show_alert=True)
         await callback.message.edit_text(
             f"✅ Сообщение отправлено пользователю <b>{callback_data.username}</b>\n\n"
-            f"<b>Заготовка:</b> {callback_data.reply_name}\n"
+            f"<b>Заготовка:</b> {reply_name}\n"
             f"<b>Текст:</b>\n{reply_text}", 
             parse_mode="HTML"
         )

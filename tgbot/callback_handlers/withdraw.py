@@ -14,7 +14,7 @@ from aiogram import Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from playerokapi.enums import TransactionProviderDirections, TransactionProviderIds
+from playerokapi.enums import TransactionOperations, TransactionProviderDirections, TransactionProviderIds
 
 from .. import callback_datas as calls
 from .. import states
@@ -231,6 +231,22 @@ async def callback_withdraw_action(callback: CallbackQuery, callback_data: calls
         await _do_withdraw(callback, state, ctx)
         return
 
+    if action == "history":
+        try:
+            page = max(0, int(callback_data.value or 0))
+        except ValueError:
+            page = 0
+        await show_transactions(message, state, callback, page=page)
+        return
+
+    if action == "hist_filter":
+        key = callback_data.value if callback_data.value in templ.TX_HISTORY_FILTERS else "all"
+        ctx["hist_filter"] = key
+        ctx["hist_cursors"] = [None]
+        await _set_ctx(state, ctx)
+        await show_transactions(message, state, callback, page=0)
+        return
+
     if action == "cancel_tx":
         await throw_float_message(state=state, message=message, callback=callback,
                                   text="🚫 <b>Отменить заявку на вывод?</b>\n\nДеньги вернутся на баланс Playerok.",
@@ -242,6 +258,56 @@ async def callback_withdraw_action(callback: CallbackQuery, callback_data: calls
         return
 
     await callback.answer()
+
+
+HISTORY_PAGE_SIZE = 10
+
+
+async def show_transactions(message: Message, state: FSMContext, callback: CallbackQuery | None = None,
+                            page: int = 0):
+    await state.set_state(None)
+    ctx = await _get_ctx(state)
+    filter_key = ctx.get("hist_filter") or "all"
+    cursors = ctx.get("hist_cursors") if isinstance(ctx.get("hist_cursors"), list) else [None]
+    if page >= len(cursors):
+        # Курсор этой страницы неизвестен (например, после перезапуска) — начинаем сначала.
+        page, cursors = 0, [None]
+
+    account = _get_account()
+    if account is None:
+        if callback:
+            await callback.answer("Нет подключения к Playerok", show_alert=True)
+        return
+
+    operation = TransactionOperations.__members__.get(filter_key) if filter_key != "all" else None
+    try:
+        tx_list = await asyncio.to_thread(account.get_transactions, count=HISTORY_PAGE_SIZE,
+                                          operation=operation, after_cursor=cursors[page])
+    except Exception as e:
+        logger.warning("Не удалось загрузить историю транзакций: %s", e)
+        await throw_float_message(state=state, message=message, callback=callback,
+                                  text=templ.do_action_text(f"❌ Не удалось загрузить историю транзакций: {e}"),
+                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="open").pack()))
+        return
+
+    transactions = [tx for tx in (getattr(tx_list, "transactions", None) or []) if tx]
+    page_info = getattr(tx_list, "page_info", None)
+    has_next = bool(getattr(page_info, "has_next_page", False))
+    cursors = cursors[:page + 1]
+    if has_next:
+        cursors.append(getattr(page_info, "end_cursor", None))
+    ctx["hist_cursors"] = cursors
+    ctx["hist_filter"] = filter_key
+    await _set_ctx(state, ctx)
+
+    cancellable = [tx for tx in transactions
+                   if getattr(getattr(tx, "operation", None), "name", None) == "WITHDRAW"
+                   and getattr(getattr(tx, "status", None), "name", None) == "PENDING"
+                   and getattr(tx, "id", None)]
+    await throw_float_message(state=state, message=message, callback=callback,
+                              text=templ.transactions_text(transactions, page,
+                                                           getattr(tx_list, "total_count", None), filter_key),
+                              reply_markup=templ.transactions_kb(page, has_next, filter_key, cancellable))
 
 
 async def _do_withdraw(callback: CallbackQuery, state: FSMContext, ctx: dict):
