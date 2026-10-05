@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 
 from core.plugins import get_plugin_by_uuid, activate_plugin, deactivate_plugin
 from plbot.auto_reminder import DEFAULT_MESSAGE_TEXT, LEGACY_DEFAULT_MESSAGE_TEXT
+from plbot.placeholders import placeholders_help
 from settings import Settings as sett
 
 from .. import templates as templ
@@ -516,7 +517,7 @@ async def callback_auto_response_edit(callback: CallbackQuery, callback_data: ca
         await throw_float_message(
             state=state,
             message=callback.message,
-            text=f"✏️ Введите новый текст {type_names[message_type]} ↓\n\n<b>Текущий текст:</b>\n<code>{current_text or 'Не задан'}</code>\n\n💡 <i>Можно использовать несколько строк</i>",
+            text=f"✏️ Введите новый текст {type_names[message_type]} ↓\n\n<b>Текущий текст:</b>\n<code>{current_text or 'Не задан'}</code>\n\n💡 <i>Можно использовать несколько строк</i>\n\n{placeholders_help('deal')}",
             reply_markup=templ.back_kb(calls.MessagesNavigation(to=nav_to).pack())
         )
         

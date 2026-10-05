@@ -4,6 +4,8 @@ from aiogram.fsm.context import FSMContext
 
 from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, AUTO_DELIVERY_KIND_STATIC, normalize_auto_deliveries
 from settings import Settings as sett
+from plbot.placeholders import placeholders_help
+
 
 from .. import templates as templ
 from .. import callback_datas as calls
@@ -174,7 +176,7 @@ async def callback_enter_custom_command_answer(callback: CallbackQuery, state: F
         await throw_float_message(
             state=state, 
             message=callback.message, 
-            text=templ.settings_comm_page_float_text(f"💬 Введите новый <b>текст ответа</b> команды <code>{custom_command}</code> ↓\n┗ Текущее: <blockquote>{custom_command_answer}</blockquote>"), 
+            text=templ.settings_comm_page_float_text(f"💬 Введите новый <b>текст ответа</b> команды <code>{custom_command}</code> ↓\n┗ Текущее: <blockquote>{custom_command_answer}</blockquote>\n\n{placeholders_help('chat')}"), 
             reply_markup=templ.back_kb(calls.CustomCommandPage(command=custom_command).pack())
         )
     except Exception as e:

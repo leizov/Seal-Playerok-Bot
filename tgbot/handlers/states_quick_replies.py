@@ -7,6 +7,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from settings import Settings as sett
+from plbot.placeholders import placeholders_help
 from .. import callback_datas as calls
 from ..templates.main import do_action_text, back_kb
 from ..states.quick_replies import QuickReplyStates
@@ -21,7 +22,7 @@ async def process_quick_reply_name(message: Message, state: FSMContext):
     await state.update_data(reply_name=message.text)
     await state.set_state(QuickReplyStates.waiting_for_text)
     await message.answer(
-        do_action_text(f"📝 <b>Введите текст для заготовки '{message.text}':</b>\n\n<i>Это сообщение будет отправлено пользователю</i>"),
+        do_action_text(f"📝 <b>Введите текст для заготовки '{message.text}':</b>\n\n<i>Это сообщение будет отправлено пользователю</i>\n\n{placeholders_help('chat')}"),
         reply_markup=back_kb(calls.SettingsNavigation(to="quick_replies").pack()),
         parse_mode="HTML"
     )

@@ -34,7 +34,11 @@ from tgbot.telegrambot import get_telegram_bot, get_telegram_bot_loop
 from tgbot.templates import log_text, log_new_mess_kb, log_new_deal_kb
 from tgbot.utils.message_formatter import format_system_message
 
-from .stats import get_stats, load_stats, record_new_deal, record_raise, record_refund, record_review, set_stats
+from .placeholders import format_template
+from .stats import (
+    get_stats, load_stats, record_keep_in_sale, record_new_deal, record_raise, record_refund,
+    record_review, set_stats,
+)
 from .raise_times import (
     cleanup_completed_timings,
     get_msk_now,
@@ -135,9 +139,50 @@ class PlayerokBot:
         deal_id = str(getattr(deal, "id", "unknown"))
 
         def _worker():
-            record_new_deal(self._deal_amount(deal))
+            item_name = getattr(getattr(deal, "item", None), "name", None)
+            record_new_deal(self._deal_amount(deal), item_name=item_name)
+            try:
+                self._record_keep_in_sale_expense(deal)
+            except Exception as e:
+                self.logger.warning(f"Не удалось учесть расход «Оставлять в продаже» для сделки {deal_id}: {e}")
 
         self._start_daemon_thread(_worker, name=f"record-new-deal-{deal_id}")
+
+    def _current_raise_price(self, item) -> float:
+        """
+        Текущая цена поднятия товара: цена статуса приоритета того же типа,
+        что у товара сейчас; запасной вариант — item.priority_price.
+        """
+        item_priority = getattr(item, "priority", None)
+        try:
+            statuses = self.account.get_item_priority_statuses(item.id, item.price) or []
+            for status in statuses:
+                if item_priority is not None and status.type == item_priority:
+                    return float(status.price or 0)
+        except Exception as e:
+            self.logger.warning(f"Не удалось получить цены поднятия товара {getattr(item, 'id', '?')}: {e}")
+        try:
+            return float(getattr(item, "priority_price", 0) or 0)
+        except Exception:
+            return 0.0
+
+    def _record_keep_in_sale_expense(self, deal: types.ItemDeal):
+        """
+        Если у проданного товара включено «Оставлять в продаже», учитываем
+        оценочный расход по текущей цене его поднятия. Это оценка — реальные
+        списания в транзакциях не сверяются.
+        """
+        if not self.is_connected or self.account is None:
+            return
+        item_id = str(getattr(getattr(deal, "item", None), "id", "") or "")
+        if not item_id:
+            return
+        full_item = self.account.get_item(item_id)
+        if not bool(getattr(full_item, "keep_in_sale", False)):
+            return
+        price = self._current_raise_price(full_item)
+        if price > 0:
+            record_keep_in_sale(price)
 
     def _record_refund_async(self, deal: types.ItemDeal):
         deal_id = str(getattr(deal, "id", "unknown"))
@@ -765,10 +810,6 @@ class PlayerokBot:
         :return: Отформатированное сообщение или None, если сообщение выключено.
         :rtype: `str` or `None`
         """
-        class Format(dict):
-            def __missing__(self, key):
-                return "{" + key + "}"
-
         # Проверяем глобальный переключатель автоответа
         if not self.config["playerok"].get("auto_response_enabled", True):
             return None
@@ -782,8 +823,7 @@ class PlayerokBot:
             self.logger.warning(f"Сообщение {message_name} пустое")
             return None
         try:
-            msg = "\n".join([line.format_map(Format(**kwargs)) for line in message_lines])
-            return msg
+            return format_template("\n".join(str(line) for line in message_lines), **kwargs)
         except Exception as e:
             self.logger.error(f"Не удалось отформатировать сообщение {message_name}: {e}")
             return None
@@ -1607,7 +1647,13 @@ class PlayerokBot:
                             command_answer = self.custom_commands[command_key]
 
                 if command_answer:
-                    msg = "\n".join(command_answer)
+                    if isinstance(command_answer, str):
+                        command_answer = [command_answer]
+                    msg = format_template(
+                        "\n".join(str(line) for line in command_answer),
+                        username=event.message.user.username,
+                        chat_id=event.chat.id,
+                    )
                     self.send_message(event.chat.id, msg)
 
                     # Отправка уведомления о получении команды
@@ -1656,6 +1702,8 @@ class PlayerokBot:
             event.chat.id,
             self.msg(
                 "deal_has_problem",
+                username=event.deal.user.username,
+                chat_id=event.chat.id,
                 deal_id=event.deal.id,
                 deal_item_name=event.deal.item.name,
                 deal_item_price=event.deal.item.price
@@ -1691,6 +1739,8 @@ class PlayerokBot:
             event.chat.id,
             self.msg(
                 "deal_problem_resolved",
+                username=event.deal.user.username,
+                chat_id=event.chat.id,
                 deal_id=event.deal.id,
                 deal_item_name=event.deal.item.name,
                 deal_item_price=event.deal.item.price
@@ -1740,7 +1790,14 @@ class PlayerokBot:
 
         # Проверяем, нужно ли отправить приветственное сообщение (по истории чата)
         if self._should_send_greeting_with_deal(event.chat.id, event):
-            greeting_msg = self.msg("first_message", username=event.deal.user.username)
+            greeting_msg = self.msg(
+                "first_message",
+                username=event.deal.user.username,
+                chat_id=event.chat.id,
+                deal_id=event.deal.id,
+                deal_item_name=event.deal.item.name,
+                deal_item_price=event.deal.item.price,
+            )
             if greeting_msg:  # Отправляем только если сообщение включено
                 self.send_message(event.chat.id, greeting_msg)
                 self.logger.info(f'Отправил приветственное сообщение для {event.deal.user.username}')
@@ -1901,7 +1958,7 @@ class PlayerokBot:
         first_message_config = self.messages.get("deal_sent", {})
         if first_message_config.get("enabled", True):
             self.send_message(event.chat.id,
-                          self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                          self.msg("deal_sent", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
             self.logger.info('Отправил сообщение после нашего подтверждения')
         # возьми телефон детка я знаю ты хочешь позвонить
@@ -1958,7 +2015,7 @@ class PlayerokBot:
             )
 
         self.send_message(event.chat.id,
-                          self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                          self.msg("deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
 
     async def _on_deal_rolled_back(self, event: DealConfirmedEvent):
@@ -1989,7 +2046,7 @@ class PlayerokBot:
             )
 
         self.send_message(event.chat.id,
-                          self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                          self.msg("deal_refunded", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
         self._record_refund_async(event.deal)
 
@@ -2022,7 +2079,7 @@ class PlayerokBot:
             )
 
         self.send_message(event.chat.id,
-                          self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                          self.msg("deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
                                    deal_item_price=event.deal.item.price))
 
     async def _on_new_review(self, event: NewReviewEvent):
@@ -2036,6 +2093,7 @@ class PlayerokBot:
         response_text = self.msg(
             "new_review_response",
             username=event.deal.user.username,
+            chat_id=event.chat.id,
             deal_id=event.deal.id,
             deal_item_name=event.deal.item.name,
             deal_item_price=event.deal.item.price,
@@ -2081,13 +2139,13 @@ class PlayerokBot:
             )
 
         # if event.deal.status is ItemDealStatuses.PENDING:
-        #     self.send_message(event.chat.id, self.msg("deal_pending", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+        #     self.send_message(event.chat.id, self.msg("deal_pending", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         # if event.deal.status is ItemDealStatuses.SENT:
-        #     self.send_message(event.chat.id, self.msg("deal_sent", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+        #     self.send_message(event.chat.id, self.msg("deal_sent", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         if event.deal.status is ItemDealStatuses.CONFIRMED:
-            self.send_message(event.chat.id, self.msg("deal_confirmed", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+            self.send_message(event.chat.id, self.msg("deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         elif event.deal.status is ItemDealStatuses.ROLLED_BACK:
-            self.send_message(event.chat.id, self.msg("deal_refunded", deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+            self.send_message(event.chat.id, self.msg("deal_refunded", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
 
 
 

@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 
 from settings import Settings as sett
+from plbot.placeholders import format_template, placeholders_help
 from .. import callback_datas as calls
 from ..templates.quick_replies import (
     settings_quick_replies_text, settings_quick_replies_kb, 
@@ -89,7 +90,7 @@ async def callback_confirm_edit_quick_reply(callback: CallbackQuery, callback_da
     current_text = quick_replies.get(reply_name, "")
     
     await callback.message.edit_text(
-        do_action_text(f"✏️ <b>Редактирование заготовки '{reply_name}'</b>\n\n<b>Текущий текст:</b>\n{current_text}\n\n📝 <b>Введите новый текст:</b>"),
+        do_action_text(f"✏️ <b>Редактирование заготовки '{reply_name}'</b>\n\n<b>Текущий текст:</b>\n{current_text}\n\n{placeholders_help('chat')}\n\n📝 <b>Введите новый текст:</b>"),
         reply_markup=back_kb(calls.SettingsNavigation(to="quick_replies").pack()),
         parse_mode="HTML"
     )
@@ -220,6 +221,7 @@ async def callback_send_quick_reply(callback: CallbackQuery, callback_data: call
         if not chat:
             await callback.answer(f"❌ Чат с пользователем {callback_data.username} не найден", show_alert=True)
             return
+        reply_text = format_template(reply_text, username=callback_data.username, chat_id=chat.id)
         playerok_bot.send_message(chat.id, reply_text)
         await callback.answer(f"✅ Отправлено пользователю {callback_data.username}", show_alert=True)
         await callback.message.edit_text(

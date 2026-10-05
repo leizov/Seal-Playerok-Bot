@@ -1,7 +1,10 @@
 from aiogram import types, Router, F
 from aiogram.fsm.context import FSMContext
 
+from html import escape
+
 from settings import Settings as sett
+from plbot.placeholders import placeholders_help
 
 from .. import templates as templ
 from .. import states
@@ -50,7 +53,10 @@ async def handler_waiting_for_new_custom_command(message: types.Message, state: 
         await throw_float_message(
             state=state,
             message=message,
-            text=templ.settings_new_comm_float_text(f"💬 Введите <b>ответ для команды</b> <code>{message.text.strip()}</code> ↓"),
+            text=templ.settings_new_comm_float_text(
+                f"💬 Введите <b>ответ для команды</b> <code>{escape(message.text.strip())}</code> ↓\n\n"
+                f"{placeholders_help('chat')}"
+            ),
             reply_markup=templ.back_kb(calls.CustomCommandsPagination(page=data.get("last_page", 0)).pack())
         )
     except Exception as e:
