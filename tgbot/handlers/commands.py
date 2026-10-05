@@ -723,6 +723,17 @@ async def handler_start_shortcut_chats(message: types.Message, state: FSMContext
     await show_chats_menu(message=message, state=state, force_reload=True)
 
 
+@router.message(StateFilter(None), F.text == templ.START_SHORTCUT_REVIEWS)
+async def handler_start_shortcut_reviews(message: types.Message, state: FSMContext):
+    config = sett.get("config")
+    if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
+        return await do_auth(message, state)
+
+    from ..callback_handlers.reviews import show_reviews
+
+    await show_reviews(message=message, state=state)
+
+
 @router.message(StateFilter(None), F.text == templ.START_SHORTCUT_PROFILE)
 async def handler_start_shortcut_profile(message: types.Message, state: FSMContext):
     config = sett.get("config")

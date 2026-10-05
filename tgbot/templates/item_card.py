@@ -9,11 +9,30 @@ def item_card_kb(
     is_owner: bool,
     item_status: str | None = None,
     back_text: str | None = None,
+    keep_in_sale: bool | None = None,
+    keep_in_sale_available: bool = False,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     status_name = str(item_status or "").upper()
     can_restore = status_name in {"SOLD", "EXPIRED"}
     can_publish = status_name == "DRAFT" or can_restore
+
+    if is_owner and keep_in_sale_available and status_name != "BLOCKED":
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=(
+                        "♾ Оставлять в продаже: ВКЛ — выключить"
+                        if keep_in_sale
+                        else "♾ Оставлять в продаже: ВЫКЛ — включить"
+                    ),
+                    callback_data=calls.ItemsAction(
+                        action="item_keep_in_sale",
+                        value="0" if keep_in_sale else "1",
+                    ).pack(),
+                )
+            ]
+        )
 
     if is_owner:
         delete_button = InlineKeyboardButton(

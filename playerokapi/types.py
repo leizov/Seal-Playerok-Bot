@@ -1390,7 +1390,15 @@ class Item:
     """
     def __init__(self, id: str, slug: str, name: str, description: str, obtaining_type: GameCategoryObtainingType | None, price: int, raw_price: int, priority_position: int,
                  attachments: list[FileObject], attributes: dict, category: GameCategory, comment: str | None, data_fields: list[GameCategoryDataField] | None,
-                 fee_multiplier: float, game: GameProfile, seller_type: UserTypes, status: ItemStatuses, user: UserProfile):
+                 fee_multiplier: float, game: GameProfile, seller_type: UserTypes, status: ItemStatuses, user: UserProfile,
+                 is_automated: bool | None = None, is_attachments_forbidden: bool | None = None,
+                 post_moderation_checked_at: str | None = None):
+        self.is_automated: bool | None = is_automated
+        """ Автоматическая ли выдача товара силами Playerok. """
+        self.is_attachments_forbidden: bool | None = is_attachments_forbidden
+        """ Скрыты ли картинки товара модерацией. """
+        self.post_moderation_checked_at: str | None = post_moderation_checked_at
+        """ Дата пост-модерационной проверки товара. """
         self.id: str = id
         """ ID предмета. """
         self.slug: str = slug
@@ -1541,7 +1549,32 @@ class MyItem:
                  user: UserProfile, prev_price: int, prev_fee_multiplier: float, seller_notified_about_fee_change: bool,
                  priority: PriorityTypes, priority_price: int, status_expiration_date: str | None, status_description: str | None,
                  status_payment: Transaction | None, views_counter: int, is_editable: bool, approval_date: str | None, deleted_at: str | None,
-                 updated_at: str | None, created_at: str | None):
+                 updated_at: str | None, created_at: str | None, deals_counter: int | None = None,
+                 keep_in_sale: bool | None = None, keep_in_sale_available: bool | None = None,
+                 may_be_published: bool | None = None, pause_available: bool | None = None,
+                 republish_available: bool | None = None, is_automated: bool | None = None,
+                 is_attachments_forbidden: bool | None = None, sequence: int | None = None,
+                 post_moderation_checked_at: str | None = None):
+        self.deals_counter: int | None = deals_counter
+        """ Количество продаж этого товара. """
+        self.keep_in_sale: bool | None = keep_in_sale
+        """ Оставлять ли товар в продаже после покупки (не уходит в «Проданные»). """
+        self.keep_in_sale_available: bool | None = keep_in_sale_available
+        """ Можно ли включить «Оставлять в продаже» для этого товара. """
+        self.may_be_published: bool | None = may_be_published
+        """ Можно ли выставить товар повторно (False — Playerok не даст опубликовать). """
+        self.pause_available: bool | None = pause_available
+        """ Доступна ли пауза продаж товара. """
+        self.republish_available: bool | None = republish_available
+        """ Доступна ли повторная публикация товара. """
+        self.is_automated: bool | None = is_automated
+        """ Автоматическая ли выдача товара силами Playerok. """
+        self.is_attachments_forbidden: bool | None = is_attachments_forbidden
+        """ Скрыты ли картинки товара модерацией. """
+        self.sequence: int | None = sequence
+        """ Порядковый номер товара в списке продавца. """
+        self.post_moderation_checked_at: str | None = post_moderation_checked_at
+        """ Дата пост-модерационной проверки товара. """
         self.id: str = id
         """ ID предмета. """
         self.slug: str = slug
@@ -1662,7 +1695,14 @@ class ItemProfile:
     def __init__(self, id: str, slug: str, priority: PriorityTypes, status: ItemStatuses,
                  name: str, price: int, raw_price: int, seller_type: UserTypes, attachment: FileObject,
                  user: UserProfile, approval_date: str, priority_position: int, views_counter: int | None,
-                 fee_multiplier: float, created_at: str):
+                 fee_multiplier: float, created_at: str, deals_counter: int | None = None,
+                 is_automated: bool | None = None, is_attachments_forbidden: bool | None = None):
+        self.deals_counter: int | None = deals_counter
+        """ Количество продаж этого товара. """
+        self.is_automated: bool | None = is_automated
+        """ Автоматическая ли выдача товара силами Playerok. """
+        self.is_attachments_forbidden: bool | None = is_attachments_forbidden
+        """ Скрыты ли картинки товара модерацией. """
         self.id: str = id
         """ ID предмета. """
         self.slug: str = slug

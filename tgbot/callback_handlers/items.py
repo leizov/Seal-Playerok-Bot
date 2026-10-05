@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import Router
@@ -333,6 +334,8 @@ async def _render_item_card(
             item_url=payload.get("item_url") or "https://playerok.com/products/",
             is_owner=is_owner,
             item_status=payload.get("item_status"),
+            keep_in_sale=payload.get("keep_in_sale"),
+            keep_in_sale_available=bool(payload.get("keep_in_sale_available")),
         ),
         callback=callback,
     )
@@ -507,6 +510,32 @@ async def callback_items_actions(
             )
         except Exception as e:
             await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u043a\u0440\u044b\u0442\u044c \u0442\u043e\u0432\u0430\u0440: {e}", show_alert=True)
+        return
+
+    if action == "item_keep_in_sale":
+        item_id = str(item_ctx.get("item_id") or "")
+        if account is None or not item_id:
+            await callback.answer("Карточка товара не найдена", show_alert=True)
+            return
+        if not item_ctx.get("is_owner"):
+            await callback.answer("Менять настройку может только владелец", show_alert=True)
+            return
+
+        enable = value == "1"
+        try:
+            await asyncio.to_thread(account.update_item, id=item_id, keep_in_sale=enable)
+            await callback.answer(
+                "«Оставлять в продаже» включено" if enable else "«Оставлять в продаже» выключено"
+            )
+            await _render_item_card(
+                message=callback.message,
+                state=state,
+                account=account,
+                item_id=item_id,
+                callback=None,
+            )
+        except Exception as e:
+            await callback.answer(f"Не удалось изменить настройку: {e}", show_alert=True)
         return
 
     if action == "item_raise_prompt":

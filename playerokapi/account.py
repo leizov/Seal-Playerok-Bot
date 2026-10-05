@@ -2835,7 +2835,8 @@ class Account:
 
     def update_item(self, id: str, name: str | None = None, price: int | None = None, description: str | None = None,
                     options: list[GameCategoryOption] | None = None, data_fields: list[GameCategoryDataField] | None = None,
-                    remove_attachments: list[str] | None = None, add_attachments: list[str] | None = None) -> types.Item:
+                    remove_attachments: list[str] | None = None, add_attachments: list[str] | None = None,
+                    keep_in_sale: bool | None = None) -> types.MyItem | types.Item:
         """
         Обновляет предмет аккаунта.
 
@@ -2865,8 +2866,12 @@ class Account:
         :param add_attachments: Массив файлов-приложений предмета, которые нужно добавить. Указываются пути к файлам.
         :type add_attachments: `list[str]` or `None`
 
+        :param keep_in_sale: «Оставлять в продаже» — товар не уходит в проданные после покупки.
+            Работает только если у товара `keep_in_sale_available=True`.
+        :type keep_in_sale: `bool` or `None`
+
         :return: Объект обновлённого предмета.
-        :rtype: `playerokapi.types.Item`
+        :rtype: `playerokapi.types.MyItem` or `playerokapi.types.Item`
         """
         payload_attributes = {option.field: option.value for option in options} if options is not None else None
         payload_data_fields = [{"fieldId": field.id, "value": field.value} for field in data_fields] if data_fields is not None else None
@@ -2887,6 +2892,7 @@ class Account:
         if options: operations["variables"]["input"]["attributes"] = payload_attributes
         if data_fields: operations["variables"]["input"]["dataFields"] = payload_data_fields
         if remove_attachments: operations["variables"]["input"]["removedAttachments"] = remove_attachments
+        if keep_in_sale is not None: operations["variables"]["input"]["keepInSale"] = bool(keep_in_sale)
 
         map = {}
         files = {}
@@ -2902,7 +2908,8 @@ class Account:
                 "map": json.dumps(map)
             }
             r = self.request("post", f"{self.base_url}/graphql", headers, payload if files else operations, files if files else None).json()
-            return item(r["data"]["updateItem"])
+            data = r["data"]["updateItem"]
+            return item_by_typename(data) or item(data)
         finally:
             for file_obj in files.values():
                 file_obj.close()
@@ -3012,12 +3019,7 @@ class Account:
             "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get("item")}}, ensure_ascii=False)
         }
         r = self.request("get", f"{self.base_url}/graphql", headers, payload).json()
-        data: dict = r["data"]["item"]
-        if data["__typename"] == "MyItem": _item = my_item(data)
-        elif data["__typename"] == "ItemProfile": _item = item_profile(data)
-        elif data["__typename"] in ["Item", "ForeignItem"]: _item = item(data)
-        else: _item = None
-        return _item
+        return item_by_typename(r["data"]["item"])
 
     def get_item_priority_statuses(self, item_id: str, item_price: str) -> list[types.ItemPriorityStatus]:
         """

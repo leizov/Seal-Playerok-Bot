@@ -359,9 +359,12 @@ class GameCategoryAutoConfirmPeriods(Enum):
     Периоды автоматического подтверждения сделки в категории игры.
     """
 
-    # TODO: Доделать все периоды авто-подтверждения
-    SEVEN_DEYS = 0
+    TWO_DAYS = 0
+    """ Два дня. """
+    SEVEN_DAYS = 1
     """ Семь дней. """
+    SEVEN_DEYS = 1
+    """ Устаревшее имя с опечаткой — алиас SEVEN_DAYS для совместимости с плагинами. """
 
 
 class GameCategoryInstructionTypes(Enum):

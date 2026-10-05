@@ -11,6 +11,8 @@ START_SHORTCUT_DEALS = "💼 Сделки"
 START_SHORTCUT_ITEMS = "📦 Товары"
 START_SHORTCUT_CHATS = "💬 Чаты"
 START_SHORTCUT_PROFILE = "👤 Профиль"
+START_SHORTCUT_REVIEWS = "⭐ Отзывы"
+
 
 
 def menu_text():
@@ -47,6 +49,7 @@ def start_shortcuts_kb() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text=START_SHORTCUT_MAIN_MENU),
+                KeyboardButton(text=START_SHORTCUT_REVIEWS),
             ],
             [
                 KeyboardButton(text=START_SHORTCUT_DEALS),

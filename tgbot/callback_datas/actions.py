@@ -42,6 +42,10 @@ class ChatsAction(CallbackData, prefix="cact"):
     value: str | None = None
 
 
+class ReviewsAction(CallbackData, prefix="rvact"):
+    action: str
+
+
 class DeleteIncludedRestoreItem(CallbackData, prefix="delinre"):
     index: int
 

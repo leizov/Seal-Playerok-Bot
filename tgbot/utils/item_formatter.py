@@ -224,11 +224,31 @@ def _common_item_block(item) -> str:
     )
 
 
+def _keep_in_sale_text(item) -> str:
+    if not getattr(item, "keep_in_sale_available", None):
+        return "недоступно"
+    return "✅ включено" if getattr(item, "keep_in_sale", None) else "❌ выключено"
+
+
+def _my_item_flags_lines(item) -> str:
+    lines = [f"♾ <b>Оставлять в продаже:</b> {_keep_in_sale_text(item)}\n"]
+    deals_counter = getattr(item, "deals_counter", None)
+    lines.append(f"🛒 <b>Продаж:</b> {_fmt_value(deals_counter if deals_counter is not None else 0)}\n")
+    if getattr(item, "is_automated", None):
+        lines.append("🤖 <b>Автовыдача Playerok:</b> да\n")
+    if getattr(item, "may_be_published", None) is False:
+        lines.append("⛔ <b>Повторная публикация:</b> запрещена Playerok\n")
+    if getattr(item, "is_attachments_forbidden", None):
+        lines.append("🖼 <b>Картинки:</b> скрыты модерацией\n")
+    return "".join(lines)
+
+
 def _my_item_extra_block(item) -> str:
     priority_name = _enum_name(getattr(item, "priority", None))
     priority_text = PRIORITY_LABELS.get(priority_name or "", priority_name or DASH)
     return (
         "<blockquote>"
+        f"{_my_item_flags_lines(item)}"
         f"\U0001F680 <b>\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442:</b> {_safe(priority_text)}\n"
         f"\U0001F441 <b>\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u044B:</b> {_fmt_value(getattr(item, 'views_counter', None))}\n"
         f"\u2705 <b>\u041E\u0434\u043E\u0431\u0440\u0435\u043D:</b> {_fmt_date(getattr(item, 'approval_date', None))}\n"
@@ -312,6 +332,8 @@ def format_item_card_payload(item, account=None, item_url: str | None = None) ->
         "is_owner": is_owner,
         "item_status": status_name,
         "type_name": type_name,
+        "keep_in_sale": bool(getattr(item, "keep_in_sale", False)),
+        "keep_in_sale_available": bool(getattr(item, "keep_in_sale_available", False)),
     }
 
 

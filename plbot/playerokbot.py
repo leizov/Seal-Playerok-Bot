@@ -952,6 +952,18 @@ class PlayerokBot:
         except Exception as e:
             self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при восстановлении истёкших предметов: {Fore.WHITE}{e}")
 
+    def _is_kept_in_sale(self, item) -> bool:
+        """Проверяет флаг «Оставлять в продаже» у товара (запрашивает свежие данные)."""
+        item_id = str(getattr(item, "id", "") or "")
+        if not item_id:
+            return False
+        try:
+            full_item = self.account.get_item(item_id)
+        except Exception as e:
+            self.logger.warning(f"Не удалось проверить «Оставлять в продаже» у товара {item_id}: {e}")
+            return False
+        return bool(getattr(full_item, "keep_in_sale", False))
+
     def restore_last_sold_item(self, item: Item):
         """
         Восстанавливает последний проданный предмет.
@@ -960,6 +972,12 @@ class PlayerokBot:
         :type item: `playerokapi.types.Item`
         """
         if not self.is_connected or self.account is None:
+            return
+        if self._is_kept_in_sale(item):
+            self.logger.info(
+                f"{Fore.LIGHTWHITE_EX}«{item.name}» {Fore.WHITE}— включено «Оставлять в продаже», "
+                f"восстановление не требуется"
+            )
             return
         try:
             profile = None

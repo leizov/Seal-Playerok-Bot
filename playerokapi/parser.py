@@ -707,6 +707,9 @@ def item(data: dict) -> "Item":
         seller_type=data.get("sellerType"),
         status=ItemStatuses.__members__.get(data.get("status")),
         user=user_profile(data.get("user")),
+        is_automated=data.get("isAutomated"),
+        is_attachments_forbidden=data.get("isAttachmentsForbidden"),
+        post_moderation_checked_at=data.get("postModerationCheckedAt"),
     )
 
 
@@ -755,11 +758,21 @@ def my_item(data: dict) -> "MyItem":
         status_description=data.get("statusDescription"),
         status_payment=transaction(data.get("statusPayment")),
         views_counter=data.get("viewsCounter"),
-        is_editable=data.get("isEditable"),
+        is_editable=data.get("editable", data.get("isEditable")),
         approval_date=data.get("approvalDate"),
         deleted_at=data.get("deletedAt"),
         updated_at=data.get("updatedAt"),
         created_at=data.get("createdAt"),
+        deals_counter=data.get("dealsCounter"),
+        keep_in_sale=data.get("keepInSale"),
+        keep_in_sale_available=data.get("keepInSaleAvailable"),
+        may_be_published=data.get("mayBePublished"),
+        pause_available=data.get("pauseAvailable"),
+        republish_available=data.get("republishAvailable"),
+        is_automated=data.get("isAutomated"),
+        is_attachments_forbidden=data.get("isAttachmentsForbidden"),
+        sequence=data.get("sequence"),
+        post_moderation_checked_at=data.get("postModerationCheckedAt"),
     )
 
 
@@ -784,7 +797,24 @@ def item_profile(data: dict) -> "ItemProfile":
         views_counter=data.get("viewsCounter"),
         fee_multiplier=data.get("feeMultiplier"),
         created_at=data.get("createdAt"),
+        deals_counter=data.get("dealsCounter"),
+        is_automated=data.get("isAutomated"),
+        is_attachments_forbidden=data.get("isAttachmentsForbidden"),
     )
+
+
+def item_by_typename(data: dict) -> "MyItem | Item | ItemProfile | None":
+    """Выбирает нужный парсер предмета по полю `__typename`."""
+    if not data:
+        return None
+    type_name = data.get("__typename")
+    if type_name == "MyItem":
+        return my_item(data)
+    if type_name in ("ItemProfile", "MyItemProfile", "ForeignItemProfile"):
+        return item_profile(data)
+    if type_name in ("Item", "ForeignItem"):
+        return item(data)
+    return None
 
 
 def item_profile_page_info(data: dict) -> "ItemProfilePageInfo":

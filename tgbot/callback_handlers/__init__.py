@@ -15,6 +15,7 @@ from .deals import router as deals_router
 from .items import router as items_router
 from .chats import router as chats_router
 from .plugin_management import router as plugin_management_router
+from .reviews import router as reviews_router
 
 router = Router()
 router.include_routers(
@@ -34,4 +35,5 @@ router.include_routers(
     deals_router,
     items_router,
     chats_router,
+    reviews_router,
 )

@@ -39,3 +39,4 @@ from .deals import *
 from .items import *
 from .chats import *
 from .item_card import *
+from .reviews import *
