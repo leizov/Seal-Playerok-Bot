@@ -29,8 +29,8 @@ def format_system_message(msg_text: str, deal: ItemDeal=None) -> tuple[str, str]
             "<b>🎉 Сделка подтверждена!</b>"
         ),
         "{{DEAL_CONFIRMED_AUTOMATICALLY}}": (
-            "🤖",
-            "<b>🤖 Сделка подтверждена автоматически</b>"
+            "⌛",
+            "<b>⌛ Система подтвердила сделку за покупателя</b>"
         ),
         "{{DEAL_ROLLED_BACK}}": (
             "↩️",
@@ -77,7 +77,7 @@ def get_system_message_description(msg_text: str) -> str | None:
         "{{ITEM_PAID}}": "Товар оплачен",
         "{{ITEM_SENT}}": "Товар отправлен",
         "{{DEAL_CONFIRMED}}": "Сделка подтверждена",
-        "{{DEAL_CONFIRMED_AUTOMATICALLY}}": "Сделка подтверждена автоматически",
+        "{{DEAL_CONFIRMED_AUTOMATICALLY}}": "Система подтвердила сделку за покупателя",
         "{{DEAL_ROLLED_BACK}}": "Сделка отменена",
         "{{DEAL_HAS_PROBLEM}}": "Проблема со сделкой",
         "{{DEAL_PROBLEM_RESOLVED}}": "Проблема решена",

@@ -2010,7 +2010,7 @@ class PlayerokBot:
             asyncio.run_coroutine_threadsafe(
                 get_telegram_bot().log_event(
                     text=log_text(
-                        title="✅ Сделка подтверждена автоматически",
+                        title="⌛ Система подтвердила сделку за покупателя",
                         text=f"{self._format_deal_line(event.deal.id)}\n"
                              f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
                              f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"

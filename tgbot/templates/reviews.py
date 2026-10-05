@@ -55,6 +55,12 @@ def reviews_kb() -> InlineKeyboardMarkup:
                     text="🔄 Обновить",
                     callback_data=calls.ReviewsAction(action="refresh").pack(),
                 )
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ В профиль",
+                    callback_data=calls.ProfileNavigation(to="main").pack(),
+                )
+            ],
         ]
     )

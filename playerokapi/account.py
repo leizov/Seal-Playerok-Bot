@@ -3144,8 +3144,8 @@ class Account:
         :param count: Кол-во транзакциий которые нужно получить (не более 24 за один запрос).
         :type count: `int`
 
-        :param operation: Операция транзакции, _опционально_.
-        :type operation: `playerokapi.enums.TransactionOperations` or `None`
+        :param operation: Операция транзакции (или список операций), _опционально_.
+        :type operation: `playerokapi.enums.TransactionOperations`, `list` or `None`
 
         :param min_value: Минимальная сумма транзакции, _опционально_.
         :type min_value: `int` or `None`
@@ -3171,7 +3171,9 @@ class Account:
             "variables": {"pagination": {"first": count, "after": after_cursor}, "filter": {"userId": self.id}, "hasSupportAccess": False},
             "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get("transactions")}}, ensure_ascii=False)
         }
-        if operation: payload["variables"]["filter"]["operation"] = [operation.name]
+        if operation:
+            operations = operation if isinstance(operation, (list, tuple, set)) else [operation]
+            payload["variables"]["filter"]["operation"] = [op.name for op in operations]
         if min_value or max_value:
             payload["variables"]["filter"]["value"] = {}
             if min_value: payload["variables"]["filter"]["value"]["min"] = str(min_value)

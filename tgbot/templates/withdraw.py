@@ -51,6 +51,33 @@ def _limits_text(provider) -> str:
     return f"{_money(outgoing.min)} – {_money(outgoing.max)}"
 
 
+def _balance_lines(balance) -> list[str]:
+    if balance is None:
+        return []
+    return [
+        f"💰 <b>Баланс:</b> {_money(balance.value)}",
+        f"┣ <b>Можно вывести:</b> {_money(balance.withdrawable)}",
+        f"┣ <b>Доступно:</b> {_money(balance.available)}",
+        f"┣ <b>Ожидается:</b> {_money(balance.pending_income)}",
+        f"┗ <b>Заморожено:</b> {_money(balance.frozen)}",
+        "",
+    ]
+
+
+def wallet_text(balance) -> str:
+    lines = ["👛 <b>Кошелёк</b>", ""] + _balance_lines(balance)
+    lines.append("Выберите действие ↓")
+    return "\n".join(lines)
+
+
+def wallet_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("💸 Вывод", "withdraw"), _btn("📜 История транзакций", "history", "0")],
+        [_btn("🔄 Обновить", "open")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.ProfileNavigation(to="main").pack())],
+    ])
+
+
 def withdraw_main_text(balance, providers: list) -> str:
     lines = ["💸 <b>Вывод средств</b>", ""]
     if balance is not None:
@@ -90,9 +117,8 @@ def withdraw_main_kb(has_sbp: bool) -> InlineKeyboardMarkup:
     rows = []
     if has_sbp:
         rows.append([_btn("⚡ Вывести через СБП", "sbp")])
-    rows.append([_btn("📜 История транзакций", "history", "0")])
-    rows.append([_btn("🔄 Обновить", "open")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.ProfileNavigation(to="main").pack())])
+    rows.append([_btn("🔄 Обновить", "withdraw")])
+    rows.append([_btn("⬅️ В кошелёк", "open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -107,7 +133,7 @@ def withdraw_phone_choice_kb(saved_phone: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn(f"📱 Номер {mask_requisite(saved_phone)}", "phone_saved")],
         [_btn("✏️ Другой номер", "phone_new")],
-        [_btn("❌ Отмена", "open")],
+        [_btn("❌ Отмена", "withdraw")],
     ])
 
 
@@ -130,7 +156,7 @@ def withdraw_bank_choice_kb(bank_name: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn(f"🏦 {bank_name[:40]}", "bank_saved")],
         [_btn("🔎 Другой банк", "bank_search")],
-        [_btn("❌ Отмена", "open")],
+        [_btn("❌ Отмена", "withdraw")],
     ])
 
 
@@ -148,7 +174,7 @@ def withdraw_bank_results_text(query: str, count: int) -> str:
 def withdraw_bank_results_kb(banks: list) -> InlineKeyboardMarkup:
     rows = [[_btn(f"🏦 {str(b.name)[:40]}", "bank_pick", str(b.id))] for b in banks]
     rows.append([_btn("🔎 Искать заново", "bank_search")])
-    rows.append([_btn("❌ Отмена", "open")])
+    rows.append([_btn("❌ Отмена", "withdraw")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -178,7 +204,7 @@ def withdraw_confirm_text(ctx: dict) -> str:
 
 def withdraw_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("✅ Подтвердить вывод", "confirm"), _btn("❌ Отмена", "open")],
+        [_btn("✅ Подтвердить вывод", "confirm"), _btn("❌ Отмена", "withdraw")],
     ])
 
 
@@ -204,7 +230,7 @@ def withdraw_result_text(tx) -> str:
 def withdraw_result_kb(tx_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("🚫 Отменить заявку", "cancel_tx", tx_id)],
-        [_btn("⬅️ К выводу", "open")],
+        [_btn("⬅️ В кошелёк", "open")],
     ])
 
 
@@ -212,8 +238,8 @@ TX_OPERATION_LABELS = {
     "DEPOSIT": "Пополнение",
     "BUY": "Покупка",
     "SELL": "Продажа",
-    "ITEM_DEFAULT_PRIORITY": "Стандартный приоритет",
-    "ITEM_PREMIUM_PRIORITY": "Премиум приоритет",
+    "ITEM_DEFAULT_PRIORITY": "Оплата выставления",
+    "ITEM_PREMIUM_PRIORITY": "Оплата премиум/поднятия",
     "WITHDRAW": "Вывод",
     "MANUAL_BALANCE_INCREASE": "Зачисление",
     "MANUAL_BALANCE_DECREASE": "Списание",
@@ -226,6 +252,12 @@ TX_HISTORY_FILTERS = {
     "WITHDRAW": "Выводы",
     "SELL": "Продажи",
     "BUY": "Покупки",
+    "PRIORITY": "Поднятия",
+}
+
+# Фильтры, объединяющие несколько операций Playerok.
+TX_HISTORY_FILTER_OPERATIONS = {
+    "PRIORITY": ("ITEM_DEFAULT_PRIORITY", "ITEM_PREMIUM_PRIORITY"),
 }
 
 
@@ -275,10 +307,11 @@ def transactions_text(transactions: list, page: int, total_count, filter_key: st
 
 
 def transactions_kb(page: int, has_next: bool, filter_key: str, cancellable: list | None = None) -> InlineKeyboardMarkup:
-    rows = [[
+    filter_buttons = [
         _btn(("• " if key == filter_key else "") + label, "hist_filter", key)
         for key, label in TX_HISTORY_FILTERS.items()
-    ]]
+    ]
+    rows = [filter_buttons[i:i + 3] for i in range(0, len(filter_buttons), 3)]
     for tx in cancellable or []:
         rows.append([_btn(f"🚫 Отменить вывод {_money(getattr(tx, 'value', None))}", "cancel_tx", str(tx.id))])
     nav = []
@@ -288,7 +321,7 @@ def transactions_kb(page: int, has_next: bool, filter_key: str, cancellable: lis
     if has_next:
         nav.append(_btn("➡️", "history", str(page + 1)))
     rows.append(nav)
-    rows.append([_btn("⬅️ К выводу", "open")])
+    rows.append([_btn("⬅️ В кошелёк", "open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

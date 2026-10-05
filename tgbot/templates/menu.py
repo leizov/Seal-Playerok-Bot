@@ -49,7 +49,6 @@ def start_shortcuts_kb() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text=START_SHORTCUT_MAIN_MENU),
-                KeyboardButton(text=START_SHORTCUT_REVIEWS),
             ],
             [
                 KeyboardButton(text=START_SHORTCUT_DEALS),

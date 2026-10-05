@@ -96,6 +96,23 @@ async def _set_ctx(state: FSMContext, ctx: dict):
     await state.update_data(**{CTX_KEY: ctx})
 
 
+async def show_wallet(message: Message, state: FSMContext, callback: CallbackQuery | None = None):
+    await state.set_state(None)
+    account = _get_account()
+    if account is None:
+        await throw_float_message(state=state, message=message, callback=callback,
+                                  text=templ.do_action_text("❌ Нет подключения к Playerok"),
+                                  reply_markup=templ.back_kb(calls.ProfileNavigation(to="main").pack()))
+        return
+    try:
+        balance = await asyncio.to_thread(account.get_balance)
+    except Exception as e:
+        logger.warning("Не удалось загрузить баланс: %s", e)
+        balance = None
+    await throw_float_message(state=state, message=message, callback=callback,
+                              text=templ.wallet_text(balance), reply_markup=templ.wallet_kb())
+
+
 async def show_withdraw_menu(message: Message, state: FSMContext, callback: CallbackQuery | None = None):
     await state.set_state(None)
     account = _get_account()
@@ -153,7 +170,7 @@ async def _ask_bank_query(message: Message, state: FSMContext, callback: Callbac
     await state.set_state(states.WithdrawStates.waiting_for_bank_query)
     await throw_float_message(state=state, message=message, callback=callback,
                               text=templ.withdraw_enter_bank_text(error),
-                              reply_markup=templ.back_kb(calls.WithdrawAction(action="open").pack()))
+                              reply_markup=templ.back_kb(calls.WithdrawAction(action="withdraw").pack()))
 
 
 async def _ask_amount(message: Message, state: FSMContext, callback: CallbackQuery | None = None,
@@ -162,7 +179,7 @@ async def _ask_amount(message: Message, state: FSMContext, callback: CallbackQue
     await state.set_state(states.WithdrawStates.waiting_for_amount)
     await throw_float_message(state=state, message=message, callback=callback,
                               text=templ.withdraw_enter_amount_text(ctx, error),
-                              reply_markup=templ.back_kb(calls.WithdrawAction(action="open").pack()))
+                              reply_markup=templ.back_kb(calls.WithdrawAction(action="withdraw").pack()))
 
 
 @router.callback_query(calls.WithdrawAction.filter())
@@ -171,6 +188,10 @@ async def callback_withdraw_action(callback: CallbackQuery, callback_data: calls
     message = callback.message
 
     if action == "open":
+        await show_wallet(message, state, callback=callback)
+        return
+
+    if action == "withdraw":
         await show_withdraw_menu(message, state, callback=callback)
         return
 
@@ -200,7 +221,7 @@ async def callback_withdraw_action(callback: CallbackQuery, callback_data: calls
         await state.set_state(states.WithdrawStates.waiting_for_phone)
         await throw_float_message(state=state, message=message, callback=callback,
                                   text=templ.withdraw_enter_phone_text(),
-                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="open").pack()))
+                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="withdraw").pack()))
         return
 
     if action == "bank_saved":
@@ -279,7 +300,11 @@ async def show_transactions(message: Message, state: FSMContext, callback: Callb
             await callback.answer("Нет подключения к Playerok", show_alert=True)
         return
 
-    operation = TransactionOperations.__members__.get(filter_key) if filter_key != "all" else None
+    operation = None
+    if filter_key in templ.TX_HISTORY_FILTER_OPERATIONS:
+        operation = [TransactionOperations[name] for name in templ.TX_HISTORY_FILTER_OPERATIONS[filter_key]]
+    elif filter_key != "all":
+        operation = TransactionOperations.__members__.get(filter_key)
     try:
         tx_list = await asyncio.to_thread(account.get_transactions, count=HISTORY_PAGE_SIZE,
                                           operation=operation, after_cursor=cursors[page])
@@ -287,7 +312,7 @@ async def show_transactions(message: Message, state: FSMContext, callback: Callb
         logger.warning("Не удалось загрузить историю транзакций: %s", e)
         await throw_float_message(state=state, message=message, callback=callback,
                                   text=templ.do_action_text(f"❌ Не удалось загрузить историю транзакций: {e}"),
-                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="open").pack()))
+                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="withdraw").pack()))
         return
 
     transactions = [tx for tx in (getattr(tx_list, "transactions", None) or []) if tx]
@@ -340,7 +365,7 @@ async def _do_withdraw(callback: CallbackQuery, state: FSMContext, ctx: dict):
         logger.warning("Ошибка вывода через СБП: %s", e)
         await throw_float_message(state=state, message=callback.message,
                                   text=templ.do_action_text(f"❌ Playerok не принял заявку на вывод: {e}"),
-                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="open").pack()))
+                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="withdraw").pack()))
         return
 
     logger.info("Создана заявка на вывод %s ₽ через СБП (id=%s)", amount, getattr(tx, "id", None))
@@ -348,7 +373,7 @@ async def _do_withdraw(callback: CallbackQuery, state: FSMContext, ctx: dict):
     await throw_float_message(state=state, message=callback.message,
                               text=templ.withdraw_result_text(tx),
                               reply_markup=templ.withdraw_result_kb(tx_id) if tx_id
-                              else templ.back_kb(calls.WithdrawAction(action="open").pack()))
+                              else templ.back_kb(calls.WithdrawAction(action="withdraw").pack()))
 
 
 async def _do_cancel(callback: CallbackQuery, state: FSMContext, tx_id: str | None):
@@ -373,7 +398,7 @@ async def handler_withdraw_phone(message: Message, state: FSMContext):
     if phone is None:
         await throw_float_message(state=state, message=message,
                                   text=templ.withdraw_enter_phone_text("Не похоже на номер РФ."),
-                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="open").pack()))
+                                  reply_markup=templ.back_kb(calls.WithdrawAction(action="withdraw").pack()))
         return
     ctx = await _get_ctx(state)
     ctx["phone"] = phone
