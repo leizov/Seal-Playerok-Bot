@@ -3,7 +3,12 @@ from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramAPIError
 
-from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, AUTO_DELIVERY_KIND_STATIC, normalize_auto_deliveries
+from core.auto_deliveries import (
+    AUTO_DELIVERY_KIND_MULTI,
+    AUTO_DELIVERY_KIND_STATIC,
+    DEFAULT_MULTI_FORMAT,
+    normalize_auto_deliveries,
+)
 from playerokapi.enums import ItemDealStatuses
 from settings import Settings as sett
 
@@ -443,6 +448,15 @@ async def callback_delete_custom_command(callback: CallbackQuery, state: FSMCont
         )
 
 
+@router.callback_query(F.data == "use_default_multi_format")
+async def callback_use_default_multi_format(callback: CallbackQuery, state: FSMContext):
+    from ..handlers.states_delivs import show_new_multi_confirm
+
+    await state.set_state(None)
+    await state.update_data(new_auto_delivery_format=DEFAULT_MULTI_FORMAT)
+    await show_new_multi_confirm(state, callback.message, callback)
+
+
 @router.callback_query(F.data == "add_new_auto_delivery")
 async def callback_add_new_auto_delivery(callback: CallbackQuery, state: FSMContext):
     try:
@@ -468,6 +482,7 @@ async def callback_add_new_auto_delivery(callback: CallbackQuery, state: FSMCont
                     "items": list(new_auto_delivery_items),
                     "issued_total": 0,
                     "issued_current_batch": 0,
+                    "format": data.get("new_auto_delivery_format") or DEFAULT_MULTI_FORMAT,
                 }
             )
             success_text = "✅ <b>Мультивыдача</b> была добавлена"

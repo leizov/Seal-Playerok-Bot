@@ -22,5 +22,10 @@ class AutoDeliveryPage(CallbackData, prefix="audepage"):
     index: int
 
 
+class DeliveryHistoryRecord(CallbackData, prefix="adhrec"):
+    rec_id: int
+    page: int
+
+
 class ProxyPage(CallbackData, prefix="proxpage"):
     proxy_id: int

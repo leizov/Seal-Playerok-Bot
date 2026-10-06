@@ -23,7 +23,10 @@ from playerokapi.listener.listener import EventListener
 from playerokapi.types import Chat, Item
 
 from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY, SECONDARY_COLOR, HIGHLIGHT_COLOR, SUCCESS_COLOR
-from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, match_auto_delivery_keyphrase, normalize_auto_deliveries
+from core.auto_deliveries import (
+    AUTO_DELIVERY_KIND_MULTI, AUTO_DELIVERY_KIND_STATIC, match_auto_delivery_keyphrase,
+    normalize_auto_deliveries, render_multi_delivery, render_static_delivery,
+)
 from core.utils import set_title, shutdown, run_async_in_thread
 from core.handlers import add_bot_event_handler, add_playerok_event_handler, call_bot_event, call_playerok_event
 from core.error_stats import get_playerok_connection_health, mark_playerok_startup_fatal_incident
@@ -35,6 +38,10 @@ from tgbot.templates import log_text, log_new_mess_kb, log_new_deal_kb
 from tgbot.utils.message_formatter import format_system_message
 
 from .placeholders import format_template
+from .delivery_history import (
+    STATUS_FAILED as DELIVERY_STATUS_FAILED, STATUS_OUT_OF_STOCK as DELIVERY_STATUS_OUT_OF_STOCK,
+    STATUS_SENT as DELIVERY_STATUS_SENT, add_record as add_delivery_record,
+)
 from .stats import (
     get_stats, load_stats, record_keep_in_sale, record_new_deal, record_raise, record_refund,
     record_review, set_stats,
@@ -862,15 +869,18 @@ class PlayerokBot:
             except Exception as e:
                 self.logger.warning(f"Не удалось пометить чат {chat_id} как прочитанный: {e}")
 
+        # Водяной знак добавляется один раз до цикла: раньше он приклеивался
+        # на каждой повторной попытке и уходил покупателю дважды/трижды.
+        if (
+            text
+            and self.config["playerok"]["watermark"]["enabled"]
+            and self.config["playerok"]["watermark"]["value"]
+            and not exclude_watermark
+        ):
+            text = f"{self.config['playerok']['watermark']['value']}\n\n{text}"
+
         for ix in range(max_attempts):
             try:
-                if (
-                    text
-                    and self.config["playerok"]["watermark"]["enabled"]
-                    and self.config["playerok"]["watermark"]["value"]
-                    and not exclude_watermark
-                ):
-                    text = f"{self.config['playerok']['watermark']['value']}\n\n{text}"
                 # Передаем mark_chat_as_read=False т.к. уже пометили выше
                 mess = self.account.send_message(chat_id, text, photo_file_path, mark_chat_as_read=False)
                 return mess
@@ -1747,6 +1757,147 @@ class PlayerokBot:
             )
         )
 
+    def _auto_delivery_log_enabled(self) -> bool:
+        return bool(
+            self.config["playerok"]["tg_logging"]["enabled"]
+            and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
+        )
+
+    def _send_auto_delivery_log(self, title: str, text: str):
+        try:
+            asyncio.run_coroutine_threadsafe(
+                get_telegram_bot().log_event(text=log_text(title=title, text=text)),
+                get_telegram_bot_loop()
+            )
+        except Exception as e:
+            self.logger.error(f"Не удалось отправить лог авто-выдачи в Telegram: {e}")
+
+    def _run_auto_delivery(self, event: NewDealEvent):
+        auto_deliveries = normalize_auto_deliveries(self.auto_deliveries)
+        matched_delivery_index = None
+        matched_phrase = None
+
+        for idx, auto_delivery in enumerate(auto_deliveries):
+            if not auto_delivery.get("enabled", True):
+                continue
+            phrase = match_auto_delivery_keyphrase(event.deal.item.name, auto_delivery.get("keyphrases", []))
+            if phrase:
+                matched_delivery_index = idx
+                matched_phrase = phrase
+                break
+
+        if matched_delivery_index is None:
+            return
+
+        matched_delivery = auto_deliveries[matched_delivery_index]
+        buyer_username = getattr(event.deal.user, "username", None)
+        template_values = dict(
+            username=buyer_username,
+            chat_id=event.chat.id,
+            deal_id=event.deal.id,
+            deal_item_name=event.deal.item.name,
+            deal_item_price=event.deal.item.price,
+        )
+        history_base = dict(
+            deal_id=event.deal.id,
+            chat_id=event.chat.id,
+            buyer=buyer_username,
+            item_name=event.deal.item.name,
+            item_price=event.deal.item.price,
+            keyphrase=matched_phrase,
+        )
+        deal_lines = (
+            f"{self._format_deal_line(event.deal.id)}\n"
+            f"{self._format_buyer_line(buyer_username)}\n"
+            f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
+        )
+
+        if matched_delivery.get("kind") == AUTO_DELIVERY_KIND_MULTI:
+            items = matched_delivery.get("items", [])
+
+            if not items:
+                out_of_stock_message = "❌ Товар закончился. Напишите продавцу в чат."
+                self.send_message(event.chat.id, out_of_stock_message)
+                self.logger.warning(f'Мультивыдача пуста для сделки {event.deal.id}')
+                add_delivery_record(
+                    status=DELIVERY_STATUS_OUT_OF_STOCK, kind=AUTO_DELIVERY_KIND_MULTI,
+                    message=out_of_stock_message, remaining=0, **history_base,
+                )
+                if self._auto_delivery_log_enabled():
+                    self._send_auto_delivery_log(
+                        "⚠️ Остаток мультивыдачи пуст",
+                        deal_lines + f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}",
+                    )
+                return
+
+            issued_item = items.pop(0)
+            matched_delivery["issued_total"] = int(matched_delivery.get("issued_total", 0)) + 1
+            matched_delivery["issued_current_batch"] = int(matched_delivery.get("issued_current_batch", 0)) + 1
+            remaining = len(items)
+
+            self.auto_deliveries = auto_deliveries
+            sett.set("auto_deliveries", auto_deliveries)
+
+            delivery_text = render_multi_delivery(
+                matched_delivery.get("format", ""), issued_item, **template_values
+            )
+            sent = self.send_message(event.chat.id, delivery_text)
+            status = DELIVERY_STATUS_SENT if sent is not None else DELIVERY_STATUS_FAILED
+            add_delivery_record(
+                status=status, kind=AUTO_DELIVERY_KIND_MULTI, good=issued_item,
+                message=delivery_text, remaining=remaining, **history_base,
+            )
+
+            if sent is None:
+                self.logger.error(f'Не удалось отправить товар мультивыдачи для {event.deal.id} — строка сохранена в истории выдач')
+            else:
+                self.logger.info(f'Выдал товар из мультивыдачи для {event.deal.id}')
+
+            if self._auto_delivery_log_enabled():
+                title = "🚀📦 Выдан товар из мультивыдачи" if sent is not None else "❌ Не удалось отправить товар мультивыдачи"
+                extra = "" if sent is not None else "\n<i>Строка сохранена в истории выдач — отправьте её покупателю вручную.</i>"
+                self._send_auto_delivery_log(
+                    title,
+                    deal_lines
+                    + f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽\n"
+                    + f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}\n"
+                    + f"<b>Выданная строка:</b> <tg-spoiler>{escape(issued_item)}</tg-spoiler>\n"
+                    + f"<b>Осталось:</b> {escape(str(remaining))}"
+                    + extra,
+                )
+                if remaining == 0:
+                    self._send_auto_delivery_log(
+                        "⚠️ Последний товар мультивыдачи выдан",
+                        deal_lines
+                        + f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}\n"
+                        + "<b>Остаток:</b> 0",
+                    )
+            return
+
+        static_message = render_static_delivery(matched_delivery.get("message", []), **template_values)
+        if not static_message:
+            self.logger.warning(f'Сообщение авто-выдачи пустое — сделка {event.deal.id} осталась без выдачи')
+            return
+
+        sent = self.send_message(event.chat.id, static_message)
+        status = DELIVERY_STATUS_SENT if sent is not None else DELIVERY_STATUS_FAILED
+        add_delivery_record(
+            status=status, kind=AUTO_DELIVERY_KIND_STATIC, message=static_message, **history_base,
+        )
+        if sent is None:
+            self.logger.error(f'Не удалось отправить сообщение авто-выдачи для {event.deal.id}')
+        else:
+            self.logger.info(f'Выдал товар из автовыдачи для {event.deal.id}')
+
+        if self._auto_delivery_log_enabled():
+            title = "🚀📦 Выдан товар из автовыдачи" if sent is not None else "❌ Не удалось отправить авто-выдачу"
+            self._send_auto_delivery_log(
+                title,
+                deal_lines
+                + f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽\n"
+                + f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}",
+            )
+
     async def _on_new_deal(self, event: NewDealEvent):
         if not self.is_connected or self.account is None:
             return
@@ -1803,128 +1954,10 @@ class PlayerokBot:
                 self.logger.info(f'Отправил приветственное сообщение для {event.deal.user.username}')
 
         if self.config["playerok"]["auto_deliveries"]["enabled"]:
-            auto_deliveries = normalize_auto_deliveries(self.auto_deliveries)
-            matched_delivery_index = None
-            matched_phrase = None
-
-            for idx, auto_delivery in enumerate(auto_deliveries):
-                if not auto_delivery.get("enabled", True):
-                    continue
-                phrase = match_auto_delivery_keyphrase(event.deal.item.name, auto_delivery.get("keyphrases", []))
-                if phrase:
-                    matched_delivery_index = idx
-                    matched_phrase = phrase
-                    break
-
-            if matched_delivery_index is not None:
-                matched_delivery = auto_deliveries[matched_delivery_index]
-
-                if matched_delivery.get("kind") == AUTO_DELIVERY_KIND_MULTI:
-                    items = matched_delivery.get("items", [])
-
-                    if items:
-                        issued_item = items.pop(0)
-                        matched_delivery["issued_total"] = int(matched_delivery.get("issued_total", 0)) + 1
-                        matched_delivery["issued_current_batch"] = int(matched_delivery.get("issued_current_batch", 0)) + 1
-                        remaining = len(items)
-
-                        self.auto_deliveries = auto_deliveries
-                        sett.set("auto_deliveries", auto_deliveries)
-
-                        self.send_message(event.chat.id, issued_item)
-                        self.logger.info(f'Выдал товар из мультивыдачи для {event.deal.id}')
-
-                        if (
-                            self.config["playerok"]["tg_logging"]["enabled"]
-                            and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
-                        ):
-                            safe_issued_item = escape(issued_item)
-                            asyncio.run_coroutine_threadsafe(
-                                get_telegram_bot().log_event(
-                                    text=log_text(
-                                        title="🚀📦 Выдан товар из мультивыдачи",
-                                        text=(
-                                            f"{self._format_deal_line(event.deal.id)}\n"
-                                            f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
-                                            f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
-                                            f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽\n"
-                                            f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}\n"
-                                            f"<b>Выданная строка:</b> <tg-spoiler>{safe_issued_item}</tg-spoiler>\n"
-                                            f"<b>Осталось:</b> {escape(str(remaining))}"
-                                        )
-                                    )
-                                ),
-                                get_telegram_bot_loop()
-                            )
-
-                        if (
-                            remaining == 0
-                            and self.config["playerok"]["tg_logging"]["enabled"]
-                            and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
-                        ):
-                            asyncio.run_coroutine_threadsafe(
-                                get_telegram_bot().log_event(
-                                    text=log_text(
-                                        title="⚠️ Последний товар мультивыдачи выдан",
-                                        text=(
-                                            f"{self._format_deal_line(event.deal.id)}\n"
-                                            f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
-                                            f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
-                                            f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}\n"
-                                            f"<b>Остаток:</b> 0"
-                                        )
-                                    )
-                                ),
-                                get_telegram_bot_loop()
-                            )
-                    else:
-                        out_of_stock_message = "❌ Товар закончился. Напишите продавцу в чат."
-                        self.send_message(event.chat.id, out_of_stock_message)
-                        self.logger.warning(f'Мультивыдача пуста для сделки {event.deal.id}')
-
-                        if (
-                            self.config["playerok"]["tg_logging"]["enabled"]
-                            and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
-                        ):
-                            asyncio.run_coroutine_threadsafe(
-                                get_telegram_bot().log_event(
-                                    text=log_text(
-                                        title="⚠️ Остаток мультивыдачи пуст",
-                                        text=(
-                                            f"{self._format_deal_line(event.deal.id)}\n"
-                                            f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
-                                            f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
-                                            f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}"
-                                        )
-                                    )
-                                ),
-                                get_telegram_bot_loop()
-                            )
-                else:
-                    static_message = "\n".join(matched_delivery.get("message", []))
-                    if static_message:
-                        self.send_message(event.chat.id, static_message)
-                    self.logger.info(f'Выдал товар из автовыдачи для {event.deal.id}')
-
-                    if (
-                        self.config["playerok"]["tg_logging"]["enabled"]
-                        and self.config["playerok"]["tg_logging"].get("events", {}).get("auto_delivery", True)
-                    ):
-                        asyncio.run_coroutine_threadsafe(
-                            get_telegram_bot().log_event(
-                                text=log_text(
-                                    title="🚀📦 Выдан товар из автовыдачи",
-                                    text=(
-                                        f"{self._format_deal_line(event.deal.id)}\n"
-                                        f"{self._format_buyer_line(getattr(event.deal.user, 'username', None))}\n"
-                                        f"<b>📦 Товар:</b> {escape(str(event.deal.item.name or '—'))}\n"
-                                        f"<b>💰 Сумма:</b> {escape(str(event.deal.item.price or '?'))}₽\n"
-                                        f"<b>🧩 Ключевая фраза:</b> {escape(str(matched_phrase or '—'))}"
-                                    )
-                                )
-                            ),
-                            get_telegram_bot_loop()
-                        )
+            try:
+                self._run_auto_delivery(event)
+            except Exception as e:
+                self.logger.error(f"Ошибка авто-выдачи для сделки {event.deal.id}: {e}", exc_info=True)
         if self._should_auto_complete_deal(event.deal):
             deal_id = str(getattr(event.deal, "id", "unknown"))
             self._start_daemon_thread(

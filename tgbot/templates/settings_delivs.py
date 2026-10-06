@@ -109,6 +109,7 @@ def settings_delivs_kb(page: int = 0):
         rows.append(buttons_row)
 
     rows.append([InlineKeyboardButton(text="➕ Добавить автовыдачу", callback_data="enter_new_auto_delivery")])
+    rows.append([InlineKeyboardButton(text="📜 История выдач", callback_data=calls.DeliveryHistoryPagination(page=0).pack())])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.MenuPagination(page=0).pack())])
 
     kb = InlineKeyboardMarkup(inline_keyboard=rows)

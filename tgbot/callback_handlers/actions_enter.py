@@ -1,3 +1,5 @@
+from html import escape
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -233,6 +235,7 @@ async def callback_select_new_auto_delivery_kind_static(callback: CallbackQuery,
         new_auto_delivery_kind=AUTO_DELIVERY_KIND_STATIC,
         new_auto_delivery_message=None,
         new_auto_delivery_items=None,
+        new_auto_delivery_format=None,
     )
     await throw_float_message(
         state=state,
@@ -252,6 +255,7 @@ async def callback_select_new_auto_delivery_kind_multi(callback: CallbackQuery, 
         new_auto_delivery_kind=AUTO_DELIVERY_KIND_MULTI,
         new_auto_delivery_message=None,
         new_auto_delivery_items=None,
+        new_auto_delivery_format=None,
     )
     await throw_float_message(
         state=state,
@@ -316,7 +320,11 @@ async def callback_enter_auto_delivery_message(callback: CallbackQuery, state: F
         await throw_float_message(
             state=state, 
             message=callback.message, 
-            text=templ.settings_deliv_page_float_text(f"💬 Введите новое <b>сообщение</b> после покупки\n┗ Текущее: <blockquote>{auto_delivery_message}</blockquote>"), 
+            text=templ.settings_deliv_page_float_text(
+                f"💬 Введите новый <b>шаблон сообщения</b>, который покупатель получит после оплаты\n"
+                f"┗ Текущее: <blockquote>{escape(auto_delivery_message)}</blockquote>\n\n"
+                f"{templ.line_break_hint()}\n\n{placeholders_help('deal')}"
+            ),
             reply_markup=templ.back_kb(calls.AutoDeliveryPage(index=auto_delivery_index).pack())
         )
     except Exception as e:
@@ -352,7 +360,8 @@ async def callback_enter_auto_delivery_add_items(callback: CallbackQuery, state:
                 "➕ Отправьте новые товары для добавления в конец списка:\n\n"
                 "• текстом (каждая непустая строка = один товар)\n"
                 "или\n"
-                "• <b>.txt</b> файлом (каждая непустая строка = один товар)."
+                "• <b>.txt</b> файлом (каждая непустая строка = один товар).\n\n"
+                f"{templ.line_break_hint()}"
             ),
             reply_markup=templ.back_kb(calls.AutoDeliveryPage(index=auto_delivery_index).pack())
         )
@@ -390,7 +399,46 @@ async def callback_enter_auto_delivery_replace_items(callback: CallbackQuery, st
                 "• текстом (каждая непустая строка = один товар)\n"
                 "или\n"
                 "• <b>.txt</b> файлом (каждая непустая строка = один товар).\n\n"
-                "ℹ️ Счетчик «Выдано в текущей партии» будет сброшен в 0."
+                "ℹ️ Счетчик «Выдано в текущей партии» будет сброшен в 0.\n\n"
+                f"{templ.line_break_hint()}"
+            ),
+            reply_markup=templ.back_kb(calls.AutoDeliveryPage(index=auto_delivery_index).pack())
+        )
+    except Exception as e:
+        data = await state.get_data()
+        last_page = data.get("last_page", 0)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.settings_deliv_page_float_text(e),
+            reply_markup=templ.back_kb(calls.AutoDeliveriesPagination(page=last_page).pack())
+        )
+
+
+@router.callback_query(F.data == "enter_auto_delivery_format")
+async def callback_enter_auto_delivery_format(callback: CallbackQuery, state: FSMContext):
+    try:
+        data = await state.get_data()
+        auto_delivery_index = data.get("auto_delivery_index")
+        if auto_delivery_index is None:
+            raise Exception("❌ Авто-выдача не была найдена")
+
+        auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
+        if auto_delivery_index < 0 or auto_delivery_index >= len(auto_deliveries):
+            raise Exception("❌ Авто-выдача не была найдена")
+        auto_delivery = auto_deliveries[auto_delivery_index]
+        if auto_delivery.get("kind") != AUTO_DELIVERY_KIND_MULTI:
+            raise Exception("❌ Формат выдачи настраивается только для мультивыдачи.")
+
+        await state.set_state(states.AutoDeliveriesStates.waiting_for_auto_delivery_format)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.settings_deliv_page_float_text(
+                f"🧩 Введите новый <b>формат выдачи</b>\n"
+                f"┗ Текущий: <code>{escape(auto_delivery.get('format', ''))}</code>\n\n"
+                f"Пример: <code>Привет, {{username}}!\\nВаш ключ: {{good}}</code>\n\n"
+                f"{templ.multi_format_hint()}"
             ),
             reply_markup=templ.back_kb(calls.AutoDeliveryPage(index=auto_delivery_index).pack())
         )

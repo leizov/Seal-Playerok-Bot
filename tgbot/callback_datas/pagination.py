@@ -21,6 +21,10 @@ class AutoDeliveriesPagination(CallbackData, prefix="audepag"):
     page: int
 
 
+class DeliveryHistoryPagination(CallbackData, prefix="adhpag"):
+    page: int
+
+
 class MessagesPagination(CallbackData, prefix="messpag"):
     page: int
 

@@ -56,6 +56,7 @@ INITIALIZED_USERS_FILE = os.path.join(BOT_DATA_DIR, "initialized_users.json")
 AUTO_RAISE_ITEMS_TIMES_FILE = os.path.join(BOT_DATA_DIR, "auto_raise_items_times.json")
 AUTO_REMINDER_DEALS_FILE = os.path.join(BOT_DATA_DIR, "auto_reminder_deals.json")
 PLAYEROK_CONNECTION_HEALTH_FILE = os.path.join(BOT_DATA_DIR, "playerok_connection_health.json")
+AUTO_DELIVERY_HISTORY_FILE = os.path.join(BOT_DATA_DIR, "auto_delivery_history.json")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ФАЙЛЫ ЛОГОВ (logs/)

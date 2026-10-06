@@ -42,6 +42,29 @@ async def callback_auto_delivery_pagination(callback: CallbackQuery, callback_da
     await throw_float_message(state, callback.message, templ.settings_delivs_text(), templ.settings_delivs_kb(page), callback)
 
 
+@router.callback_query(calls.DeliveryHistoryPagination.filter())
+async def callback_delivery_history_pagination(callback: CallbackQuery, callback_data: calls.DeliveryHistoryPagination, state: FSMContext):
+    from plbot.delivery_history import get_records
+
+    await state.set_state(None)
+    records = get_records()
+    page = max(0, min(callback_data.page, templ.history_page_count(len(records)) - 1))
+    await throw_float_message(
+        state, callback.message, templ.delivery_history_text(records, page), templ.delivery_history_kb(records, page), callback
+    )
+
+
+@router.callback_query(calls.DeliveryHistoryRecord.filter())
+async def callback_delivery_history_record(callback: CallbackQuery, callback_data: calls.DeliveryHistoryRecord, state: FSMContext):
+    from plbot.delivery_history import get_record
+
+    await state.set_state(None)
+    record = get_record(callback_data.rec_id)
+    await throw_float_message(
+        state, callback.message, templ.delivery_record_text(record), templ.delivery_record_kb(record, callback_data.page), callback
+    )
+
+
 @router.callback_query(calls.PluginsPagination.filter())
 async def callback_plugins_pagination(callback: CallbackQuery, callback_data: calls.PluginsPagination, state: FSMContext):
     try:

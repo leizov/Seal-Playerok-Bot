@@ -32,6 +32,14 @@ PLACEHOLDERS: dict[str, tuple[str, str]] = {
     "deal_item_name": ("название купленного товара", "deal"),
     "item_name": ("название товара (синоним {deal_item_name})", "deal"),
     "deal_item_price": ("цена товара, ₽", "deal"),
+    "good": ("выдаваемый товар (строка из списка мультивыдачи)", "multi"),
+}
+
+# Какие группы переменных показывать в справке для каждого экрана.
+_SCOPE_GROUPS = {
+    "chat": ("all",),
+    "deal": ("all", "deal"),
+    "multi": ("all", "deal", "multi"),
 }
 
 _PATTERN = re.compile(r"\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -115,14 +123,16 @@ def placeholders_help(scope: str = "deal") -> str:
     """
     HTML-справка по подстановкам для экранов редактирования.
 
-    :param scope: "deal" — доступны и переменные сделки; "chat" — только общие.
+    :param scope: "deal" — доступны и переменные сделки; "chat" — только общие;
+                  "multi" — переменные сделки и {good} (формат мультивыдачи).
     """
+    groups = _SCOPE_GROUPS.get(scope, _SCOPE_GROUPS["chat"])
     lines = ["🧩 <b>Подстановки</b> (вставьте в текст как есть):"]
     for key, (desc, where) in PLACEHOLDERS.items():
-        if where == "deal" and scope != "deal":
+        if where not in groups:
             continue
         lines.append(f"・ <code>{{{key}}}</code> — {escape(desc)}")
-    if scope != "deal":
+    if "deal" not in groups:
         lines.append("<i>Переменные сделки здесь недоступны и останутся как есть.</i>")
     else:
         lines.append("<i>Если значение недоступно для события, переменная останется как есть.</i>")

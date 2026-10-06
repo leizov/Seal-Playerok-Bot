@@ -3,10 +3,67 @@ from html import escape
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, normalize_auto_deliveries
+from core.auto_deliveries import (
+    AUTO_DELIVERY_KIND_MULTI,
+    DEFAULT_MULTI_FORMAT,
+    normalize_auto_deliveries,
+    render_multi_delivery,
+    render_static_delivery,
+)
+from plbot.placeholders import placeholders_help
 from settings import Settings as sett
 
 from .. import callback_datas as calls
+
+
+_PREVIEW_VALUES = dict(
+    username="Покупатель",
+    deal_id="00000000-0000-0000-0000-000000000000",
+    deal_item_name="Название товара",
+    deal_item_price=100,
+)
+_PREVIEW_LIMIT = 1500
+
+
+def _cut_preview(text: str) -> str:
+    return text if len(text) <= _PREVIEW_LIMIT else text[:_PREVIEW_LIMIT].rstrip() + "…"
+
+
+def line_break_hint() -> str:
+    """Подсказка, как сделать перенос строки внутри одной строки товара."""
+    return (
+        "↩️ <b>Перенос строки внутри товара:</b> напишите <code>\\n</code> — "
+        "покупатель получит текст с новой строки.\n"
+        "Пример: <code>Логин: abc\\nПароль: 123</code> → придёт двумя строками."
+    )
+
+
+def multi_format_hint() -> str:
+    return (
+        "🧩 <b>Формат выдачи</b> — текст, который получит покупатель. "
+        "Вместо <code>{good}</code> подставится строка товара.\n"
+        "Можно писать в несколько строк или использовать <code>\\n</code>.\n\n"
+        f"{placeholders_help('multi')}"
+    )
+
+
+def multi_format_preview(fmt: str, sample_good: str | None) -> str:
+    """HTML-превью того, что получит покупатель (на первой строке товара)."""
+    good = sample_good if sample_good else "ПРИМЕР-КЛЮЧА-123"
+    rendered = render_multi_delivery(fmt, good, **_PREVIEW_VALUES)
+    return f"👀 <b>Так увидит покупатель:</b>\n<blockquote>{escape(_cut_preview(rendered))}</blockquote>"
+
+
+def static_message_preview(message: str) -> str:
+    rendered = render_static_delivery(str(message or "").splitlines(), **_PREVIEW_VALUES)
+    return f"👀 <b>Так увидит покупатель:</b>\n<blockquote>{escape(_cut_preview(rendered))}</blockquote>"
+
+
+def new_multi_format_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"✅ Оставить «{DEFAULT_MULTI_FORMAT}»", callback_data="use_default_multi_format")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="enter_new_auto_delivery")],
+    ])
 
 
 def _format_keyphrases(keyphrases: list[str]) -> str:
@@ -28,41 +85,41 @@ def settings_deliv_page_text(index: int):
         items = delivery.get("items", [])
         issued_total = delivery.get("issued_total", 0)
         issued_current_batch = delivery.get("issued_current_batch", 0)
-        next_item = escape(items[0]) if items else "❌ Список пуст"
+        next_item = escape(_cut_preview(items[0])) if items else "❌ Список пуст"
+        fmt = delivery.get("format", "")
 
-        txt = textwrap.dedent(
-            f"""
-            ✏️ <b>Редактирование авто-выдачи</b>
-
-            <b>Тип:</b> 📦 <code>МУЛЬТИ</code>
-            <b>Статус:</b> {enabled}
-            🔑 <b>Ключевые фразы:</b> <code>{keyphrases}</code>
-
-            📦 <b>Осталось товаров:</b> <code>{len(items)}</code>
-            📤 <b>Выдано всего:</b> <code>{issued_total}</code>
-            📊 <b>Выдано в текущей партии:</b> <code>{issued_current_batch}</code>
-            🔜 <b>Следующий товар:</b> <blockquote>{next_item}</blockquote>
-
-            Выберите параметр для изменения ↓
-        """
-        )
-        return txt
+        lines = [
+            "✏️ <b>Редактирование авто-выдачи</b>",
+            "",
+            "<b>Тип:</b> 📦 <code>МУЛЬТИ</code>",
+            f"<b>Статус:</b> {enabled}",
+            f"🔑 <b>Ключевые фразы:</b> <code>{keyphrases}</code>",
+            f"🧩 <b>Формат выдачи:</b> <code>{escape(_cut_preview(fmt))}</code>",
+            "",
+            f"📦 <b>Осталось товаров:</b> <code>{len(items)}</code>",
+            f"📤 <b>Выдано всего:</b> <code>{issued_total}</code>",
+            f"📊 <b>Выдано в текущей партии:</b> <code>{issued_current_batch}</code>",
+            f"🔜 <b>Следующий товар:</b> <blockquote>{next_item}</blockquote>",
+        ]
+        if items:
+            lines += ["", multi_format_preview(fmt, items[0])]
+        lines += ["", "Выберите параметр для изменения ↓"]
+        return "\n".join(lines)
 
     message_lines = delivery.get("message", [])
     message = "\n".join(escape(line) for line in message_lines) or "❌ Не задано"
-    txt = textwrap.dedent(
-        f"""
-        ✏️ <b>Редактирование авто-выдачи</b>
-
-        <b>Тип:</b> 🧾 <code>ОБЫЧНАЯ</code>
-        <b>Статус:</b> {enabled}
-        🔑 <b>Ключевые фразы:</b> <code>{keyphrases}</code>
-        💬 <b>Сообщение:</b> <blockquote>{message}</blockquote>
-
-        Выберите параметр для изменения ↓
-    """
-    )
-    return txt
+    lines = [
+        "✏️ <b>Редактирование авто-выдачи</b>",
+        "",
+        "<b>Тип:</b> 🧾 <code>ОБЫЧНАЯ</code>",
+        f"<b>Статус:</b> {enabled}",
+        f"🔑 <b>Ключевые фразы:</b> <code>{keyphrases}</code>",
+        f"💬 <b>Шаблон сообщения:</b> <blockquote>{message}</blockquote>",
+    ]
+    if message_lines:
+        lines += ["", static_message_preview("\n".join(message_lines))]
+    lines += ["", "Выберите параметр для изменения ↓"]
+    return "\n".join(lines)
 
 
 def settings_deliv_page_kb(index: int, page: int = 0):
@@ -85,6 +142,7 @@ def settings_deliv_page_kb(index: int, page: int = 0):
     ]
 
     if delivery.get("kind") == AUTO_DELIVERY_KIND_MULTI:
+        rows.append([InlineKeyboardButton(text="🧩 Формат выдачи", callback_data="enter_auto_delivery_format")])
         rows.append([InlineKeyboardButton(text="➕ Добавить товары", callback_data="enter_auto_delivery_add_items")])
         rows.append([InlineKeyboardButton(text="♻️ Обновить товары", callback_data="enter_auto_delivery_replace_items")])
     else:
