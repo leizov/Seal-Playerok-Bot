@@ -43,7 +43,23 @@ class ChatsAction(CallbackData, prefix="cact"):
 
 
 class ReviewsAction(CallbackData, prefix="rvact"):
-    action: str
+    action: str  # refresh (перезагрузить), open (из кэша), noop
+
+
+class ReviewsPage(CallbackData, prefix="rvpg"):
+    page: int
+
+
+class ReviewView(CallbackData, prefix="rvv"):
+    rv_id: str
+
+
+class ReviewDeal(CallbackData, prefix="rvdl"):
+    rv_id: str
+
+
+class ReviewChat(CallbackData, prefix="rvch"):
+    rv_id: str
 
 
 class WithdrawAction(CallbackData, prefix="wdr"):
