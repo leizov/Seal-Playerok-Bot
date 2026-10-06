@@ -17,6 +17,7 @@ from .chats import router as chats_router
 from .plugin_management import router as plugin_management_router
 from .reviews import router as reviews_router
 from .withdraw import router as withdraw_router
+from .tg_connection import router as tg_connection_router
 
 router = Router()
 router.include_routers(
@@ -38,4 +39,5 @@ router.include_routers(
     chats_router,
     reviews_router,
     withdraw_router,
+    tg_connection_router,
 )

@@ -91,7 +91,14 @@ CONFIG = SettingsFile(
         "telegram": {
             "api": {
                 "token": "",
-                "proxy": ""
+                # Основной способ подключения к Telegram: direct | worker | proxy
+                # (пусто — выбрать автоматически по заполненным полям).
+                "mode": "",
+                "proxy": "",
+                # Адрес собственного Cloudflare Worker вместо api.telegram.org
+                "custom_api_url": "",
+                # Пробовать запасные способы, если основной перестал работать
+                "auto_fallback": True
             },
             "bot": {
                 "password": "",

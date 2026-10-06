@@ -32,6 +32,8 @@ class SettingsStates(StatesGroup):
     waiting_for_listener_requests_delay = State()
     waiting_for_proxy = State()
     waiting_for_new_proxy = State()
+    waiting_for_tg_worker_url = State()
+    waiting_for_tg_proxy = State()
 
     waiting_for_tg_logging_chat_id = State()
     waiting_for_watermark_value = State()

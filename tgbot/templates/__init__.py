@@ -16,6 +16,8 @@ from .settings_auth import *
 from .settings_comms import *
 from .settings_comm_page import *
 from .settings_conn import *
+from .settings_tgconn import *
+
 from .settings_delivs import *
 from .settings_deliv_page import *
 from .settings_deliv_history import *

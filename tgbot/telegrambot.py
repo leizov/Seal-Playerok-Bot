@@ -15,6 +15,7 @@ import re
 from __init__ import ACCENT_COLOR, VERSION, DEVELOPER, REPOSITORY, TELEGRAM_CHANNEL, TELEGRAM_CHAT, TELEGRAM_BOT
 from settings import Settings as sett
 from core.proxy_utils import normalize_proxy, validate_proxy
+from core import tg_connection as tgc
 from core.plugins import get_plugins
 from core.handlers import call_bot_event
 
@@ -26,10 +27,16 @@ from .cookie_guide import build_cookie_collection_instruction
 logger = logging.getLogger("seal.telegram")
 
 TG_PROXY_HELP_TEXT = (
-    "Если вы из RU региона, Telegram может работать нестабильно без прокси. "
-    "Добавьте прокси не RU региона в bot_settings/config.json (telegram.api.proxy). "
-    "Купить: https://proxylin.net?ref=448587"
+    "Если Telegram недоступен напрямую (например, в RU регионе), подключите бесплатный "
+    "Cloudflare Worker (telegram.api.custom_api_url) или прокси не RU региона (telegram.api.proxy) "
+    "в bot_settings/config.json либо в меню бота: Настройки → 📡 Подключение к Telegram. "
+    "Инструкция — в README, раздел «Подключение к Telegram». Прокси: https://proxylin.net?ref=448587"
 )
+
+# Сторож подключения
+WATCHDOG_INTERVAL = 20           # как часто проверять состояние, сек
+WATCHDOG_FAILS_TO_SWITCH = 3     # сколько неудачных запросов подряд считать сбоем
+WATCHDOG_RETURN_INTERVAL = 600   # как часто пробовать вернуться на основной способ, сек
 
 
 def _build_tg_proxy_url(raw_proxy: str | None) -> tuple[str | None, str | None]:
@@ -58,11 +65,7 @@ class TelegramFetchUpdatesHintHandler(logging.Handler):
             return
 
         if "Failed to fetch updates" in message and "TelegramNetworkError" in message:
-            logger.warning(
-                "Если Telegram работает нестабильно, добавьте прокси не RU региона "
-                "в bot_settings/config.json (telegram.api.proxy). "
-                "Купить: https://proxylin.net?ref=448587"
-            )
+            logger.warning(TG_PROXY_HELP_TEXT)
 
 
 def get_telegram_bot() -> TelegramBot | None:
@@ -90,6 +93,11 @@ class TelegramBot:
             dispatcher_logger.addHandler(TelegramFetchUpdatesHintHandler())
 
         config = sett.get("config")
+        self.connection_tracker = tgc.ConnectionTracker()
+        self.active_route: str = tgc.preferred_route(config)
+        self._route_lock = asyncio.Lock()
+        self._watchdog_task: asyncio.Task | None = None
+        self._last_return_attempt: float = 0.0
         self.bot = self._build_bot_from_config(config)
         self.dp = Dispatcher()
 
@@ -127,30 +135,208 @@ class TelegramBot:
         self._recovery_dialog_lock = threading.Lock()
         self._active_recovery_dialog_users: set[int] = set()
 
-    def _build_bot_from_config(self, config: dict | None = None) -> Bot:
+    def _warn_broken_settings(self, config: dict) -> None:
+        api_cfg = tgc.get_api_cfg(config)
+        if str(api_cfg.get("proxy") or "").strip() and not tgc.is_route_configured(tgc.ROUTE_PROXY, config):
+            logger.warning(
+                "Некорректный TG-прокси в bot_settings/config.json (telegram.api.proxy) — он будет пропущен."
+            )
+        if str(api_cfg.get("custom_api_url") or "").strip() and not tgc.is_route_configured(tgc.ROUTE_WORKER, config):
+            logger.warning(
+                "Некорректный адрес воркера в bot_settings/config.json (telegram.api.custom_api_url) — он будет пропущен."
+            )
+
+    def _build_session_for_route(self, route: str, config: dict):
+        try:
+            return tgc.build_session(route, config, tracker=self.connection_tracker), route
+        except Exception as e:
+            logger.warning(
+                f"Не удалось подготовить подключение к Telegram {tgc.describe_route(route, config)}: {e}. "
+                f"Использую подключение напрямую."
+            )
+            return tgc.build_session(tgc.ROUTE_DIRECT, config, tracker=self.connection_tracker), tgc.ROUTE_DIRECT
+
+    def _build_bot_from_config(self, config: dict | None = None, route: str | None = None) -> Bot:
         config = config or sett.get("config")
         token = config["telegram"]["api"]["token"]
-        raw_proxy = (config["telegram"]["api"].get("proxy") or "").strip()
+        self._warn_broken_settings(config)
+        route = route if route in tgc.ROUTES else tgc.preferred_route(config)
+        session, route = self._build_session_for_route(route, config)
+        self.active_route = route
+        logger.info(f"Подключение к Telegram: {tgc.describe_route(route, config)}")
+        return Bot(token=token, session=session)
 
-        if not raw_proxy:
-            return Bot(token=token)
-
+    async def _apply_route(self, route: str, config: dict | None = None) -> None:
+        """Переключает уже созданного бота на другой способ подключения без перезапуска."""
+        config = config or sett.get("config")
+        new_session, route = self._build_session_for_route(route, config)
+        old_session = self.bot.session
+        self.bot.session = new_session
+        self.active_route = route
+        self.connection_tracker.reset()
         try:
-            proxy_url, normalized_proxy = _build_tg_proxy_url(raw_proxy)
+            await old_session.close()
+        except Exception:
+            pass
 
-            if normalized_proxy and normalized_proxy != raw_proxy:
-                config["telegram"]["api"]["proxy"] = normalized_proxy
+    def get_connection_status(self) -> dict:
+        config = sett.get("config")
+        preferred = tgc.preferred_route(config)
+        return {
+            "active": self.active_route,
+            "preferred": preferred,
+            "is_fallback": self.active_route != preferred,
+            "failures": self.connection_tracker.consecutive_failures,
+        }
+
+    async def switch_route(self, route: str, *, make_preferred: bool = True) -> tgc.ProbeResult:
+        """
+        Проверяет способ подключения и, если он работает, переключает на него бота.
+        При make_preferred=True сохраняет способ как основной (telegram.api.mode).
+        """
+        config = sett.get("config")
+        token = config["telegram"]["api"]["token"]
+        result = await tgc.probe_route_with_retries(token, route, config, attempts=2)
+        if not result.ok:
+            return result
+        async with self._route_lock:
+            if make_preferred:
+                config = sett.get("config")
+                config["telegram"]["api"]["mode"] = route
                 sett.set("config", config)
+            await self._apply_route(route, config)
+        logger.info(f"Подключение к Telegram переключено: {tgc.describe_route(route, config)}")
+        return result
 
-            logger.info("TG-прокси применен ко всем запросам Telegram API.")
-            return Bot(token=token, session=AiohttpSession(proxy=proxy_url))
-        except Exception as proxy_error:
+    async def _notify_route_change(self, text: str) -> None:
+        config = sett.get("config")
+        for user_id in self._get_unique_signed_user_ids(config):
+            try:
+                await self.bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+            except Exception as e:
+                logger.debug(f"Не удалось уведомить о смене подключения user_id={user_id}: {e}")
+
+    async def _watchdog_tick(self) -> None:
+        """Одна проверка сторожа: при сбое ищет рабочий способ, на запасном — пробует вернуться."""
+        import time as _time
+
+        config = sett.get("config")
+        api_cfg = tgc.get_api_cfg(config)
+        if not api_cfg.get("auto_fallback", True):
+            return
+        token = api_cfg.get("token")
+        preferred = tgc.preferred_route(config)
+
+        if self.connection_tracker.consecutive_failures >= WATCHDOG_FAILS_TO_SWITCH:
+            chain = tgc.route_chain(config, preferred)
+            if len(chain) < 2 and self.active_route == preferred:
+                return  # переключаться некуда
             logger.warning(
-                f"Некорректный TG-прокси в bot_settings/config.json (telegram.api.proxy): {proxy_error}. "
-                f"Telegram будет запущен без прокси."
+                f"Telegram не отвечает {tgc.describe_route(self.active_route, config)} "
+                f"({self.connection_tracker.consecutive_failures} ошибок подряд). Ищу рабочий способ: "
+                + " → ".join(tgc.ROUTE_TITLES[r] for r in chain)
             )
-            logger.warning(TG_PROXY_HELP_TEXT)
-            return Bot(token=token)
+            found, results = await tgc.find_working_route(token, config, preferred=preferred)
+            if not found:
+                logger.error(
+                    "Ни один способ подключения к Telegram не работает: "
+                    + "; ".join(f"{tgc.ROUTE_TITLES[r.route]} — {tgc.describe_reason(r.reason)}" for r in results)
+                )
+                logger.warning(TG_PROXY_HELP_TEXT)
+                self.connection_tracker.reset()
+                return
+            if found.route == self.active_route:
+                self.connection_tracker.reset()
+                return
+            async with self._route_lock:
+                previous = self.active_route
+                await self._apply_route(found.route, config)
+            self._last_return_attempt = _time.monotonic()
+            logger.warning(
+                f"Подключение к Telegram переключено: {tgc.ROUTE_TITLES[previous]} → "
+                f"{tgc.describe_route(found.route, config)}"
+            )
+            if found.route == preferred:
+                text = (
+                    f"✅ <b>Подключение к Telegram восстановлено</b>\n\n"
+                    f"Снова работаю {html_escape(tgc.describe_route(found.route, config))}."
+                )
+            else:
+                text = (
+                    f"⚠️ <b>Основной способ подключения к Telegram не отвечает</b>\n\n"
+                    f"Было: {html_escape(tgc.ROUTE_TITLES[previous])}\n"
+                    f"Сейчас: {html_escape(tgc.describe_route(found.route, config))} (запасной)\n\n"
+                    f"Каждые {WATCHDOG_RETURN_INTERVAL // 60} мин. проверяю основной способ и вернусь на него, "
+                    f"когда он заработает. Настройки: ⚙️ Настройки → 📡 Подключение к Telegram."
+                )
+            await self._notify_route_change(text)
+            return
+
+        if self.active_route != preferred:
+            now = _time.monotonic()
+            if now - self._last_return_attempt < WATCHDOG_RETURN_INTERVAL:
+                return
+            self._last_return_attempt = now
+            result = await tgc.probe_route(token, preferred, config)
+            if not result.ok:
+                logger.info(
+                    f"Основной способ подключения ({tgc.ROUTE_TITLES[preferred]}) пока не работает, "
+                    f"остаюсь {tgc.ROUTE_TITLES[self.active_route]}."
+                )
+                return
+            async with self._route_lock:
+                previous = self.active_route
+                await self._apply_route(preferred, config)
+            logger.info(
+                f"Основной способ подключения к Telegram снова работает: {tgc.ROUTE_TITLES[previous]} → "
+                f"{tgc.describe_route(preferred, config)}"
+            )
+            await self._notify_route_change(
+                f"✅ <b>Основной способ подключения к Telegram снова работает</b>\n\n"
+                f"Вернулся: {html_escape(tgc.describe_route(preferred, config))}."
+            )
+
+    async def _connection_watchdog(self) -> None:
+        while True:
+            await asyncio.sleep(WATCHDOG_INTERVAL)
+            try:
+                await self._watchdog_tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug(f"Сторож подключения к Telegram: {e}")
+
+    async def _select_startup_route(self) -> None:
+        """При запуске находит рабочий способ: основной, затем запасные по порядку."""
+        config = sett.get("config")
+        api_cfg = tgc.get_api_cfg(config)
+        preferred = tgc.preferred_route(config)
+        if not api_cfg.get("auto_fallback", True):
+            if self.active_route != preferred:
+                await self._apply_route(preferred, config)
+            return
+        chain = tgc.route_chain(config, preferred)
+        if len(chain) < 2:
+            if self.active_route != preferred:
+                await self._apply_route(preferred, config)
+            return
+        found, results = await tgc.find_working_route(api_cfg.get("token"), config, preferred=preferred)
+        for r in results:
+            if not r.ok:
+                logger.warning(
+                    f"Telegram {tgc.describe_route(r.route, config)}: {tgc.describe_reason(r.reason)}"
+                )
+        target = found.route if found else preferred
+        if target != self.active_route:
+            await self._apply_route(target, config)
+        if found and found.route != preferred:
+            logger.warning(
+                f"Основной способ ({tgc.ROUTE_TITLES[preferred]}) не работает, запускаюсь на запасном: "
+                f"{tgc.describe_route(found.route, config)}"
+            )
+            import time as _time
+            self._last_return_attempt = _time.monotonic()
+
 
 
     async def _update_bot_commands(self):
@@ -545,6 +731,12 @@ class TelegramBot:
         
         for attempt in range(1, max_retries + 1):
             try:
+                # Выбираем рабочий способ подключения: основной, затем запасные
+                try:
+                    await self._select_startup_route()
+                except Exception as route_error:
+                    logger.debug(f"Не удалось выбрать способ подключения к Telegram: {route_error}")
+
                 # Проверяем соединение с Telegram API
                 me = await self.bot.get_me()
                 logger.info(f"{ACCENT_COLOR}Успешное подключение к Telegram API как @{me.username}")
@@ -584,6 +776,9 @@ class TelegramBot:
                     logger.warning(f"Не удалось запустить систему объявлений: {e}")
                 
                 # Запускаем бота с обработкой ошибок
+                if self._watchdog_task is None or self._watchdog_task.done():
+                    self.connection_tracker.reset()
+                    self._watchdog_task = asyncio.create_task(self._connection_watchdog())
                 try:
                     await self.dp.start_polling(self.bot, skip_updates=True, handle_signals=False)
                     break  # Выходим из цикла при успешном запуске
@@ -592,6 +787,10 @@ class TelegramBot:
                         raise  # Пробрасываем исключение, если попытки исчерпаны
                     logger.warning(f"Ошибка сети/API при запуске бота: {e}")
                     logger.warning(TG_PROXY_HELP_TEXT)
+                finally:
+                    if self._watchdog_task is not None:
+                        self._watchdog_task.cancel()
+                        self._watchdog_task = None
                 
             except Exception as e:
                 if attempt == max_retries:
@@ -612,7 +811,12 @@ class TelegramBot:
                 if attempt % 3 == 0:  # Обновляем токен каждые 3 попытки
                     try:
                         config = sett.get("config")
+                        old_bot = self.bot
                         self.bot = self._build_bot_from_config(config)
+                        try:
+                            await old_bot.session.close()
+                        except Exception:
+                            pass
                         logger.info("Обновлен токен бота")
                     except Exception as token_error:
                         logger.error(f"Ошибка при обновлении токена бота: {token_error}")

@@ -434,149 +434,9 @@ def check_and_configure_config():
 
         return False
 
-    def get_tg_proxy_for_session() -> str | None:
-        """
-        Возвращает прокси для Telegram в формате, который понимает aiogram/aiohttp.
-        Если формат в конфиге некорректный, возвращает None (бот продолжит запуск без прокси).
-        """
-        tg_proxy_raw = (config["telegram"]["api"].get("proxy") or "").strip()
-        if not tg_proxy_raw:
-            return None
-
-        try:
-            validate_proxy(tg_proxy_raw)
-            normalized_proxy = normalize_proxy(tg_proxy_raw)
-
-            if normalized_proxy != tg_proxy_raw:
-                config["telegram"]["api"]["proxy"] = normalized_proxy
-                sett.set("config", config)
-
-            if normalized_proxy.startswith(("socks5://", "socks4://", "http://", "https://")):
-                return normalized_proxy
-
-            # По умолчанию для TG-прокси без схемы используем HTTP.
-            return f"http://{normalized_proxy}"
-        except Exception as e:
-            logger.warning(
-                f"{Fore.YELLOW}Некорректный TG-прокси в bot_settings/config.json "
-                f"(telegram.api.proxy): {e}. Telegram-проверка токена продолжится без прокси."
-            )
-            return None
-
     def is_tg_token_valid(token: str) -> bool:
         pattern = r'^\d{7,12}:[A-Za-z0-9_-]{35}$'
         return bool(re.match(pattern, token))
-
-    async def _fetch_tg_bot_data(
-            token: str,
-            request_timeout: int,
-            tg_proxy: str | None = None
-    ) -> tuple[bool, str | None, str | None, int | None]:
-        """Проверяет токен Telegram через aiogram. Возвращает (ok, username, reason, retry_after)."""
-        from aiogram import Bot
-        from aiogram.exceptions import (
-            TelegramAPIError,
-            TelegramBadRequest,
-            TelegramNetworkError,
-            TelegramNotFound,
-            TelegramRetryAfter,
-            TelegramServerError,
-            TelegramUnauthorizedError,
-        )
-
-        bot = None
-        try:
-            if tg_proxy:
-                from aiogram.client.session.aiohttp import AiohttpSession
-                bot = Bot(token=token, session=AiohttpSession(proxy=tg_proxy))
-            else:
-                bot = Bot(token=token)
-
-            me = await bot.get_me(request_timeout=request_timeout)
-            if me and me.is_bot:
-                return True, me.username or "", None, None
-            return False, None, "api_error", None
-        except (TelegramUnauthorizedError, TelegramBadRequest, TelegramNotFound):
-            return False, None, "invalid_token", None
-        except TelegramRetryAfter as exc:
-            retry_after = min(int(getattr(exc, "retry_after", 1)), 5)
-            return False, None, "rate_limit", retry_after
-        except (TelegramNetworkError, TelegramServerError, asyncio.TimeoutError, TimeoutError):
-            return False, None, "network", None
-        except TelegramAPIError:
-            return False, None, "api_error", None
-        except RuntimeError as exc:
-            if "aiohttp-socks" in str(exc).lower():
-                return False, None, "proxy_dependency_missing", None
-            return False, None, "api_error", None
-        except Exception:
-            return False, None, "api_error", None
-        finally:
-            if bot is not None:
-                await bot.session.close()
-
-    def is_tg_bot_exists() -> tuple[bool, str | None, str | None]:
-        """Проверяет Telegram бота. Возвращает (успех, username, reason)."""
-        max_attempts = 3
-        request_timeout = 20
-        backoff = (1, 2)
-        last_reason = "api_error"
-        max_wait_time = max_attempts * request_timeout + sum(backoff)
-        tg_proxy_for_session = get_tg_proxy_for_session()
-
-        print(f"\n{Fore.CYAN}Проверяю токен Telegram: начинаю подключение к API, подождите...")
-        if tg_proxy_for_session:
-            print(f"{Fore.CYAN}Для проверки токена используется TG-прокси из bot_settings/config.json.")
-        print(
-            f"{Fore.CYAN}Это может занять до {max_wait_time} сек при нестабильной сети."
-            f" Если ответ долго не приходит, будет автоматический повтор."
-        )
-
-        for attempt in range(1, max_attempts + 1):
-            print(
-                f"{Fore.WHITE}  Попытка {attempt}/{max_attempts}: проверка токена...",
-                end=" ",
-                flush=True
-            )
-            ok, username, reason, retry_after = asyncio.run(
-                _fetch_tg_bot_data(
-                    token=config["telegram"]["api"]["token"],
-                    request_timeout=request_timeout,
-                    tg_proxy=tg_proxy_for_session
-                )
-            )
-            if ok:
-                print(f"{Fore.GREEN}OK")
-                return True, username, None
-
-            last_reason = reason or "api_error"
-            if last_reason == "invalid_token":
-                print(f"{Fore.LIGHTRED_EX}неверный токен")
-                return False, None, "invalid_token"
-
-            print(f"{Fore.YELLOW}ошибка")
-            if attempt < max_attempts:
-                if last_reason == "rate_limit":
-                    delay = retry_after if retry_after is not None else 1
-                    print(
-                        f"{Fore.YELLOW}! Telegram временно ограничил запросы."
-                        f" Повтор через {delay} сек..."
-                    )
-                elif last_reason == "network":
-                    delay = backoff[min(attempt - 1, len(backoff) - 1)]
-                    print(
-                        f"{Fore.YELLOW}! Сетевая ошибка при проверке Telegram API."
-                        f" Повтор через {delay} сек..."
-                    )
-                else:
-                    delay = backoff[min(attempt - 1, len(backoff) - 1)]
-                    print(
-                        f"{Fore.YELLOW}! Временная ошибка Telegram API."
-                        f" Повтор через {delay} сек..."
-                    )
-                time.sleep(delay)
-
-        return False, None, last_reason
 
     def is_password_valid(password: str) -> bool:
         if len(password) < 6 or len(password) > 64:
@@ -591,81 +451,38 @@ def check_and_configure_config():
             return False
         return True
 
-    # Проверка Telegram бота только при первичном вводе токена
-    tg_token_is_new = not config["telegram"]["api"]["token"]
-    tg_proxy_is_empty = not (config["telegram"]["api"].get("proxy") or "").strip()
-
-    if tg_token_is_new and tg_proxy_is_empty:
-        while True:
-            print(f"\n{Fore.WHITE}Опционально: введите {Fore.CYAN}прокси для Telegram{Fore.WHITE}.")
-            print(f"  {Fore.WHITE}• Этот шаг можно пропустить и добавить прокси позже в:")
-            print(f"    {Fore.LIGHTWHITE_EX}bot_settings/config.json {Fore.WHITE}(поле {Fore.LIGHTWHITE_EX}telegram.api.proxy{Fore.WHITE})")
-            print(f"  {Fore.YELLOW}• В RU регионе Telegram может работать нестабильно без прокси.")
-            print(f"  {Fore.YELLOW}• Используйте прокси не RU региона.")
-            print(f"  {Fore.WHITE}• Где купить: {Fore.LIGHTWHITE_EX}https://proxylin.net?ref=448587")
-            print(f"\n{Fore.WHITE}Форматы: ip:port | user:pass@ip:port | socks5://user:pass@ip:port")
-            print(f"\n  {Fore.YELLOW}Если не хотите указывать TG-прокси сейчас - нажмите Enter.")
-            tg_proxy = input(f"\n  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
-            if not tg_proxy:
-                print(f"\n{Fore.WHITE}Этап TG-прокси пропущен. Можно добавить позже в config.")
-                break
-            if is_proxy_valid(tg_proxy):
-                normalized_tg_proxy = normalize_proxy(tg_proxy)
-                config["telegram"]["api"]["proxy"] = normalized_tg_proxy
-                sett.set("config", config)
-                print(f"\n{Fore.GREEN}TG-прокси сохранен в config.")
-                break
-            print(f"\n{Fore.LIGHTRED_EX}Некорректный формат TG-прокси. Попробуйте еще раз.")
-
+    # Ввод токена Telegram и настройка способа подключения (напрямую / воркер / прокси).
     while not config["telegram"]["api"]["token"]:
         print(f"\n{Fore.WHITE}Введите {Fore.CYAN}токен вашего Telegram бота{Fore.WHITE}. Бота нужно создать у @BotFather."
               f"\n  {Fore.WHITE}· Пример: 7257913369:AAG2KjLL3-zvvfSQFSVhaTb4w7tR2iXsJXM")
         token = input(f"  {Fore.WHITE}> {Fore.LIGHTWHITE_EX}").strip()
-        if is_tg_token_valid(token):
-            # Проверяем бота сразу при вводе токена
-            config["telegram"]["api"]["token"] = token
-            tg_ok, tg_username, tg_error_reason = is_tg_bot_exists()
-            if tg_ok:
-                sett.set("config", config)
-                print(f"\n{Fore.GREEN}Telegram бот подключен: {Fore.LIGHTCYAN_EX}@{tg_username}")
-            else:
-                config["telegram"]["api"]["token"] = ""
-                if tg_error_reason == "invalid_token":
-                    print(
-                        f"\n{Fore.LIGHTRED_EX}Токен Telegram недействителен"
-                        f" или отозван. Проверьте токен и попробуйте снова."
-                    )
-                elif tg_error_reason == "network":
-                    print(
-                        f"\n{Fore.LIGHTRED_EX}Не удалось проверить токен из-за сетевой ошибки"
-                        f" (доступ к Telegram API нестабилен). Попробуйте снова позже."
-                    )
-                    print(
-                        f"{Fore.YELLOW}Если вы из RU региона, Telegram может не работать без прокси."
-                        f" Добавьте прокси не RU региона в {Fore.LIGHTWHITE_EX}bot_settings/config.json"
-                        f"{Fore.YELLOW} (поле {Fore.LIGHTWHITE_EX}telegram.api.proxy{Fore.YELLOW})."
-                        f" Где купить: {Fore.LIGHTWHITE_EX}https://proxylin.net?ref=448587"
-                    )
-                elif tg_error_reason == "rate_limit":
-                    print(
-                        f"\n{Fore.LIGHTRED_EX}Telegram временно ограничил проверку токена."
-                        f" Подождите немного и повторите ввод."
-                    )
-                elif tg_error_reason == "proxy_dependency_missing":
-                    print(
-                        f"\n{Fore.LIGHTRED_EX}Для запуска Telegram через прокси не хватает зависимости"
-                        f" {Fore.LIGHTWHITE_EX}aiohttp-socks{Fore.LIGHTRED_EX}."
-                    )
-                    print(
-                        f"{Fore.YELLOW}Переустановите зависимости и попробуйте снова."
-                    )
-                else:
-                    print(
-                        f"\n{Fore.LIGHTRED_EX}Не удалось проверить токен из-за ошибки Telegram API."
-                        f" Попробуйте снова."
-                    )
-        else:
+        if not is_tg_token_valid(token):
             print(f"\n{Fore.LIGHTRED_EX}Похоже, что вы ввели некорректный токен. Убедитесь, что он соответствует формату и попробуйте ещё раз.")
+            continue
+
+        from core.tg_setup_wizard import (
+            configure_telegram_connection,
+            RESULT_OK,
+            RESULT_INVALID_TOKEN,
+            RESULT_RATE_LIMIT,
+        )
+        result, tg_username = configure_telegram_connection(config, token)
+        if result == RESULT_OK:
+            config["telegram"]["api"]["token"] = token
+            sett.set("config", config)
+            print(f"\n{Fore.GREEN}Telegram бот подключен: {Fore.LIGHTCYAN_EX}@{tg_username}")
+        elif result == RESULT_INVALID_TOKEN:
+            print(
+                f"\n{Fore.LIGHTRED_EX}Токен Telegram недействителен"
+                f" или отозван. Проверьте токен у @BotFather и попробуйте снова."
+            )
+        elif result == RESULT_RATE_LIMIT:
+            print(
+                f"\n{Fore.LIGHTRED_EX}Telegram временно ограничил проверку токена."
+                f" Подождите минуту и введите токен ещё раз."
+            )
+        else:
+            print(f"\n{Fore.LIGHTRED_EX}Не удалось настроить подключение к Telegram. Попробуйте снова.")
 
     while not config["telegram"]["bot"]["password"]:
         print(f"\n{Fore.WHITE}Придумайте и введите {Fore.YELLOW}пароль для вашего Telegram бота{Fore.WHITE}. Бот будет запрашивать этот пароль при каждой новой попытке взаимодействия чужого пользователя с вашим Telegram ботом."

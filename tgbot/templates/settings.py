@@ -29,6 +29,7 @@ def settings_kb():
     rows = [
         [InlineKeyboardButton(text="🔑 Авторизация", callback_data=calls.SettingsNavigation(to="auth").pack())],
         [InlineKeyboardButton(text="📶 Соединение", callback_data=calls.SettingsNavigation(to="conn").pack())],
+        [InlineKeyboardButton(text="📡 Подключение к Telegram", callback_data=calls.SettingsNavigation(to="tgconn").pack())],
         [InlineKeyboardButton(text="♻️ Восстановление", callback_data=calls.SettingsNavigation(to="restore").pack())],
         [InlineKeyboardButton(text="⌨️ Команды", callback_data=calls.CustomCommandsPagination(page=0).pack())],
         [InlineKeyboardButton(text="🚀 Авто-выдача", callback_data=calls.AutoDeliveriesPagination(page=0).pack())],
