@@ -320,7 +320,7 @@ def transactions_kb(page: int, has_next: bool, filter_key: str, cancellable: lis
     nav = []
     if page > 0:
         nav.append(_btn("⬅️", "history", str(page - 1)))
-    nav.append(_btn("🔄", "history", str(page)))
+    # nav.append(_btn("🔄", "history", str(page)))
     if has_next:
         nav.append(_btn("➡️", "history", str(page + 1)))
     rows.append(nav)
