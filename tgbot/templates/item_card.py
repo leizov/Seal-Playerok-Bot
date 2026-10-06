@@ -22,9 +22,9 @@ def item_card_kb(
             [
                 InlineKeyboardButton(
                     text=(
-                        "🔄 Оставлять в продаже: ВКЛ — выключить"
+                        "🔄 Оставлять в продаже: ✅"
                         if keep_in_sale
-                        else "🔄 Оставлять в продаже: ВЫКЛ — включить"
+                        else "🔄 Оставлять в продаже: ❌"
                     ),
                     callback_data=calls.ItemsAction(
                         action="item_keep_in_sale",

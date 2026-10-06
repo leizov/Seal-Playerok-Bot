@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import paths
 
 
+# Класс для хранения информации о файле данных
 @dataclass
 class DataFile:
     name: str

@@ -739,7 +739,6 @@ async def handler_start_shortcut_profile(message: types.Message, state: FSMConte
     config = sett.get("config")
     if message.from_user.id not in config["telegram"]["bot"]["signed_users"]:
         return await do_auth(message, state)
-
     await throw_float_message(
         state=state,
         message=message,

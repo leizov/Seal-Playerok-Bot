@@ -72,7 +72,10 @@ def wallet_text(balance) -> str:
 
 def wallet_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("💸 Вывод", "withdraw"), _btn("📜 История транзакций", "history", "0")],
+        [
+            # _btn("💸 Вывод", "withdraw"),
+            _btn("📜 История транзакций", "history", "0")
+        ],
         [_btn("🔄 Обновить", "open")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.ProfileNavigation(to="main").pack())],
     ])
