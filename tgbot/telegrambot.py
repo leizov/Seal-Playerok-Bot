@@ -35,7 +35,7 @@ TG_PROXY_HELP_TEXT = (
 
 # Сторож подключения
 WATCHDOG_INTERVAL = 20           # как часто проверять состояние, сек
-WATCHDOG_FAILS_TO_SWITCH = 3     # сколько неудачных запросов подряд считать сбоем
+WATCHDOG_FAILS_TO_SWITCH = 7     # сколько неудачных запросов подряд считать сбоем
 WATCHDOG_RETURN_INTERVAL = 600   # как часто пробовать вернуться на основной способ, сек
 
 
@@ -169,7 +169,8 @@ class TelegramBot:
     async def _apply_route(self, route: str, config: dict | None = None) -> None:
         """Переключает уже созданного бота на другой способ подключения без перезапуска."""
         config = config or sett.get("config")
-        new_session, route = self._build_session_for_route(route, config)
+        # Без тихого отката на «напрямую»: переключаемся только на тот способ, который проверили.
+        new_session = tgc.build_session(route, config, tracker=self.connection_tracker)
         old_session = self.bot.session
         self.bot.session = new_session
         self.active_route = route
@@ -326,9 +327,11 @@ class TelegramBot:
                 logger.warning(
                     f"Telegram {tgc.describe_route(r.route, config)}: {tgc.describe_reason(r.reason)}"
                 )
-        target = found.route if found else preferred
-        if target != self.active_route:
-            await self._apply_route(target, config)
+        if not found:
+            # Ни один способ не прошёл проверку — не переключаемся вслепую, остаёмся на текущем.
+            return
+        if found.route != self.active_route:
+            await self._apply_route(found.route, config)
         if found and found.route != preferred:
             logger.warning(
                 f"Основной способ ({tgc.ROUTE_TITLES[preferred]}) не работает, запускаюсь на запасном: "
