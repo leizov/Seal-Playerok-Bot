@@ -36,7 +36,7 @@ def item_card_kb(
 
     if is_owner:
         delete_button = InlineKeyboardButton(
-            text="\U0001F5D1 \u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0442\u043E\u0432\u0430\u0440",
+            text="🗑 Удалить товар",
             callback_data=calls.ItemsAction(action="item_delete_prompt").pack(),
         )
 
@@ -47,11 +47,11 @@ def item_card_kb(
                 [
                     InlineKeyboardButton(
                         text=(
-                            "\u267B\uFE0F \u0412\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0442\u043E\u0432\u0430\u0440"
+                            "♻️ Восстановить товар"
                             if can_restore
-                            else "\U0001F4E4 \u041E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u0442\u044C \u0442\u043E\u0432\u0430\u0440"
+                            else "📤 Опубликовать товар"
                             if can_publish
-                            else "\U0001F4C8 \u041F\u043E\u0434\u043D\u044F\u0442\u044C \u0442\u043E\u0432\u0430\u0440"
+                            else "📈 Поднять товар"
                         ),
                         callback_data=(
                             calls.ItemsAction(action="item_publish_prompt").pack()
@@ -66,10 +66,10 @@ def item_card_kb(
     rows.append(
         [
             InlineKeyboardButton(
-                text=back_text or "\u2B05\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443",
+                text=back_text or "⬅️ Назад к списку",
                 callback_data=back_cb,
             ),
-            InlineKeyboardButton(text="\U0001F517 \u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u043E\u0432\u0430\u0440", url=item_url),
+            InlineKeyboardButton(text="🔗 Открыть товар", url=item_url),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -79,11 +79,11 @@ def item_card_confirm_kb(confirm_action: str, cancel_action: str = "item_action_
     rows = [
         [
             InlineKeyboardButton(
-                text="\u2705 \u041F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044C",
+                text="✅ Подтвердить",
                 callback_data=calls.ItemsAction(action=confirm_action).pack(),
             ),
             InlineKeyboardButton(
-                text="\u274C \u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C",
+                text="❌ Отменить",
                 callback_data=calls.ItemsAction(action=cancel_action).pack(),
             ),
         ]
@@ -93,11 +93,11 @@ def item_card_confirm_kb(confirm_action: str, cancel_action: str = "item_action_
 
 def _fmt_price(value) -> str:
     if value is None:
-        return "0 \u20BD"
+        return "0 ₽"
     try:
-        return f"{float(value):.2f} \u20BD"
+        return f"{float(value):.2f} ₽"
     except Exception:
-        return f"{value} \u20BD"
+        return f"{value} ₽"
 
 
 def item_publish_confirm_kb(
@@ -113,7 +113,7 @@ def item_publish_confirm_kb(
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"\u2705 \u041E\u0431\u044B\u0447\u043D\u044B\u0439 ({_fmt_price(default_price)})",
+                    text=f"✅ Обычный ({_fmt_price(default_price)})",
                     callback_data=calls.ItemsAction(action="item_publish_confirm", value="DEFAULT").pack(),
                 )
             ]
@@ -123,7 +123,7 @@ def item_publish_confirm_kb(
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"\U0001F680 \u041F\u0440\u0435\u043C\u0438\u0443\u043C ({_fmt_price(premium_price)})",
+                    text=f"🚀 Премиум ({_fmt_price(premium_price)})",
                     callback_data=calls.ItemsAction(action="item_publish_confirm", value="PREMIUM").pack(),
                 )
             ]
@@ -132,7 +132,7 @@ def item_publish_confirm_kb(
     rows.append(
         [
             InlineKeyboardButton(
-                text="\u274C \u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C",
+                text="❌ Отменить",
                 callback_data=calls.ItemsAction(action=cancel_action).pack(),
             )
         ]

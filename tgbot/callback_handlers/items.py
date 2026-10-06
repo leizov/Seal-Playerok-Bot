@@ -328,7 +328,7 @@ async def _render_item_card(
     await throw_float_message(
         state=state,
         message=message,
-        text=payload.get("text", "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u0440\u0438\u0441\u043e\u0432\u0430\u0442\u044c \u043a\u0430\u0440\u0442\u043e\u0447\u043a\u0443 \u0442\u043e\u0432\u0430\u0440\u0430"),
+        text=payload.get("text", "Не удалось отрисовать карточку товара"),
         reply_markup=templ.item_card_kb(
             back_cb=calls.ItemsAction(action="open").pack(),
             item_url=payload.get("item_url") or "https://playerok.com/products/",
@@ -386,7 +386,7 @@ async def show_items_menu(
     if force_reload or not isinstance(cached_items, list):
         loading_message = message
         loading_callback = callback
-        loading_text = "\u23F3 \u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043F\u0440\u0435\u0434\u043C\u0435\u0442\u043E\u0432..."
+        loading_text = "⏳ Загрузка предметов..."
 
         if callback is not None:
             await throw_float_message(
@@ -408,7 +408,7 @@ async def show_items_menu(
             await throw_float_message(
                 state=state,
                 message=loading_message,
-                text=templ.do_action_text("\u274C \u041D\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043A Playerok"),
+                text=templ.do_action_text("❌ Нет подключения к Playerok"),
                 reply_markup=templ.back_kb(calls.ItemsAction(action="open").pack()),
                 callback=loading_callback,
             )
@@ -419,7 +419,7 @@ async def show_items_menu(
             await throw_float_message(
                 state=state,
                 message=loading_message,
-                text=templ.do_action_text(f"\u274C \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0442\u043E\u0432\u0430\u0440\u044B: {e}"),
+                text=templ.do_action_text(f"❌ Не удалось загрузить товары: {e}"),
                 reply_markup=templ.back_kb(calls.ItemsAction(action="open").pack()),
                 callback=loading_callback,
             )
@@ -509,7 +509,7 @@ async def callback_items_actions(
                 callback=callback,
             )
         except Exception as e:
-            await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u043a\u0440\u044b\u0442\u044c \u0442\u043e\u0432\u0430\u0440: {e}", show_alert=True)
+            await callback.answer(f"Не удалось открыть товар: {e}", show_alert=True)
         return
 
     if action == "item_keep_in_sale":
@@ -541,14 +541,14 @@ async def callback_items_actions(
     if action == "item_raise_prompt":
         item_id = str(item_ctx.get("item_id") or "")
         if account is None or not item_id:
-            await callback.answer("\u041a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 \u0442\u043e\u0432\u0430\u0440\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430", show_alert=True)
+            await callback.answer("Карточка товара не найдена", show_alert=True)
             return
 
         try:
             full_item = account.get_item(id=item_id)
             card_payload = format_item_card_payload(item=full_item, account=account)
             if not card_payload.get("is_owner"):
-                await callback.answer("\u041f\u043e\u0434\u043d\u0438\u043c\u0430\u0442\u044c \u0442\u043e\u0432\u0430\u0440 \u043c\u043e\u0436\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446", show_alert=True)
+                await callback.answer("Поднимать товар может только владелец", show_alert=True)
                 return
 
             price_value = _item_price_for_priority(full_item)
@@ -560,7 +560,7 @@ async def callback_items_actions(
                     break
 
             if premium_status is None:
-                await callback.answer("\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0439 \u0441\u0442\u0430\u0442\u0443\u0441 \u0434\u043b\u044f \u043f\u043e\u0434\u043d\u044f\u0442\u0438\u044f \u0442\u043e\u0432\u0430\u0440\u0430", show_alert=True)
+                await callback.answer("Не найден доступный статус для поднятия товара", show_alert=True)
                 return
 
             await state.update_data(
@@ -577,33 +577,33 @@ async def callback_items_actions(
                 state=state,
                 message=callback.message,
                 text=templ.do_action_text(
-                    f"\U0001F4C8 \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043f\u043e\u0434\u043d\u044f\u0442\u0438\u0435 \u0442\u043e\u0432\u0430\u0440\u0430 <b>{getattr(full_item, 'name', '\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f')}</b>\n"
-                    f"\U0001F4B0 \u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c: <b>{_fmt_price(getattr(premium_status, 'price', None))}</b>"
+                    f"📈 Подтвердите поднятие товара <b>{getattr(full_item, 'name', 'Без названия')}</b>\n"
+                    f"💰 Стоимость: <b>{_fmt_price(getattr(premium_status, 'price', None))}</b>"
                 ),
                 reply_markup=templ.item_card_confirm_kb(confirm_action="item_raise_confirm"),
                 callback=callback,
             )
         except Exception as e:
-            await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u0438\u0442\u044c \u043f\u043e\u0434\u043d\u044f\u0442\u0438\u0435 \u0442\u043e\u0432\u0430\u0440\u0430: {e}", show_alert=True)
+            await callback.answer(f"Не удалось подготовить поднятие товара: {e}", show_alert=True)
         return
 
     if action == "item_raise_confirm":
         if account is None:
-            await callback.answer("\u041d\u0435\u0442 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u043a Playerok", show_alert=True)
+            await callback.answer("Нет подключения к Playerok", show_alert=True)
             return
         if item_action.get("kind") != "raise":
-            await callback.answer("\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0443\u0441\u0442\u0430\u0440\u0435\u043b\u043e", show_alert=True)
+            await callback.answer("Действие устарело", show_alert=True)
             return
 
         item_id = str(item_action.get("item_id") or "")
         priority_status_id = str(item_action.get("priority_status_id") or "")
         if not item_id or not priority_status_id:
-            await callback.answer("\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f \u043f\u043e\u0434\u043d\u044f\u0442\u0438\u044f \u0442\u043e\u0432\u0430\u0440\u0430", show_alert=True)
+            await callback.answer("Недостаточно данных для поднятия товара", show_alert=True)
             return
 
         try:
             account.increase_item_priority_status(item_id, priority_status_id)
-            item_name = str(item_action.get("item_name") or item_ctx.get("item_name") or "\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f")
+            item_name = str(item_action.get("item_name") or item_ctx.get("item_name") or "Без названия")
             await state.update_data(items_item_action=None)
             await _render_item_card(
                 message=callback.message,
@@ -613,29 +613,29 @@ async def callback_items_actions(
                 callback=callback,
             )
             if callback.message is not None:
-                await callback.message.answer(f"\u2705 \u0422\u043e\u0432\u0430\u0440 \u0443\u0441\u043f\u0435\u0448\u043d\u043e \u043f\u043e\u0434\u043d\u044f\u0442: {item_name}")
+                await callback.message.answer(f"✅ Товар успешно поднят: {item_name}")
         except Exception as e:
-            await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u043d\u044f\u0442\u044c \u0442\u043e\u0432\u0430\u0440: {e}", show_alert=True)
+            await callback.answer(f"Не удалось поднять товар: {e}", show_alert=True)
         return
 
     if action == "item_publish_prompt":
         item_id = str(item_ctx.get("item_id") or "")
         if account is None or not item_id:
-            await callback.answer("\u041a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 \u0442\u043e\u0432\u0430\u0440\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430", show_alert=True)
+            await callback.answer("Карточка товара не найдена", show_alert=True)
             return
 
         try:
             full_item = account.get_item(id=item_id)
             card_payload = format_item_card_payload(item=full_item, account=account)
             if not card_payload.get("is_owner"):
-                await callback.answer("\u041f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c \u0442\u043e\u0432\u0430\u0440 \u043c\u043e\u0436\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446", show_alert=True)
+                await callback.answer("Публиковать товар может только владелец", show_alert=True)
                 return
             item_status_now = str(card_payload.get("item_status") or "").upper()
             is_restore = item_status_now in {"SOLD", "EXPIRED"}
-            confirm_title = ("\u267b\ufe0f \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435" if is_restore else "\U0001F4E4 \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044e")
-            confirm_type = ("\u0440\u0430\u0437\u043c\u0435\u0449\u0435\u043d\u0438\u044f" if is_restore else "\u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438")
+            confirm_title = ("♻️ Подтвердите восстановление" if is_restore else "📤 Подтвердите публикацию")
+            confirm_type = ("размещения" if is_restore else "публикации")
             if item_status_now not in {"DRAFT", "EXPIRED", "SOLD"}:
-                await callback.answer("\u041f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e \u0434\u043b\u044f \u0447\u0435\u0440\u043d\u043e\u0432\u0438\u043a\u043e\u0432 \u0438 \u0438\u0441\u0442\u0451\u043a\u0448\u0438\u0445 \u0442\u043e\u0432\u0430\u0440\u043e\u0432", show_alert=True)
+                await callback.answer("Публикация доступна только для черновиков и истёкших товаров", show_alert=True)
                 return
 
             price_value = _item_price_for_priority(full_item)
@@ -645,7 +645,7 @@ async def callback_items_actions(
             premium_status = publish_variants.get("PREMIUM")
 
             if default_status is None and premium_status is None:
-                await callback.answer("\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u044b \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438", show_alert=True)
+                await callback.answer("Не найдены варианты публикации", show_alert=True)
                 return
 
             await state.update_data(
@@ -671,8 +671,8 @@ async def callback_items_actions(
                 state=state,
                 message=callback.message,
                 text=templ.do_action_text(
-                    f"{confirm_title} \u0442\u043e\u0432\u0430\u0440\u0430 <b>{getattr(full_item, 'name', '\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f')}</b>\n"
-                    f"\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043f {confirm_type} \u043d\u0438\u0436\u0435:"
+                    f"{confirm_title} товара <b>{getattr(full_item, 'name', 'Без названия')}</b>\n"
+                    f"Выберите тип {confirm_type} ниже:"
                 ),
                 reply_markup=templ.item_publish_confirm_kb(
                     has_default=default_status is not None,
@@ -683,15 +683,15 @@ async def callback_items_actions(
                 callback=callback,
             )
         except Exception as e:
-            await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u0438\u0442\u044c \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044e \u0442\u043e\u0432\u0430\u0440\u0430: {e}", show_alert=True)
+            await callback.answer(f"Не удалось подготовить публикацию товара: {e}", show_alert=True)
         return
 
     if action == "item_publish_confirm":
         if account is None:
-            await callback.answer("\u041d\u0435\u0442 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u043a Playerok", show_alert=True)
+            await callback.answer("Нет подключения к Playerok", show_alert=True)
             return
         if item_action.get("kind") != "publish":
-            await callback.answer("\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0443\u0441\u0442\u0430\u0440\u0435\u043b\u043e", show_alert=True)
+            await callback.answer("Действие устарело", show_alert=True)
             return
 
         item_id = str(item_action.get("item_id") or "")
@@ -703,14 +703,14 @@ async def callback_items_actions(
 
         priority_status_id = str((variant_payload or {}).get("priority_status_id") or "")
         if not item_id or not priority_status_id:
-            await callback.answer("\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u0438 \u0442\u043e\u0432\u0430\u0440\u0430", show_alert=True)
+            await callback.answer("Недостаточно данных для публикации товара", show_alert=True)
             return
 
         try:
             account.publish_item(item_id=item_id, priority_status_id=priority_status_id)
-            item_name = str(item_action.get("item_name") or item_ctx.get("item_name") or "\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f")
+            item_name = str(item_action.get("item_name") or item_ctx.get("item_name") or "Без названия")
             logger.info(
-                "\u0423\u0441\u043f\u0435\u0448\u043d\u0430\u044f \u043f\u0443\u0431\u043b\u0438\u043a\u0430\u0446\u0438\u044f \u0442\u043e\u0432\u0430\u0440\u0430 \u0438\u0437 /items: id=%s, priority=%s, name=%s",
+                "Успешная публикация товара из /items: id=%s, priority=%s, name=%s",
                 item_id,
                 selected_variant,
                 item_name,
@@ -724,23 +724,23 @@ async def callback_items_actions(
                 callback=callback,
             )
             if callback.message is not None:
-                done_word = "\u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d" if item_action.get("is_restore") else "\u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u043d"
-                await callback.message.answer(f"\u2705 \u0422\u043e\u0432\u0430\u0440 \u0443\u0441\u043f\u0435\u0448\u043d\u043e {done_word}: {item_name}")
+                done_word = "восстановлен" if item_action.get("is_restore") else "опубликован"
+                await callback.message.answer(f"✅ Товар успешно {done_word}: {item_name}")
         except Exception as e:
-            await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0443\u0431\u043b\u0438\u043a\u043e\u0432\u0430\u0442\u044c \u0442\u043e\u0432\u0430\u0440: {e}", show_alert=True)
+            await callback.answer(f"Не удалось опубликовать товар: {e}", show_alert=True)
         return
 
     if action == "item_delete_prompt":
         item_id = str(item_ctx.get("item_id") or "")
         if account is None or not item_id:
-            await callback.answer("\u041a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 \u0442\u043e\u0432\u0430\u0440\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430", show_alert=True)
+            await callback.answer("Карточка товара не найдена", show_alert=True)
             return
 
         try:
             full_item = account.get_item(id=item_id)
             card_payload = format_item_card_payload(item=full_item, account=account)
             if not card_payload.get("is_owner"):
-                await callback.answer("\u0423\u0434\u0430\u043b\u044f\u0442\u044c \u0442\u043e\u0432\u0430\u0440 \u043c\u043e\u0436\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0432\u043b\u0430\u0434\u0435\u043b\u0435\u0446", show_alert=True)
+                await callback.answer("Удалять товар может только владелец", show_alert=True)
                 return
 
             await state.update_data(
@@ -754,34 +754,34 @@ async def callback_items_actions(
                 state=state,
                 message=callback.message,
                 text=templ.do_action_text(
-                    f"\U0001F5D1 \u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0442\u043e\u0432\u0430\u0440\u0430 <b>{getattr(full_item, 'name', '\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f')}</b>\n"
-                    "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043d\u0435\u043b\u044c\u0437\u044f \u043e\u0442\u043c\u0435\u043d\u0438\u0442\u044c."
+                    f"🗑 Подтвердите удаление товара <b>{getattr(full_item, 'name', 'Без названия')}</b>\n"
+                    "Действие нельзя отменить."
                 ),
                 reply_markup=templ.item_card_confirm_kb(confirm_action="item_delete_confirm"),
                 callback=callback,
             )
         except Exception as e:
-            await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u0438\u0442\u044c \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0442\u043e\u0432\u0430\u0440\u0430: {e}", show_alert=True)
+            await callback.answer(f"Не удалось подготовить удаление товара: {e}", show_alert=True)
         return
 
     if action == "item_delete_confirm":
         if account is None:
-            await callback.answer("\u041d\u0435\u0442 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u043a Playerok", show_alert=True)
+            await callback.answer("Нет подключения к Playerok", show_alert=True)
             return
         if item_action.get("kind") != "delete":
-            await callback.answer("\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0443\u0441\u0442\u0430\u0440\u0435\u043b\u043e", show_alert=True)
+            await callback.answer("Действие устарело", show_alert=True)
             return
 
         item_id = str(item_action.get("item_id") or "")
         if not item_id:
-            await callback.answer("\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u044f \u0442\u043e\u0432\u0430\u0440\u0430", show_alert=True)
+            await callback.answer("Недостаточно данных для удаления товара", show_alert=True)
             return
 
         try:
             account.remove_item(item_id)
-            item_name = str(item_action.get("item_name") or item_ctx.get("item_name") or "\u0411\u0435\u0437 \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044f")
+            item_name = str(item_action.get("item_name") or item_ctx.get("item_name") or "Без названия")
             logger.info(
-                "\u0423\u0441\u043f\u0435\u0448\u043d\u043e\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0442\u043e\u0432\u0430\u0440\u0430 \u0438\u0437 /items: id=%s, name=%s",
+                "Успешное удаление товара из /items: id=%s, name=%s",
                 item_id,
                 item_name,
             )
@@ -794,9 +794,9 @@ async def callback_items_actions(
             )
 
             if callback.message is not None:
-                await callback.message.answer(f"\u2705 \u0422\u043e\u0432\u0430\u0440 \u0443\u0441\u043f\u0435\u0448\u043d\u043e \u0443\u0434\u0430\u043b\u0451\u043d: {item_name}")
+                await callback.message.answer(f"✅ Товар успешно удалён: {item_name}")
         except Exception as e:
-            await callback.answer(f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0442\u043e\u0432\u0430\u0440: {e}", show_alert=True)
+            await callback.answer(f"Не удалось удалить товар: {e}", show_alert=True)
         return
 
     if action == "open":

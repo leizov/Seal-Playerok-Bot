@@ -41,7 +41,12 @@ def _get_balance_info() -> tuple[str, str]:
     return total, available
 
 
-_PERIOD_TITLES = {"week": "За 7 дней", "month": "За месяц", "all": "За всё время"}
+_PERIOD_TITLES = {
+    "calweek": "За неделю",
+    "week": "За 7 дней",
+    "month": "За месяц",
+    "all": "За всё время",
+}
 
 
 def _fmt_day(key: str) -> str:
@@ -68,12 +73,6 @@ def _journal_lines(summary: dict, period: str, stats) -> str:
     else:
         lines.append("🔥 Популярный товар: —")
 
-    started = getattr(stats, "daily_started_at", None)
-    if started:
-        try:
-            lines.append(f"<i>ℹ️ Подневный учёт ведётся с {started.strftime('%d.%m.%Y')}.</i>")
-        except Exception:
-            pass
     return "\n".join(lines)
 
 
@@ -105,8 +104,8 @@ def stats_text(period: str = "all"):
     except Exception:
         pass
 
-    if period == "week":
-        summary = summarize_days(period_days("week"))
+    if period in ("week", "calweek"):
+        summary = summarize_days(period_days(period))
         sales_count = summary["sales_count"]
         refund_count = summary["refund_count"]
         reviews_count = summary["reviews_count"]
@@ -169,7 +168,6 @@ def stats_text(period: str = "all"):
         """
 
         ⚠️ Статистика обновляется только во время работы бота.
-        ❗ Статистика сохраняется между перезапусками бота.
         ℹ️ Расход «Оставлять в продаже» считается по текущей цене поднятия товара и может быть выше реального.
         """
     )
@@ -185,7 +183,8 @@ def stats_kb(period: str = "all"):
         )
 
     rows = [
-        [_btn("week"), _btn("month"), _btn("all")],
+        [_btn("calweek"), _btn("week")],
+        [_btn("month"), _btn("all")],
         # TODO(stats-charts): кнопка «📈 График» по дневному журналу.
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.MenuPagination(page=1).pack())],
     ]

@@ -246,7 +246,7 @@ async def show_deals_menu(
     if force_reload or not isinstance(cached_deals, list):
         loading_message = message
         loading_callback = callback
-        loading_text = "\u23F3 \u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u0441\u0434\u0435\u043B\u043E\u043A..."
+        loading_text = "⏳ Загрузка сделок..."
 
         if callback is not None:
             await throw_float_message(
@@ -268,7 +268,7 @@ async def show_deals_menu(
             await throw_float_message(
                 state=state,
                 message=loading_message,
-                text=templ.do_action_text("\u274C \u041D\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043A Playerok"),
+                text=templ.do_action_text("❌ Нет подключения к Playerok"),
                 reply_markup=templ.back_kb(calls.DealsAction(action="open").pack()),
                 callback=loading_callback,
             )
@@ -280,7 +280,7 @@ async def show_deals_menu(
             await throw_float_message(
                 state=state,
                 message=loading_message,
-                text=templ.do_action_text(f"\u274C \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0441\u0434\u0435\u043B\u043A\u0438: {e}"),
+                text=templ.do_action_text(f"❌ Не удалось загрузить сделки: {e}"),
                 reply_markup=templ.back_kb(calls.DealsAction(action="open").pack()),
                 callback=loading_callback,
             )

@@ -232,12 +232,15 @@ def record_keep_in_sale(amount: float):
 def period_days(period: str, today: date | None = None) -> list[str]:
     """
     Ключи дней периода:
-    - week  — последние 7 дней, включая сегодня;
-    - month — с 1-го числа текущего календарного месяца по сегодня.
+    - week    — последние 7 дней, включая сегодня;
+    - calweek — текущая календарная неделя: с понедельника по сегодня;
+    - month   — с 1-го числа текущего календарного месяца по сегодня.
     """
     today = today or date.today()
     if period == "week":
         start = today - timedelta(days=6)
+    elif period == "calweek":
+        start = today - timedelta(days=today.weekday())
     elif period == "month":
         start = today.replace(day=1)
     else:

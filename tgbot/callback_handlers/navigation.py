@@ -166,8 +166,8 @@ async def callback_stats_navigation(callback: CallbackQuery, callback_data: call
         await state.set_state(None)
         to = callback_data.to
         
-        if to in ["default", "main", "all", "month", "week"]:
-            period = to if to in ("month", "week") else "all"
+        if to in ["default", "main", "all", "month", "week", "calweek"]:
+            period = to if to in ("month", "week", "calweek") else "all"
             await throw_float_message(
                 state=state,
                 message=callback.message,

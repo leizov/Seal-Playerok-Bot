@@ -25,6 +25,8 @@ PLACEHOLDERS: dict[str, tuple[str, str]] = {
     "time": ("текущее время, ЧЧ:ММ", "all"),
     "chat_link": ("ссылка на чат с покупателем", "all"),
     "buyer_link": ("ссылка на профиль покупателя", "all"),
+    "seller_username": ("ваш никнейм на Playerok", "all"),
+    "seller_link": ("ссылка на ваш профиль продавца", "all"),
     "deal_id": ("ID сделки", "deal"),
     "deal_link": ("ссылка на сделку", "deal"),
     "deal_item_name": ("название купленного товара", "deal"),
@@ -40,6 +42,21 @@ def _clean(value: Any) -> str | None:
         return None
     text = str(value)
     return text if text != "" else None
+
+
+def _own_username() -> str | None:
+    """Никнейм нашего аккаунта из запущенного PlayerokBot (без сетевых запросов)."""
+    try:
+        from .playerokbot import get_playerok_bot
+
+        plbot = get_playerok_bot()
+        for acc in (getattr(plbot, "playerok_account", None), getattr(plbot, "account", None)):
+            name = _clean(getattr(acc, "username", None))
+            if name:
+                return name
+    except Exception:
+        pass
+    return None
 
 
 def build_values(**kwargs) -> dict[str, str]:
@@ -59,6 +76,11 @@ def build_values(**kwargs) -> dict[str, str]:
         values.setdefault("username", username)
         values.setdefault("buyer_username", username)
         values.setdefault("buyer_link", PROFILE_URL.format(quote(username, safe="")))
+
+    seller = values.get("seller_username") or _own_username()
+    if seller:
+        values.setdefault("seller_username", seller)
+        values.setdefault("seller_link", PROFILE_URL.format(quote(seller, safe="")))
 
     item_name = values.get("deal_item_name") or values.get("item_name")
     if item_name:

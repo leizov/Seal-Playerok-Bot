@@ -417,9 +417,19 @@ class UserProfile:
             if max_item_price is not None:
                 item_price["max"] = max_item_price
             filters["itemPrice"] = item_price
+        pagination = {"first": count}
+        if after_cursor:
+            pagination["after"] = after_cursor
+        variables = {
+            "pagination": pagination,
+            "filter": filters,
+            "sort": {"direction": sort_direction.name if sort_direction else None, "field": sort_field},
+            # Обязательная переменная persisted query (Boolean!), как в веб-клиенте.
+            "hasSupportAccess": False,
+        }
         payload = {
             "operationName": "testimonials",
-            "variables": json.dumps({"pagination": {"first": count, "after": after_cursor}, "filter": filters, "sort": {"direction": sort_direction.name if sort_direction else None, "field": sort_field}}, ensure_ascii=False),
+            "variables": json.dumps(variables, ensure_ascii=False),
             "extensions": json.dumps({"persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERIES.get("testimonials")}}, ensure_ascii=False)
         }
         r = self.__account.request("get", f"{self.__account.base_url}/graphql", headers, payload).json()
