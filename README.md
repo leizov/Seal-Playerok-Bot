@@ -50,7 +50,7 @@
 4. Запустите `start.bat`
 5. Следуйте инструкциям для настройки бота
 
-**⚠️ Если вы живёте в России покупайте [прокси для тг](https://proxylin.net?ref=448587) Ipv4, регион Нидерланды)**  
+**⚠️ Если вы живёте в России покупайте [прокси для тг](https://proxys.io/?refid=417457) Ipv4, регион Нидерланды)**  
 💡 Прокси можно указать:
 1. на этапе установки, когда установщик спросит TG-прокси;
 2. позже вручную в `bot_settings/config.json` (не `config.py`) → `telegram.api.proxy`.
@@ -62,8 +62,8 @@
 ### 🛒 Где купить VDS?
 
 Рекомендуем:
-- **[play2go.cloud](https://play2go.cloud/?ref_id=mUMKLA3vhJg)** 
-- **[FirstByte VDS](https://firstbyte.ru/?from=192586)** 
+- **[play2go.cloud](https://play2go.cloud/?ref_id=mUMKLA3vhJg)** (самый стабильный на текущий момент) 
+
 - **[Bhost.fun](https://bhost.fun/register?ref=seal)**
 
 > 💡 На **Bhost.fun** установка ещё проще: не нужно вводить никакие команды.  
@@ -85,7 +85,7 @@
 
 #### Шаг 1: Купи VDS сервер
 
-1. Зайди на сайт хостинга (например [play2go.cloud](https://play2go.cloud/?ref_id=mUMKLA3vhJg) или [FirstByte](https://firstbyte.ru/?from=192586))
+1. Зайди на сайт хостинга (например [play2go.cloud](https://play2go.cloud/?ref_id=mUMKLA3vhJg))
 2. Выбери тариф (за 75 рублёв там есть или за 200 в месяц)
 3. Выбери ОС: **Ubuntu 22.04** или **Ubuntu 24.04** (рекомендуется)
 4. После оплаты в инструкции к своему серверу на сайте находишь: **IP, логин (root), пароль**

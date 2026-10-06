@@ -40,6 +40,8 @@ env/
 
 .idea/
 .vscode/
+.kilo/
+.agents/
 .claude/
 *.swp
 *.swo
