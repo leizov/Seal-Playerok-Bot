@@ -237,7 +237,9 @@ class TelegramBot:
                 f"({self.connection_tracker.consecutive_failures} ошибок подряд). Ищу рабочий способ: "
                 + " → ".join(tgc.ROUTE_TITLES[r] for r in chain)
             )
-            found, results = await tgc.find_working_route(token, config, preferred=preferred)
+            found, results = await tgc.find_working_route(
+                token, config, preferred=preferred, preferred_attempts=2
+            )
             if not found:
                 logger.error(
                     "Ни один способ подключения к Telegram не работает: "
@@ -321,7 +323,11 @@ class TelegramBot:
             if self.active_route != preferred:
                 await self._apply_route(preferred, config)
             return
-        found, results = await tgc.find_working_route(api_cfg.get("token"), config, preferred=preferred)
+        # Основной способ (у кого настроен прокси — прокси) проверяем 3 раза,
+        # чтобы разовый сбой при запуске не увёл бота с него.
+        found, results = await tgc.find_working_route(
+            api_cfg.get("token"), config, preferred=preferred, preferred_attempts=3
+        )
         for r in results:
             if not r.ok:
                 logger.warning(

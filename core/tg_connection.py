@@ -383,13 +383,19 @@ async def probe_route_with_retries(token: str, route: str, config: dict | None =
 
 
 async def find_working_route(token: str, config: dict | None, *, preferred: str | None = None,
-                             attempts_per_route: int = 1, timeout: int = DEFAULT_PROBE_TIMEOUT,
+                             attempts_per_route: int = 1, preferred_attempts: int | None = None,
+                             timeout: int = DEFAULT_PROBE_TIMEOUT,
                              ) -> tuple[ProbeResult | None, list[ProbeResult]]:
-    """Перебирает основной и запасные способы. Возвращает (первый рабочий|None, все результаты)."""
+    """
+    Перебирает основной и запасные способы. Возвращает (первый рабочий|None, все результаты).
+    Основной способ можно проверять большим числом попыток (preferred_attempts), чтобы
+    случайный сбой не уводил бота с него.
+    """
     results: list[ProbeResult] = []
-    for route in route_chain(config, preferred):
+    for index, route in enumerate(route_chain(config, preferred)):
+        attempts = preferred_attempts if index == 0 and preferred_attempts else attempts_per_route
         result = await probe_route_with_retries(
-            token, route, config, attempts=attempts_per_route, timeout=timeout
+            token, route, config, attempts=attempts, timeout=timeout
         )
         results.append(result)
         if result.ok:
