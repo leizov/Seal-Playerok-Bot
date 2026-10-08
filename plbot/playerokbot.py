@@ -1442,9 +1442,9 @@ class PlayerokBot:
                     self.logger.error(f"Ошибка при постановке health-уведомления: {e}")
 
             while True:
-                if self.account and self.account.profile.balance:
-                    balance = self.account.profile.balance.value
-                else:
+                acc_balance = getattr(getattr(self.account, "profile", None), "balance", None)
+                balance = getattr(acc_balance, "value", None)
+                if balance is None:
                     balance = "?"
 
                 username = self.account.username if self.account else "Не подключен"
