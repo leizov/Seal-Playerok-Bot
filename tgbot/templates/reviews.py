@@ -1,5 +1,6 @@
 import html
 from datetime import datetime
+from urllib.parse import quote
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -204,10 +205,11 @@ def review_card_text(review: dict) -> str:
         text = text[:REVIEW_TEXT_LIMIT].rstrip() + "…"
 
     deal_id = review.get("deal_id")
+    buyer = _safe(review.get('buyer') or '—')
     lines = [
-        f"<b>⭐ Отзыв</b> {stars} <b>({rating}/5)</b>",
+        f"<b>💫 Отзыв:</b> {stars} <b>({rating}/5)</b>",
         "",
-        f"👤 <b>Покупатель:</b> {_safe(review.get('buyer') or '—')}",
+        f"👤 <b>Покупатель:</b> <a href='https://playerok.com/profile/{quote(buyer)}'>{buyer}</a>",
         f"📅 <b>Дата:</b> {_fmt_date(review.get('created_at'))}",
         "",
         f"📦 <b>Товар:</b> {_safe(review.get('item_name') or '—')}",
