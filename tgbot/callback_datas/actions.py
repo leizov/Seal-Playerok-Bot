@@ -50,6 +50,11 @@ class ReviewsPage(CallbackData, prefix="rvpg"):
     page: int
 
 
+class ReviewsFilter(CallbackData, prefix="rvflt"):
+    rating: int  # 0 — все оценки, 1..5 — только с такой оценкой
+    text: int    # 1 — только отзывы с текстом
+
+
 class ReviewView(CallbackData, prefix="rvv"):
     rv_id: str
 

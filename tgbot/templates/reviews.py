@@ -67,6 +67,28 @@ def _rating(review: dict) -> int:
         return 0
 
 
+review_rating = _rating
+
+
+def _filter_parts(review_filter: dict | None) -> tuple[int, bool]:
+    review_filter = review_filter or {}
+    try:
+        rating = int(review_filter.get("rating") or 0)
+    except (TypeError, ValueError):
+        rating = 0
+    return (rating if 1 <= rating <= 5 else 0), bool(review_filter.get("text"))
+
+
+def reviews_filter_label(review_filter: dict | None) -> str:
+    rating, with_text = _filter_parts(review_filter)
+    parts = []
+    if rating:
+        parts.append(f"только {rating}⭐")
+    if with_text:
+        parts.append("только с текстом")
+    return ", ".join(parts) if parts else "все отзывы"
+
+
 def review_button_text(review: dict) -> str:
     item_name = _short(review.get("item_name") or "Без товара", 20)
     buyer = _short(review.get("buyer") or "?", 14)
@@ -79,22 +101,64 @@ def reviews_list_text(
     total_pages: int,
     total_loaded: int,
     total_count: int | None = None,
+    review_filter: dict | None = None,
 ) -> str:
-    lines = ["<b>⭐ Отзывы</b>", ""]
-    if total_count is not None and total_count > total_loaded:
+    rating, with_text = _filter_parts(review_filter)
+    filtered = bool(rating or with_text)
+    lines = ["<b>⭐ Отзывы</b>", "", f"🔎 Фильтр: <b>{reviews_filter_label(review_filter)}</b>", ""]
+    # totalCount от Playerok при фильтре может считать все отзывы — не сравниваем с ним.
+    if not filtered and total_count is not None and total_count > total_loaded:
         lines.extend([f"ℹ️ <i>Отображаются только последние {total_loaded} отзывов.</i>", ""])
+    elif filtered and total_loaded >= MAX_REVIEWS_TO_LOAD:
+        lines.extend([f"ℹ️ <i>Показаны последние {total_loaded} подходящих отзывов.</i>", ""])
 
     if total_loaded:
-        lines.append(f"📊 Загружено: <b>{total_loaded}</b>" + (f" из <b>{total_count}</b>" if total_count is not None else ""))
+        if filtered:
+            lines.append(f"📊 Найдено: <b>{total_loaded}</b>")
+        else:
+            lines.append(f"📊 Загружено: <b>{total_loaded}</b>" + (f" из <b>{total_count}</b>" if total_count is not None else ""))
         lines.append(f"📄 Страница: <b>{page + 1}/{max(total_pages, 1)}</b>")
         lines.extend(["", "👇 Выберите отзыв кнопкой ниже."])
+    elif filtered:
+        lines.append("Под фильтр отзывов не нашлось.")
     else:
         lines.append("Отзывов пока нет.")
     return "\n".join(lines)
 
 
-def reviews_list_kb(page_reviews: list[dict], page: int, total_pages: int) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+def reviews_filter_rows(review_filter: dict | None) -> list[list[InlineKeyboardButton]]:
+    """Кнопки фильтра: по оценке (повторное нажатие снимает) и «с текстом» (вкл/выкл)."""
+    rating, with_text = _filter_parts(review_filter)
+    text_flag = 1 if with_text else 0
+    star_row = [
+        InlineKeyboardButton(
+            text=("✅ " if rating == 0 else "") + "Все",
+            callback_data=calls.ReviewsFilter(rating=0, text=text_flag).pack(),
+        )
+    ]
+    for value in range(5, 0, -1):
+        star_row.append(
+            InlineKeyboardButton(
+                text=("✅" if rating == value else "") + f"{value}⭐",
+                callback_data=calls.ReviewsFilter(rating=0 if rating == value else value, text=text_flag).pack(),
+            )
+        )
+    text_row = [
+        InlineKeyboardButton(
+            text=("✅ " if with_text else "☑️ ") + "Только с текстом",
+            callback_data=calls.ReviewsFilter(rating=rating, text=0 if with_text else 1).pack(),
+        )
+    ]
+    return [star_row, text_row]
+
+
+def reviews_list_kb(
+    page_reviews: list[dict],
+    page: int,
+    total_pages: int,
+    review_filter: dict | None = None,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = reviews_filter_rows(review_filter)
     for review in page_reviews:
         rows.append(
             [
@@ -125,7 +189,7 @@ def reviews_list_kb(page_reviews: list[dict], page: int, total_pages: int) -> In
 
     rows.append(
         [
-            InlineKeyboardButton(text="🔄 Обновить", callback_data=calls.ReviewsAction(action="refresh").pack()),
+            InlineKeyboardButton(text="🔄 Обновить", callback_data=calls.ReviewsAction(action="reload").pack()),
             InlineKeyboardButton(text="⬅️ В профиль", callback_data=calls.ProfileNavigation(to="main").pack()),
         ]
     )

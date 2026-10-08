@@ -731,7 +731,7 @@ async def handler_start_shortcut_reviews(message: types.Message, state: FSMConte
 
     from ..callback_handlers.reviews import show_reviews
 
-    await show_reviews(message=message, state=state)
+    await show_reviews(message=message, state=state, reset_filter=True)
 
 
 @router.message(StateFilter(None), F.text == templ.START_SHORTCUT_PROFILE)
