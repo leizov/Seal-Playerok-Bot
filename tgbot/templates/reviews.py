@@ -150,7 +150,9 @@ def reviews_filter_rows(review_filter: dict | None) -> list[list[InlineKeyboardB
             callback_data=calls.ReviewsFilter(rating=rating, text=0 if with_text else 1).pack(),
         )
     ]
-    return [star_row, text_row]
+    # 6 кнопок в одну строку не помещаются на телефоне — делим на две по 3:
+    # «Все · 5⭐ · 4⭐» и «3⭐ · 2⭐ · 1⭐».
+    return [star_row[:3], star_row[3:], text_row]
 
 
 def reviews_list_kb(
