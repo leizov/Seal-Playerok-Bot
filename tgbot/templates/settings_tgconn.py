@@ -1,5 +1,4 @@
 import html
-import textwrap
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -8,6 +7,10 @@ from core import tg_connection as tgc
 from core.proxy_utils import format_proxy_display
 
 from .. import callback_datas as calls
+
+TITLE = "📡 <b>Подключение к Telegram</b>"
+# Откуда открывают меню: раздел «Аккаунт» (там же прокси для Playerok).
+BACK_CB = calls.SettingsNavigation(to="account").pack()
 
 
 def _status() -> dict:
@@ -23,6 +26,21 @@ def _status() -> dict:
     return {"active": preferred, "preferred": preferred, "is_fallback": False, "failures": 0}
 
 
+def _route_name(route: str) -> str:
+    """«Напрямую» / «Через прокси» — с заглавной буквы для отдельной строки."""
+    title = tgc.ROUTE_TITLES.get(route, route)
+    return title[:1].upper() + title[1:]
+
+
+def tgconn_short_status() -> str:
+    """Одна строка о текущем способе — для других меню (например, «Аккаунт»)."""
+    status = _status()
+    text = f"{tgc.ROUTE_EMOJI[status['active']]} {_route_name(status['active'])}"
+    if status["is_fallback"]:
+        text += " (запасной)"
+    return text
+
+
 def settings_tgconn_text():
     config = sett.get("config")
     api = tgc.get_api_cfg(config)
@@ -30,37 +48,47 @@ def settings_tgconn_text():
     worker = tgc.worker_url_from_config(config)
     proxy = tgc.proxy_from_config(config)
     auto_fallback = api.get("auto_fallback", True)
+    active = status["active"]
+    preferred = status["preferred"]
 
-    active_line = f"{tgc.ROUTE_EMOJI[status['active']]} <b>{html.escape(tgc.describe_route(status['active'], config))}</b>"
+    lines = [
+        TITLE,
+        "",
+        f"<b>Сейчас:</b> {tgc.ROUTE_EMOJI[active]} <b>{html.escape(tgc.describe_route(active, config))}</b>",
+    ]
     if status["is_fallback"]:
-        active_line += (
-            f"\n⚠️ Это запасной способ: основной "
-            f"(<b>{tgc.ROUTE_TITLES[status['preferred']]}</b>) сейчас не отвечает. "
+        lines.append(
+            f"⚠️ Это запасной способ: основной (<b>{tgc.ROUTE_TITLES[preferred]}</b>) сейчас не отвечает. "
             f"Бот периодически проверяет его и вернётся сам."
         )
-
-    chain = " → ".join(tgc.ROUTE_TITLES[r] for r in tgc.route_chain(config))
-    txt = textwrap.dedent(f"""
-        ⚙️ <b>Настройки → 📡 Подключение к Telegram</b>
-
-        Сейчас бот подключён: {active_line}
-
-        ⭐ Основной способ: <b>{tgc.ROUTE_TITLES[status['preferred']]}</b>
-        ☁️ Cloudflare Worker: <b>{html.escape(worker) if worker else '❌ не настроен'}</b>
-        🌐 Прокси для Telegram: <b>{html.escape(format_proxy_display(proxy)) if proxy else '❌ не настроен'}</b>
-        🛟 Автопереключение при сбое: <b>{'✅ включено' if auto_fallback else '❌ выключено'}</b>
-        Порядок: {html.escape(chain)}
-
-        <b>Как это работает</b>
-        · <b>Напрямую</b> — бот сам обращается к api.telegram.org.
-        · <b>Cloudflare Worker</b> — бесплатный личный посредник на серверах Cloudflare. Используйте только свой воркер: через него проходит токен бота.
-        · <b>Прокси</b> — платный сервер в другой стране. Это прокси только для Telegram, прокси для Playerok настраивается в «📶 Соединение».
-
-        Перед переключением бот проверяет, что выбранный способ работает. Если основной способ перестанет отвечать, бот сам перейдёт на запасной (прокси → воркер → напрямую) и вернётся, когда основной заработает.
-
-        Выберите действие ↓
-    """)
-    return txt
+    lines += [
+        "",
+        "<b>Способы:</b>",
+        f"┣ 🌍 Напрямую: <b>{'⭐ основной' if preferred == tgc.ROUTE_DIRECT else 'доступен'}</b>",
+        f"┣ ☁️ Cloudflare Worker: <b>"
+        + (html.escape(worker) + (" — ⭐ основной" if preferred == tgc.ROUTE_WORKER else "") if worker else "не настроен")
+        + "</b>",
+        f"┗ 🌐 Прокси: <b>"
+        + (html.escape(format_proxy_display(proxy)) + (" — ⭐ основной" if preferred == tgc.ROUTE_PROXY else "") if proxy else "не настроен")
+        + "</b>",
+        "",
+        f"🛟 <b>Автопереключение при сбое:</b> {'✅ включено' if auto_fallback else '❌ выключено'}",
+        f"Порядок: {html.escape(' → '.join(tgc.ROUTE_TITLES[r] for r in tgc.route_chain(config)))}",
+        "",
+        "<b>Как это работает</b>",
+        "· <b>Напрямую</b> — бот сам обращается к api.telegram.org.",
+        "· <b>Cloudflare Worker</b> — бесплатный личный посредник на серверах Cloudflare. "
+        "Используйте только свой воркер: через него проходит токен бота.",
+        "· <b>Прокси</b> — платный сервер в другой стране. Это прокси только для Telegram, "
+        "прокси для Playerok настраивается в «🌐 Управление прокси».",
+        "",
+        "Если основной способ перестанет отвечать, бот сам перейдёт на запасной "
+        "и вернётся, когда основной заработает.",
+        "",
+        "Чтобы сменить способ, нажмите на него ниже: бот проверит, отвечает ли через него Telegram, "
+        "и попросит подтвердить переключение.",
+    ]
+    return "\n".join(lines)
 
 
 def settings_tgconn_kb():
@@ -70,30 +98,30 @@ def settings_tgconn_kb():
     worker = tgc.worker_url_from_config(config)
     proxy = tgc.proxy_from_config(config)
 
-    def mark(route: str) -> str:
-        if route == status["preferred"]:
-            return "⭐ "
-        return ""
+    def label(route: str, text: str) -> str:
+        if route == status["active"]:
+            return f"✅ {text} (сейчас)"
+        return text
 
     rows = [
-        [InlineKeyboardButton(text=f"{mark(tgc.ROUTE_DIRECT)}🌍 Напрямую", callback_data="tgconn:use:direct")],
+        [InlineKeyboardButton(text=label(tgc.ROUTE_DIRECT, "🌍 Напрямую"), callback_data="tgconn:use:direct")],
         [InlineKeyboardButton(
-            text=f"{mark(tgc.ROUTE_WORKER)}☁️ Через Cloudflare Worker" if worker else "☁️ Настроить Cloudflare Worker",
+            text=label(tgc.ROUTE_WORKER, "☁️ Через Cloudflare Worker") if worker else "➕ Настроить Cloudflare Worker",
             callback_data="tgconn:use:worker" if worker else "tgconn:set:worker",
         )],
         [InlineKeyboardButton(
-            text=f"{mark(tgc.ROUTE_PROXY)}🌐 Через прокси" if proxy else "🌐 Настроить прокси",
+            text=label(tgc.ROUTE_PROXY, "🌐 Через прокси") if proxy else "➕ Настроить прокси для Telegram",
             callback_data="tgconn:use:proxy" if proxy else "tgconn:set:proxy",
         )],
     ]
     if worker:
         rows.append([
-            InlineKeyboardButton(text="✏️ Изменить воркер", callback_data="tgconn:set:worker"),
+            InlineKeyboardButton(text="✏️ Воркер", callback_data="tgconn:set:worker"),
             InlineKeyboardButton(text="🗑 Удалить воркер", callback_data="tgconn:del:worker"),
         ])
     if proxy:
         rows.append([
-            InlineKeyboardButton(text="✏️ Изменить прокси", callback_data="tgconn:set:proxy"),
+            InlineKeyboardButton(text="✏️ Прокси", callback_data="tgconn:set:proxy"),
             InlineKeyboardButton(text="🗑 Удалить прокси", callback_data="tgconn:del:proxy"),
         ])
     rows.append([InlineKeyboardButton(text="🩺 Проверить все способы", callback_data="tgconn:check")])
@@ -102,14 +130,35 @@ def settings_tgconn_kb():
         callback_data="tgconn:toggle_fallback",
     )])
     rows.append([
-        InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.SettingsNavigation(to="default").pack()),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=BACK_CB),
         InlineKeyboardButton(text="🔄️ Обновить", callback_data=calls.SettingsNavigation(to="tgconn").pack()),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def settings_tgconn_float_text(placeholder: str):
-    return f"⚙️ <b>Настройки → 📡 Подключение к Telegram</b>\n\n{placeholder}"
+    return f"{TITLE}\n\n{placeholder}"
+
+
+def tgconn_confirm_text(route: str, username: str | None, current: str) -> str:
+    config = sett.get("config")
+    lines = [
+        f"✅ <b>Проверка пройдена:</b> Telegram отвечает {html.escape(tgc.describe_route(route, config))}"
+        + (f" (бот @{html.escape(username)})." if username else "."),
+        "",
+        f"Сейчас: {tgc.ROUTE_EMOJI[current]} <b>{html.escape(tgc.describe_route(current, config))}</b>",
+        f"Будет: {tgc.ROUTE_EMOJI[route]} <b>{html.escape(tgc.describe_route(route, config))}</b> — станет основным способом.",
+        "",
+        "Переключить?",
+    ]
+    return settings_tgconn_float_text("\n".join(lines))
+
+
+def tgconn_confirm_kb(route: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Переключить", callback_data=f"tgconn:confirm:{route}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=calls.SettingsNavigation(to="tgconn").pack())],
+    ])
 
 
 def tgconn_worker_instruction_text():

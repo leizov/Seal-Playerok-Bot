@@ -9,28 +9,26 @@ from .. import callback_datas as calls
 
 def settings_users_text():
     config = sett.get("config")
-    password_auth_enabled = "🟢 Включена" if config["telegram"]["bot"].get("password_auth_enabled", True) else "🔴 Выключена"
-    
-    # Get list of authorized users
+    password_auth_enabled = config["telegram"]["bot"].get("password_auth_enabled", True)
     users = config["telegram"]["bot"].get("signed_users", [])
-    users_list = ""
-    
-    if not users:
-        users_list = "❌ Нет авторизованных пользователей"
-    else:
-        users_list = "\n".join([f"👤 <code>{user_id}</code>" for user_id in users])
-    
-    txt = textwrap.dedent(f"""
-        ⚙️ <b>Настройки → 👥 Управление пользователями</b>
 
-        🔐 <b>Блокировка входа по паролю:</b> {password_auth_enabled}
-        
-        <b>Авторизованные пользователи:</b>
-        {users_list}
-        
-        Выберите действие ↓
-    """)
-    return txt
+    # Собираем построчно: textwrap.dedent ломался, когда список пользователей
+    # был многострочным (строки списка без отступа -> весь текст сдвигался).
+    lines = [
+        "👥 <b>Пользователи</b>",
+        "",
+        f"🔐 <b>Вход по паролю:</b> {'🟢 включён' if password_auth_enabled else '🔴 выключен'}",
+        "",
+        f"<b>Авторизованные пользователи ({len(users)}):</b>",
+    ]
+    if users:
+        for index, user_id in enumerate(users):
+            branch = "┗" if index == len(users) - 1 else "┣"
+            lines.append(f"{branch} 👤 <code>{user_id}</code>")
+    else:
+        lines.append("❌ Нет авторизованных пользователей")
+    lines += ["", "Выберите действие ↓"]
+    return "\n".join(lines)
 
 
 def settings_users_kb():

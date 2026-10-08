@@ -190,14 +190,19 @@ class TelegramBot:
             "failures": self.connection_tracker.consecutive_failures,
         }
 
-    async def switch_route(self, route: str, *, make_preferred: bool = True) -> tgc.ProbeResult:
+    async def switch_route(self, route: str, *, make_preferred: bool = True,
+                           probed: tgc.ProbeResult | None = None) -> tgc.ProbeResult:
         """
         Проверяет способ подключения и, если он работает, переключает на него бота.
         При make_preferred=True сохраняет способ как основной (telegram.api.mode).
+        probed — свежий успешный результат проверки этого способа (повторно не проверяем).
         """
         config = sett.get("config")
         token = config["telegram"]["api"]["token"]
-        result = await tgc.probe_route_with_retries(token, route, config, attempts=2)
+        if probed is not None and probed.ok and probed.route == route:
+            result = probed
+        else:
+            result = await tgc.probe_route_with_retries(token, route, config, attempts=2)
         if not result.ok:
             return result
         async with self._route_lock:

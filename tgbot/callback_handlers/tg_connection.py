@@ -3,6 +3,7 @@
 ввод и удаление воркера и прокси. Любой способ проверяется до того, как бот на него перейдёт.
 """
 import html
+import time
 from logging import getLogger
 
 from aiogram import F, Router
@@ -50,8 +51,13 @@ def _fail_text(route: str, result: tgc.ProbeResult) -> str:
     return text
 
 
+PROBE_KEY = "tgconn_probe"
+PROBE_TTL = 120  # сек.: сколько считаем проверку свежей для подтверждения
+
+
 @router.callback_query(F.data.startswith("tgconn:use:"))
 async def callback_tgconn_use(callback: CallbackQuery, state: FSMContext):
+    """Шаг 1: проверяем выбранный способ и просим подтвердить переключение."""
     route = callback.data.split(":", 2)[2]
     config = sett.get("config")
     if route not in tgc.ROUTES or not tgc.is_route_configured(route, config):
@@ -62,20 +68,74 @@ async def callback_tgconn_use(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Telegram-бот не запущен", show_alert=True)
         return
 
+    status = tg_bot.get_connection_status()
+    if route == status["active"] and route == status["preferred"]:
+        await callback.answer("Бот уже подключён этим способом", show_alert=True)
+        return
+
     await callback.answer("Проверяю подключение…")
     await throw_float_message(
         state=state, message=callback.message,
         text=templ.settings_tgconn_float_text(
             f"⏳ Проверяю, отвечает ли Telegram {html.escape(tgc.describe_route(route, config))}…\n"
-            f"Это займёт до 40 секунд."
+            f"Это займёт до 40 секунд. Бот пока работает текущим способом."
         ),
     )
-    result = await tg_bot.switch_route(route, make_preferred=True)
+    result = await tgc.probe_route_with_retries(config["telegram"]["api"]["token"], route, config, attempts=2)
+    if not result.ok:
+        await state.update_data(**{PROBE_KEY: None})
+        await _show_menu(state, callback.message, notice=_fail_text(route, result))
+        return
+
+    await state.update_data(**{PROBE_KEY: {
+        "route": route, "username": result.username, "ts": time.time(),
+        # Отпечаток настроек: если за это время адрес воркера/прокси изменили — проверку повторим.
+        "target": tgc.describe_route(route, config),
+    }})
+    await throw_float_message(
+        state=state, message=callback.message,
+        text=templ.tgconn_confirm_text(route, result.username, tg_bot.active_route),
+        reply_markup=templ.tgconn_confirm_kb(route),
+    )
+
+
+@router.callback_query(F.data.startswith("tgconn:confirm:"))
+async def callback_tgconn_confirm(callback: CallbackQuery, state: FSMContext):
+    """Шаг 2: пользователь подтвердил — переключаемся (по свежей проверке или проверив заново)."""
+    route = callback.data.split(":", 2)[2]
+    config = sett.get("config")
+    if route not in tgc.ROUTES or not tgc.is_route_configured(route, config):
+        await callback.answer("Этот способ больше не настроен", show_alert=True)
+        await _show_menu(state, callback.message)
+        return
+    tg_bot = _tg_bot()
+    if tg_bot is None:
+        await callback.answer("Telegram-бот не запущен", show_alert=True)
+        return
+
+    data = await state.get_data()
+    saved = data.get(PROBE_KEY) or {}
+    await state.update_data(**{PROBE_KEY: None})
+    probed = None
+    if (
+        saved.get("route") == route
+        and time.time() - float(saved.get("ts") or 0) <= PROBE_TTL
+        and saved.get("target") == tgc.describe_route(route, config)
+    ):
+        probed = tgc.ProbeResult(ok=True, route=route, username=saved.get("username"))
+    else:
+        await callback.answer("Проверка устарела — проверяю ещё раз…")
+        await throw_float_message(
+            state=state, message=callback.message,
+            text=templ.settings_tgconn_float_text("⏳ Проверка устарела, проверяю ещё раз…"),
+        )
+
+    result = await tg_bot.switch_route(route, make_preferred=True, probed=probed)
     if result.ok:
-        notice = f"✅ <b>Основной способ: {tgc.ROUTE_TITLES[route]}.</b> Проверка пройдена.\n"
+        notice = f"✅ <b>Переключено: {tgc.ROUTE_TITLES[route]}.</b> Это теперь основной способ.\n"
     else:
         notice = _fail_text(route, result)
-    await _show_menu(state, callback.message, notice=notice)
+    await _show_menu(state, callback.message, callback=callback if probed else None, notice=notice)
 
 
 @router.callback_query(F.data == "tgconn:set:worker")

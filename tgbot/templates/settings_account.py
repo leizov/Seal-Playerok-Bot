@@ -33,6 +33,11 @@ def settings_account_text():
     user_agent = config["playerok"]["api"]["user_agent"] or "❌ Не задан"
     proxy = config["playerok"]["api"]["proxy"] or "❌ Не задан"
     connected_username = _get_connected_playerok_username()
+    try:
+        from .settings_tgconn import tgconn_short_status
+        tg_route = tgconn_short_status()
+    except Exception:
+        tg_route = "—"
     
     txt = textwrap.dedent(f"""
         👤 <b>Аккаунт</b>
@@ -44,7 +49,8 @@ def settings_account_text():
         ┗ 🎩 User-Agent: <b>{user_agent}</b>
 
         <b>Соединение:</b>
-        ┗ 🌐 Прокси: <b>{proxy}</b>
+        ┣ 🌐 Прокси Playerok: <b>{proxy}</b>
+        ┗ 📡 Подключение к Telegram: <b>{tg_route}</b>
 
         Выберите параметр для изменения ↓
     """)
@@ -61,6 +67,7 @@ def settings_account_kb():
     
     # Кнопка управления прокси
     rows.append([InlineKeyboardButton(text="🌐 Управление прокси", callback_data=calls.ProxyListPagination(page=0).pack())])
+    rows.append([InlineKeyboardButton(text="📡 Подключение к Telegram", callback_data=calls.SettingsNavigation(to="tgconn").pack())])
     
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.MenuPagination(page=0).pack())])
     
