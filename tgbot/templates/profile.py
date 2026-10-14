@@ -54,12 +54,24 @@ def profile_text():
         except Exception:
             balance = None
 
-    sales_total = _n(_f(profile, "stats", "deals", "outgoing", "total"))
-    sales_active = sales_total - _n(_f(profile, "stats", "deals", "outgoing", "finished"))
-    purchases_total = _n(_f(profile, "stats", "deals", "incoming", "total"))
-    purchases_active = purchases_total - _n(_f(profile, "stats", "deals", "incoming", "finished"))
-    items_total = _n(_f(profile, "stats", "items", "total"))
-    items_finished = _n(_f(profile, "stats", "items", "finished"))
+    def _counter(*path) -> tuple:
+        """(всего, завершено) или (None, None), если Playerok не прислал этот блок.
+        Отсутствие данных нельзя показывать как 0 — это выглядит как «нет продаж»."""
+        block = _f(profile, "stats", *path)
+        total = _f(block, "total")
+        if total is None:
+            return None, None
+        return total, _n(_f(block, "finished"))
+
+    def _stat_line(title: str, total, finished, finished_label: str, active: bool) -> str:
+        if total is None:
+            return f"{title} — <i>(Playerok не прислал статистику)</i>"
+        extra = f"активных: {max(total - finished, 0)}" if active else f"{finished_label}: {finished}"
+        return f"{title} {total} ({extra})"
+
+    sales_total, sales_finished = _counter("deals", "outgoing")
+    purchases_total, purchases_finished = _counter("deals", "incoming")
+    items_total, items_finished = _counter("items")
 
     raw_username = _f(profile, "username") or getattr(acc, "username", None) or ""
     username = html.escape(str(raw_username))
@@ -95,9 +107,9 @@ def profile_text():
         "",
         balance_block,
         "",
-        f"<b>🛒 Продажи:</b> {sales_total} (активных: {sales_active})",
-        f"<b>🛍 Покупки:</b> {purchases_total} (активных: {purchases_active})",
-        f"<b>📦 Товары:</b> {items_total} (истёкших: {items_finished})",
+        _stat_line("<b>🛒 Продажи:</b>", sales_total, sales_finished, "", active=True),
+        _stat_line("<b>🛍 Покупки:</b>", purchases_total, purchases_finished, "", active=True),
+        _stat_line("<b>📦 Товары:</b>", items_total, items_finished, "завершённых", active=False),
         "",
         f"<b>📅 Дата регистрации:</b> {created}",
         "",

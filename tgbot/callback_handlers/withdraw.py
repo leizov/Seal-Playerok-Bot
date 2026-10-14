@@ -96,11 +96,13 @@ async def _set_ctx(state: FSMContext, ctx: dict):
     await state.update_data(**{CTX_KEY: ctx})
 
 
-async def show_wallet(message: Message, state: FSMContext, callback: CallbackQuery | None = None):
+async def show_wallet(message: Message, state: FSMContext, callback: CallbackQuery | None = None,
+                      send: bool = False):
+    """send=True — новым сообщением (кнопка снизу), иначе редактирует текущее меню."""
     await state.set_state(None)
     account = _get_account()
     if account is None:
-        await throw_float_message(state=state, message=message, callback=callback,
+        await throw_float_message(state=state, message=message, callback=callback, send=send,
                                   text=templ.do_action_text("❌ Нет подключения к Playerok"),
                                   reply_markup=templ.back_kb(calls.ProfileNavigation(to="main").pack()))
         return
@@ -109,7 +111,7 @@ async def show_wallet(message: Message, state: FSMContext, callback: CallbackQue
     except Exception as e:
         logger.warning("Не удалось загрузить баланс: %s", e)
         balance = None
-    await throw_float_message(state=state, message=message, callback=callback,
+    await throw_float_message(state=state, message=message, callback=callback, send=send,
                               text=templ.wallet_text(balance), reply_markup=templ.wallet_kb())
 
 

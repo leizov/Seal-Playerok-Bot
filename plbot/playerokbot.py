@@ -15,6 +15,7 @@ from typing import Any, Awaitable
 from colorama import Fore
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from core.cute_utilities import get_random_cute_png_path
 from playerokapi.account import Account
 from playerokapi import exceptions as plapi_exceptions
 from playerokapi.enums import *
@@ -1647,6 +1648,17 @@ class PlayerokBot:
                 text = f'⌨️ Список доступных команд:\n<b>{commands_row}</b>'
                 self.send_message(event.chat.id, text)
 
+            elif msg_text.lower() in ["!умилялка", "#хочу умиляться"]:
+                cute_png_path = get_random_cute_png_path()
+                 
+                if cute_png_path:
+                    cute_text = "🥰🦭 Высылаю милую фоточку!\nУмиляемся на скорость!!!"
+                    self.send_message(event.chat.id, cute_text)
+                    await asyncio.sleep(2)
+                    self.send_message(event.chat.id, photo_file_path=cute_png_path)
+                else:
+                    cute_text = "Админ не настроил умилялки("
+                    self.send_message(event.chat.id, cute_text)
 
             elif self.config["playerok"]["custom_commands"]["enabled"]:
                 command_answer = None

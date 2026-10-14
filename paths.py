@@ -18,8 +18,10 @@ BOT_SETTINGS_DIR = os.path.join(ROOT_DIR, "bot_settings")
 # Директория данных бота
 BOT_DATA_DIR = os.path.join(ROOT_DIR, "bot_data")
 ERROR_STATS_DIR = os.path.join(BOT_DATA_DIR, "error_stats")
-START_IMAGES_DIR = os.path.join(ROOT_DIR, "start_images")
-START_BANNER_IMAGE_FILE = os.path.join(START_IMAGES_DIR, "пасхо.png")
+BOT_IMAGES_DIR = os.path.join(ROOT_DIR, "bot_images")
+START_IMAGES_DIR = os.path.join(BOT_IMAGES_DIR, "start_images")
+START_BANNER_IMAGE_FILE = os.path.join(START_IMAGES_DIR, "осеняя_умилялка.png")
+RANDOM_CUTE_IMAGES_DIR = os.path.join(BOT_IMAGES_DIR, "random_cute_images")
 
 # Директория логов
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")

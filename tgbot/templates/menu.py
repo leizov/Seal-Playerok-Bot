@@ -12,6 +12,7 @@ START_SHORTCUT_ITEMS = "📦 Товары"
 START_SHORTCUT_CHATS = "💬 Чаты"
 START_SHORTCUT_PROFILE = "👤 Профиль"
 START_SHORTCUT_REVIEWS = "⭐ Отзывы"
+START_SHORTCUT_WALLET = "👛 Кошелёк"
 
 
 
@@ -57,6 +58,10 @@ def start_shortcuts_kb() -> ReplyKeyboardMarkup:
             [
                 KeyboardButton(text=START_SHORTCUT_CHATS),
                 KeyboardButton(text=START_SHORTCUT_PROFILE),
+            ],
+            [
+                KeyboardButton(text=START_SHORTCUT_REVIEWS),
+                KeyboardButton(text=START_SHORTCUT_WALLET),
             ],
         ],
         resize_keyboard=True,
