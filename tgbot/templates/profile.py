@@ -9,6 +9,26 @@ from plbot.placeholders import PROFILE_URL
 from .. import callback_datas as calls
 
 
+def _bot_stats_block() -> str:
+    """Выручка и популярный товар из статистики бота (plbot/stats.py), «за всё время».
+    Это продажи, которые бот видел, пока был запущен, — не вся история аккаунта."""
+    try:
+        from plbot.stats import get_stats, summarize_days
+        from .stats import _money, top_item_text
+
+        stats = get_stats()
+        if stats is None:
+            return "<b>💵 Выручка за время работы бота:</b> —\n🔥 Самый популярный товар: —"
+        revenue = getattr(stats, "sales_total_sum", 0.0)
+        summary = summarize_days(sorted((getattr(stats, "daily", None) or {}).keys()))
+        return (
+            f"<b>💵 Выручка за время работы бота:</b> {_money(revenue)}₽\n"
+            + top_item_text(summary.get("top_item"))
+        )
+    except Exception:
+        return "<b>💵 Выручка за время работы бота:</b> не удалось получить"
+
+
 def profile_text():
     from plbot.playerokbot import get_playerok_bot
     
@@ -69,9 +89,21 @@ def profile_text():
         extra = f"активных: {max(total - finished, 0)}" if active else f"{finished_label}: {finished}"
         return f"{title} {total} ({extra})"
 
+    # Счётчики Playerok из запроса `user` → profile.stats (playerokapi/parser.py: account_stats).
+    # ВНИМАНИЕ: на практике Playerok всегда присылает тут нули (проверено на живом
+    # аккаунте, октябрь 2026), поэтому реальным цифрам эти строки не соответствуют.
+    # Оставлены на случай, если Playerok начнёт заполнять поля. Настоящие цифры
+    # продаж — в статистике бота (plbot/stats.py), см. «Выручка за время работы бота» ниже.
+    #   deals.outgoing — сделки, где мы продавец (продажи); так же в playerok-universal
+    #                    и ItemDealDirections.OUT («Продажа»).
+    #   deals.incoming — сделки, где мы покупатель (покупки).
+    #   активных = total - finished.
+    #   items.finished — смысл не подтверждён (проданные/снятые/истёкшие), поэтому «завершённых».
     sales_total, sales_finished = _counter("deals", "outgoing")
     purchases_total, purchases_finished = _counter("deals", "incoming")
     items_total, items_finished = _counter("items")
+
+    bot_stats_block = _bot_stats_block()
 
     raw_username = _f(profile, "username") or getattr(acc, "username", None) or ""
     username = html.escape(str(raw_username))
@@ -110,6 +142,8 @@ def profile_text():
         _stat_line("<b>🛒 Продажи:</b>", sales_total, sales_finished, "", active=True),
         _stat_line("<b>🛍 Покупки:</b>", purchases_total, purchases_finished, "", active=True),
         _stat_line("<b>📦 Товары:</b>", items_total, items_finished, "завершённых", active=False),
+        "",
+        bot_stats_block,
         "",
         f"<b>📅 Дата регистрации:</b> {created}",
         "",

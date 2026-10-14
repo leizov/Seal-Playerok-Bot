@@ -56,22 +56,29 @@ def _fmt_day(key: str) -> str:
         return key
 
 
+def top_item_text(top_item: dict | None) -> str:
+    """Строка «Самый популярный товар»: только название цитатой —
+    без количества и суммы. Используется и в статистике, и в профиле."""
+    if not top_item:
+        return "🔥 Самый популярный товар: —"
+    return (
+        "🔥 Самый популярный товар:\n"
+        f"<blockquote>{escape(str(top_item['name']))}</blockquote>"
+    )
+
+
 def _journal_lines(summary: dict, period: str, stats) -> str:
     lines = []
     best_day = summary.get("best_day")
-    top_item = summary.get("top_item")
     label = "Лучший день месяца" if period == "month" else "Лучший день"
-    lines.append(
-        f"🏆 {label}: "
-        + (f"<b>{_fmt_day(best_day['date'])}</b> — <b>{_money(best_day['sum'])}</b>₽" if best_day else "—")
-    )
-    if top_item:
+    if best_day:
         lines.append(
-            f"🔥 Популярный товар: <b>{escape(str(top_item['name']))}</b> — "
-            f"<b>{top_item['count']}</b> шт. на <b>{_money(top_item['sum'])}</b>₽"
+            f"🏆 {label}: <b>{_money(best_day['sum'])}</b>₽\n"
+            f"<blockquote>{_fmt_day(best_day['date'])}</blockquote>"
         )
     else:
-        lines.append("🔥 Популярный товар: —")
+        lines.append(f"🏆 {label}: —")
+    lines.append(top_item_text(summary.get("top_item")))
 
     return "\n".join(lines)
 
