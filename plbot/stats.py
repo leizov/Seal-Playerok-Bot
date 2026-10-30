@@ -32,7 +32,6 @@ def _empty_day() -> dict[str, Any]:
         "refund_sum": 0.0,
         "reviews_count": 0,
         "raises_sum": 0.0,
-        "keep_in_sale_sum": 0.0,
         "items": {},
     }
 
@@ -54,9 +53,6 @@ class Stats:
     sales_month_sum: float
     refund_month_sum: float
     raises_month_sum: float
-    # Оценочный расход на «Оставлять в продаже» (по текущей цене поднятия товара).
-    keep_in_sale_total_sum: float = 0.0
-    keep_in_sale_month_sum: float = 0.0
     # Дата начала ведения дневного журнала (до неё есть только агрегаты).
     daily_started_at: datetime | None = None
     # Дневной журнал: "YYYY-MM-DD" -> счётчики дня + items {name: {count, sum}}.
@@ -121,7 +117,6 @@ def ensure_month_window():
         _stats.sales_month_sum = 0.0
         _stats.refund_month_sum = 0.0
         _stats.raises_month_sum = 0.0
-        _stats.keep_in_sale_month_sum = 0.0
 
 
 def _normalize_amount(value: Any) -> float:
@@ -207,24 +202,6 @@ def record_raise(amount: float):
         save_stats()
 
 
-def record_keep_in_sale(amount: float):
-    """
-    Оценочный расход «Оставлять в продаже»: после продажи такой товар остаётся
-    в продаже, и мы считаем, что Playerok списал текущую цену его поднятия.
-    Реальное списание может отличаться (оценка может быть завышена).
-    """
-    val = _normalize_amount(amount)
-    if val <= 0:
-        return
-    with _lock:
-        ensure_month_window()
-        _stats.keep_in_sale_total_sum = round(_stats.keep_in_sale_total_sum + val, 2)
-        _stats.keep_in_sale_month_sum = round(_stats.keep_in_sale_month_sum + val, 2)
-        day = _day()
-        day["keep_in_sale_sum"] = round(day["keep_in_sale_sum"] + val, 2)
-        save_stats()
-
-
 # ---------------------------------------------------------------------------
 # Агрегаты по дневному журналу
 # ---------------------------------------------------------------------------
@@ -263,7 +240,7 @@ def summarize_days(keys: list[str]) -> dict[str, Any]:
             days_with_data += 1
             for field_name in ("sales_count", "refund_count", "reviews_count"):
                 result[field_name] += int(day.get(field_name, 0) or 0)
-            for field_name in ("sales_sum", "refund_sum", "raises_sum", "keep_in_sale_sum"):
+            for field_name in ("sales_sum", "refund_sum", "raises_sum"):
                 result[field_name] = round(result[field_name] + _normalize_amount(day.get(field_name, 0.0)), 2)
             for name, data in (day.get("items") or {}).items():
                 agg = items.setdefault(name, {"count": 0, "sum": 0.0})
@@ -311,8 +288,6 @@ def _from_legacy(data: dict[str, Any]) -> dict[str, Any]:
         "sales_month_sum": _normalize_amount(data.get("sales_month_sum", 0.0)),
         "refund_month_sum": _normalize_amount(data.get("refund_month_sum", 0.0)),
         "raises_month_sum": _normalize_amount(data.get("raises_month_sum", 0.0)),
-        "keep_in_sale_total_sum": _normalize_amount(data.get("keep_in_sale_total_sum", 0.0)),
-        "keep_in_sale_month_sum": _normalize_amount(data.get("keep_in_sale_month_sum", 0.0)),
         "daily_started_at": data.get("daily_started_at"),
         "daily": daily if isinstance(daily, dict) else {},
     }

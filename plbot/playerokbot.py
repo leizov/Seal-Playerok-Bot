@@ -44,7 +44,7 @@ from .delivery_history import (
     STATUS_SENT as DELIVERY_STATUS_SENT, add_record as add_delivery_record,
 )
 from .stats import (
-    get_stats, load_stats, record_keep_in_sale, record_new_deal, record_raise, record_refund,
+    get_stats, load_stats, record_new_deal, record_raise, record_refund,
     record_review, set_stats,
 )
 from .raise_times import (
@@ -149,48 +149,8 @@ class PlayerokBot:
         def _worker():
             item_name = getattr(getattr(deal, "item", None), "name", None)
             record_new_deal(self._deal_amount(deal), item_name=item_name)
-            try:
-                self._record_keep_in_sale_expense(deal)
-            except Exception as e:
-                self.logger.warning(f"Не удалось учесть расход «Оставлять в продаже» для сделки {deal_id}: {e}")
 
         self._start_daemon_thread(_worker, name=f"record-new-deal-{deal_id}")
-
-    def _current_raise_price(self, item) -> float:
-        """
-        Текущая цена поднятия товара: цена статуса приоритета того же типа,
-        что у товара сейчас; запасной вариант — item.priority_price.
-        """
-        item_priority = getattr(item, "priority", None)
-        try:
-            statuses = self.account.get_item_priority_statuses(item.id, item.price) or []
-            for status in statuses:
-                if item_priority is not None and status.type == item_priority:
-                    return float(status.price or 0)
-        except Exception as e:
-            self.logger.warning(f"Не удалось получить цены поднятия товара {getattr(item, 'id', '?')}: {e}")
-        try:
-            return float(getattr(item, "priority_price", 0) or 0)
-        except Exception:
-            return 0.0
-
-    def _record_keep_in_sale_expense(self, deal: types.ItemDeal):
-        """
-        Если у проданного товара включено «Оставлять в продаже», учитываем
-        оценочный расход по текущей цене его поднятия. Это оценка — реальные
-        списания в транзакциях не сверяются.
-        """
-        if not self.is_connected or self.account is None:
-            return
-        item_id = str(getattr(getattr(deal, "item", None), "id", "") or "")
-        if not item_id:
-            return
-        full_item = self.account.get_item(item_id)
-        if not bool(getattr(full_item, "keep_in_sale", False)):
-            return
-        price = self._current_raise_price(full_item)
-        if price > 0:
-            record_keep_in_sale(price)
 
     def _record_refund_async(self, deal: types.ItemDeal):
         deal_id = str(getattr(deal, "id", "unknown"))
@@ -1003,18 +963,6 @@ class PlayerokBot:
         except Exception as e:
             self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при восстановлении истёкших предметов: {Fore.WHITE}{e}")
 
-    def _is_kept_in_sale(self, item) -> bool:
-        """Проверяет флаг «Оставлять в продаже» у товара (запрашивает свежие данные)."""
-        item_id = str(getattr(item, "id", "") or "")
-        if not item_id:
-            return False
-        try:
-            full_item = self.account.get_item(item_id)
-        except Exception as e:
-            self.logger.warning(f"Не удалось проверить «Оставлять в продаже» у товара {item_id}: {e}")
-            return False
-        return bool(getattr(full_item, "keep_in_sale", False))
-
     def restore_last_sold_item(self, item: Item):
         """
         Восстанавливает последний проданный предмет.
@@ -1023,12 +971,6 @@ class PlayerokBot:
         :type item: `playerokapi.types.Item`
         """
         if not self.is_connected or self.account is None:
-            return
-        if self._is_kept_in_sale(item):
-            self.logger.info(
-                f"{Fore.LIGHTWHITE_EX}«{item.name}» {Fore.WHITE}— включено «Оставлять в продаже», "
-                f"восстановление не требуется"
-            )
             return
         try:
             profile = None

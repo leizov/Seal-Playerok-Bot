@@ -119,7 +119,6 @@ def stats_text(period: str = "all"):
         sales_sum = summary["sales_sum"]
         refund_sum = summary["refund_sum"]
         raises_sum = summary["raises_sum"]
-        keep_sum = summary["keep_in_sale_sum"]
     elif period == "month":
         # Счётчики месяца — из агрегатов (они велись и до дневного журнала).
         summary = summarize_days(period_days("month"))
@@ -129,7 +128,6 @@ def stats_text(period: str = "all"):
         sales_sum = getattr(stats, "sales_month_sum", 0.0)
         refund_sum = getattr(stats, "refund_month_sum", 0.0)
         raises_sum = getattr(stats, "raises_month_sum", 0.0)
-        keep_sum = getattr(stats, "keep_in_sale_month_sum", 0.0)
     else:
         summary = summarize_days(sorted((getattr(stats, "daily", None) or {}).keys()))
         sales_count = getattr(stats, "sales_total_count", 0)
@@ -138,7 +136,6 @@ def stats_text(period: str = "all"):
         sales_sum = getattr(stats, "sales_total_sum", 0.0)
         refund_sum = getattr(stats, "refund_total_sum", 0.0)
         raises_sum = getattr(stats, "raises_total_sum", 0.0)
-        keep_sum = getattr(stats, "keep_in_sale_total_sum", 0.0)
 
     balance_total, balance_available = _get_balance_info()
 
@@ -165,8 +162,7 @@ def stats_text(period: str = "all"):
         <b>Суммы:</b>
         ┣ 💰 Продажи: <b>{_money(sales_sum)}</b>₽
         ┣ ↩️ Возвраты: <b>{_money(refund_sum)}</b>₽
-        ┣ 📈 Поднятия/восстановления: <b>{_money(raises_sum)}</b>₽
-        ┗ ♾ «Оставлять в продаже» (оценка): <b>{_money(keep_sum)}</b>₽
+        ┗ 📈 Поднятия/восстановления: <b>{_money(raises_sum)}</b>₽
         """
     ).strip("\n")
 
@@ -175,7 +171,6 @@ def stats_text(period: str = "all"):
         """
 
         ⚠️ Статистика обновляется только во время работы бота.
-        ℹ️ Расход «Оставлять в продаже» считается по текущей цене поднятия товара и может быть выше реального.
         """
     )
     return txt
