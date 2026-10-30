@@ -2179,9 +2179,9 @@ class PlayerokBot:
         else:
             self._notify_startup_status(
                 active=True,
-                details=f"👤 @{self.account.username} — погнали работать! 🚀",
+                details=f"👤 <a href='https://playerok.com/profile/McDonaldc/{self.account.username}'>{self.account.username}</a> — погнали работать! 🚀",
             )
-            self.logger.info(f"{SUCCESS_COLOR}✅ Аккаунт Playerok активен: @{self.account.username}")
+            self.logger.info(f"{SUCCESS_COLOR}✅ Аккаунт Playerok активен: {self.account.username}")
 
         if not getattr(self, "_event_handlers_registered", False):
             add_playerok_event_handler(EventTypes.NEW_MESSAGE, PlayerokBot._on_new_message, 0)
