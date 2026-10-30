@@ -1,8 +1,50 @@
+import html
+import random
+
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, Message, CallbackQuery
 from aiogram.exceptions import TelegramAPIError
 
 from . import templates as templ
+
+
+_RANDOM_USER_AGENTS = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+)
+
+
+def random_user_agent(exclude: str | None = None) -> str:
+    """Случайный User-Agent настоящего браузера. `exclude` — не выдавать это же значение
+    (чтобы «Сгенерировать случайный» не предлагал текущий)."""
+    choices = [ua for ua in _RANDOM_USER_AGENTS if ua != (exclude or "").strip()] or list(_RANDOM_USER_AGENTS)
+    return random.choice(choices)
+
+
+def user_agent_error(user_agent: str) -> str | None:
+    """Проверяет User-Agent перед сохранением. Возвращает текст ошибки или None.
+
+    Настоящий User-Agent состоит только из видимых ASCII-символов
+    («Mozilla/5.0 (Windows NT 10.0; ...) Chrome/140...»). Кириллица, эмодзи и
+    прочие не-ASCII символы ломают HTTP-заголовок, поэтому такое значение не принимаем.
+    """
+    value = str(user_agent or "").strip()
+    if len(value) < 10:
+        return "❌ Слишком короткое значение. Скопируйте User-Agent браузера целиком."
+    if len(value) > 512:
+        return "❌ Слишком длинное значение (больше 512 символов)."
+    bad = sorted({ch for ch in value if not (" " <= ch <= "~")})
+    if bad:
+        shown = " ".join(repr(ch)[1:-1] for ch in bad[:10])
+        return (
+            "❌ В User-Agent есть недопустимые символы (кириллица, эмодзи и т.п.): "
+            f"<code>{html.escape(shown)}</code>\n"
+            "User-Agent должен состоять только из латиницы, цифр и знаков. "
+            "Скопируйте его из браузера целиком."
+        )
+    return None
 
 
 def get_playerok_bot():

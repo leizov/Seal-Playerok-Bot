@@ -14,7 +14,7 @@ from .. import states
 from .. import callback_datas as calls
 from ..cookie_guide import build_cookie_parse_error_text
 from .states_system import _probe_playerok_credentials, _build_probe_error_text
-from ..helpful import throw_float_message
+from ..helpful import throw_float_message, user_agent_error
 
 logger = getLogger("seal.settings")
 
@@ -319,8 +319,9 @@ async def handler_waiting_for_token(message: types.Message, state: FSMContext):
 async def handler_waiting_for_user_agent(message: types.Message, state: FSMContext):
     try:
         await state.set_state(None)
-        if len(message.text.strip()) <= 3:
-            raise Exception("❌ Слишком короткое значение")
+        ua_error = user_agent_error(message.text)
+        if ua_error:
+            raise Exception(ua_error)
 
         config = sett.get("config")
         config["playerok"]["api"]["user_agent"] = message.text.strip()

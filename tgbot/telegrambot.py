@@ -515,7 +515,9 @@ class TelegramBot:
         base_details = str(details or "").strip()
         if not base_details:
             base_details = "Аккаунт активен и готов к работе." if active else "Жду активацию — отправь cookies, и оживлю аккаунт."
-        safe_details = html_escape(base_details)
+        # details — готовый HTML (ссылки, <b> и т.п.); подставляемые в него данные
+        # экранирует вызывающий код.
+        safe_details = base_details
 
         playerok_line = (
             "┗ ✅ <b>Playerok</b> — аккаунт активен"

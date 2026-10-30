@@ -2179,7 +2179,7 @@ class PlayerokBot:
         else:
             self._notify_startup_status(
                 active=True,
-                details=f"👤 <a href='https://playerok.com/profile/McDonaldc/{self.account.username}'>{self.account.username}</a> — погнали работать! 🚀",
+                details=f"👤 <a href='https://playerok.com/profile/{quote(str(self.account.username), safe='')}'>{escape(str(self.account.username))}</a> — погнали работать! 🚀",
             )
             self.logger.info(f"{SUCCESS_COLOR}✅ Аккаунт Playerok активен: {self.account.username}")
 

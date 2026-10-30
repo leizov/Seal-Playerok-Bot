@@ -4,10 +4,10 @@ import asyncio
 import html
 import json
 import logging
-import random
 from datetime import datetime
 
 from aiogram import F, Router, types
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -18,7 +18,7 @@ from settings import Settings as sett
 from .. import states
 from .. import templates as templ
 from ..cookie_guide import build_cookie_collection_instruction, build_cookie_parse_error_text
-from ..helpful import throw_float_message
+from ..helpful import random_user_agent, throw_float_message, user_agent_error
 
 
 router = Router()
@@ -61,18 +61,11 @@ def _onboarding_required(config: dict | None) -> bool:
 
 
 def _is_valid_user_agent(user_agent: str) -> bool:
-    value = str(user_agent or "").strip()
-    return 10 <= len(value) <= 512
+    return user_agent_error(user_agent) is None
 
 
 def _pick_random_user_agent() -> str:
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-    ]
-    return random.choice(user_agents)
+    return random_user_agent()
 
 
 def _parse_cookie_header(cookie_header: str) -> dict[str, str]:
@@ -247,6 +240,16 @@ def _extract_token_for_probe(cookie_map: dict[str, str], fallback_token: str) ->
 def _auth_cancel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=AUTH_CANCEL_CB)],
+        ]
+    )
+
+
+def _auth_ua_input_kb() -> InlineKeyboardMarkup:
+    """Под запросом User-Agent и под ошибкой ввода: можно сразу пропустить (случайный UA)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data=AUTH_SKIP_UA_CB)],
             [InlineKeyboardButton(text="❌ Отмена", callback_data=AUTH_CANCEL_CB)],
         ]
     )
@@ -832,27 +835,28 @@ async def callback_auth_enter_ua(callback: types.CallbackQuery, state: FSMContex
         message=callback.message,
         callback=callback,
         text="🎩 Отправьте User-Agent вашего браузера.",
-        reply_markup=_auth_cancel_kb(),
+        reply_markup=_auth_ua_input_kb(),
     )
 
 
 @router.callback_query(
-    states.SystemStates.waiting_for_playerok_auth_choose_user_agent,
+    StateFilter(
+        states.SystemStates.waiting_for_playerok_auth_choose_user_agent,
+        states.SystemStates.waiting_for_playerok_auth_user_agent,
+    ),
     F.data == AUTH_SKIP_UA_CB,
 )
 async def callback_auth_skip_ua(callback: types.CallbackQuery, state: FSMContext):
+    """«⏭ Пропустить»: без подтверждения подставляет случайный User-Agent
+    (и при первой настройке, и при повторном подключении)."""
     data = await state.get_data()
     mode = _auth_mode(data)
     await state.update_data(
         auth_user_agent="",
-        auth_prefer_random_ua=(mode != "recovery"),
+        auth_prefer_random_ua=True,
     )
     await state.set_state(states.SystemStates.waiting_for_playerok_auth_proxy)
-    ua_note = (
-        "⏭ Будет использован текущий/случайный User-Agent.\n\n"
-        if mode == "recovery"
-        else "⏭ Будет использован случайный User-Agent.\n\n"
-    )
+    ua_note = "⏭ Будет использован случайный User-Agent.\n\n"
     await throw_float_message(
         state=state,
         message=callback.message,
@@ -867,12 +871,13 @@ async def handler_auth_user_agent(message: types.Message, state: FSMContext):
     data = await state.get_data()
     mode = _auth_mode(data)
     user_agent = message.text.strip()
-    if not _is_valid_user_agent(user_agent):
+    ua_error = user_agent_error(user_agent)
+    if ua_error:
         await throw_float_message(
             state=state,
             message=message,
-            text="❌ Невалидный User-Agent. Отправьте корректное значение ещё раз.",
-            reply_markup=_auth_cancel_kb(),
+            text=f"{ua_error}\n\nОтправьте корректное значение ещё раз.",
+            reply_markup=_auth_ua_input_kb(),
         )
         return
 

@@ -1,7 +1,8 @@
+import logging
 from html import escape
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 
 from core.auto_deliveries import AUTO_DELIVERY_KIND_MULTI, AUTO_DELIVERY_KIND_STATIC, normalize_auto_deliveries
@@ -13,11 +14,12 @@ from .. import templates as templ
 from .. import callback_datas as calls
 from .. import states as states
 from ..cookie_guide import build_cookie_collection_instruction
-from ..helpful import throw_float_message
+from ..helpful import random_user_agent, throw_float_message, user_agent_error
 from .navigation import *
 
 
 router = Router()
+logger = logging.getLogger("seal.settings")
 
 
 @router.callback_query(F.data == "enter_token")
@@ -32,16 +34,77 @@ async def callback_enter_token(callback: CallbackQuery, state: FSMContext):
         reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
     )
 
+UA_RANDOM_CB = "user_agent_random"
+UA_RANDOM_CONFIRM_CB = "user_agent_random_confirm"
+
+
 @router.callback_query(F.data == "enter_user_agent")
 async def callback_enter_user_agent(callback: CallbackQuery, state: FSMContext):
     await state.set_state(states.SettingsStates.waiting_for_user_agent)
     config = sett.get("config")
-    user_agent = config["playerok"]["api"]["user_agent"] or "❌ Не задано"
+    user_agent = escape(config["playerok"]["api"]["user_agent"] or "❌ Не задано")
     await throw_float_message(
         state=state, 
         message=callback.message, 
+        callback=callback,
         text=templ.settings_account_float_text(f"🎩 Введите новый <b>user_agent</b> вашего браузера ↓\n┗ Текущее: <code>{user_agent}</code>"), 
-        reply_markup=templ.back_kb(calls.SettingsNavigation(to="account").pack())
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎲 Сгенерировать случайный", callback_data=UA_RANDOM_CB)],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.SettingsNavigation(to="account").pack())],
+        ]),
+    )
+
+
+@router.callback_query(F.data == UA_RANDOM_CB)
+async def callback_user_agent_random(callback: CallbackQuery, state: FSMContext):
+    """Показывает случайный User-Agent и просит подтвердить замену текущего."""
+    await state.set_state(None)
+    current = sett.get("config")["playerok"]["api"]["user_agent"] or ""
+    candidate = random_user_agent(exclude=current)
+    await state.update_data(pending_random_user_agent=candidate)
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        callback=callback,
+        text=templ.settings_account_float_text(
+            "🎲 <b>Случайный User-Agent</b>\n\n"
+            f"Новый: <code>{escape(candidate)}</code>\n"
+            f"Текущий: <code>{escape(current or '❌ Не задано')}</code>\n\n"
+            "Заменить текущий User-Agent на новый?"
+        ),
+        reply_markup=templ.confirm_kb(UA_RANDOM_CONFIRM_CB, "enter_user_agent"),
+    )
+
+
+@router.callback_query(F.data == UA_RANDOM_CONFIRM_CB)
+async def callback_user_agent_random_confirm(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    candidate = str(data.get("pending_random_user_agent") or "")
+    await state.update_data(pending_random_user_agent=None)
+    back = templ.back_kb(calls.SettingsNavigation(to="account").pack())
+    if not candidate or user_agent_error(candidate):
+        # Подтверждение без предварительной генерации (старая кнопка после рестарта и т.п.)
+        await throw_float_message(
+            state=state,
+            message=callback.message,
+            callback=callback,
+            text=templ.settings_account_float_text("❌ Предложение устарело. Сгенерируйте User-Agent ещё раз."),
+            reply_markup=back,
+        )
+        return
+    config = sett.get("config")
+    config["playerok"]["api"]["user_agent"] = candidate
+    sett.set("config", config)
+    logger.info("🎩 User-Agent заменён на случайный через Telegram")
+    await throw_float_message(
+        state=state,
+        message=callback.message,
+        callback=callback,
+        text=templ.settings_account_float_text(
+            f"✅ <b>User-Agent</b> заменён на случайный:\n<code>{escape(candidate)}</code>\n\n"
+            f"⏳ Применяется автоматически через 3 секунды..."
+        ),
+        reply_markup=back,
     )
 
 
