@@ -130,7 +130,6 @@ def profile_text():
         "",
         balance_block,
         "",
-        "",
         bot_stats_block,
         "",
         f"<b>📅 Дата регистрации:</b> {created}",

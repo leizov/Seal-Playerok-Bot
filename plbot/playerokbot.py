@@ -1009,7 +1009,10 @@ class PlayerokBot:
             priority_statuses = None
             for i in range(5):
                 try:
-                    priority_statuses = self.account.get_item_priority_statuses(item.id, item.price)
+                    item_price = getattr(item, "raw_price", None)
+                    if item_price is None:
+                        item_price = item.price
+                    priority_statuses = self.account.get_item_priority_statuses(item.id, item_price)
                     break
                 except Exception as e:
                     if i == 4:
@@ -1067,6 +1070,12 @@ class PlayerokBot:
             except:
                 full_item = item
 
+            # Статусы считаются от цены без скидки (rawPrice): по цене со скидкой Playerok
+            # отдаёт статусы другого диапазона и отклоняет их как «некорректные бустеры»
+            status_price = getattr(full_item, "raw_price", None)
+            if status_price is None:
+                status_price = full_item.price
+
             get_attempts = 5
             get_delay = 3
             last_error = None
@@ -1074,7 +1083,7 @@ class PlayerokBot:
             for attempt in range(get_attempts):
                 try:
                     # Получаем статусы приоритета
-                    priority_statuses = self.account.get_item_priority_statuses(full_item.id, full_item.price)
+                    priority_statuses = self.account.get_item_priority_statuses(full_item.id, status_price)
                     break
                 except Exception as e:
                     last_error = e
@@ -1086,62 +1095,89 @@ class PlayerokBot:
                 set_last_raise_time(full_item.id)
                 return False
 
-            # Ищем текущий премиум статус (PriorityTypes.PREMIUM)
-            current_priority_status = None
-            for status in priority_statuses:
-                if status.type == PriorityTypes.PREMIUM:
-                    current_priority_status = status
-                    break
+            # PREMIUM, а если Playerok его не вернул — любой платный статус
+            current_priority_status = next(
+                (status for status in priority_statuses if status.type == PriorityTypes.PREMIUM),
+                None,
+            ) or next(
+                (status for status in priority_statuses if (getattr(status, "price", 0) or 0) > 0),
+                None,
+            )
 
             if not current_priority_status:
-                self.logger.warning(f"{Fore.YELLOW}Не найден премиум статус для товара «{full_item.name}»")
+                self.logger.warning(f"{Fore.YELLOW}Не найден платный статус для поднятия товара «{full_item.name}»")
+                # Иначе товар запрашивается заново на каждом круге автоподнятия
+                set_last_raise_time(full_item.id)
                 return False
 
-            # Поднимаем товар
+            # Поднимаем товар. Повтор — только если Playerok точно отказал:
+            # ответ без ошибки значит, что деньги списаны, даже если объект не разобрался.
             publish_attempts = 5
             publish_delay = 3
             for attempt in range(publish_attempts):
                 try:
-                    raised_item = self.account.increase_item_priority_status(
+                    self.account.increase_item_priority_status(
                         full_item.id,
                         current_priority_status.id
                     )
-
-                    if raised_item:
-                        self.logger.info(f"{Fore.LIGHTWHITE_EX}«{full_item.name}» {Fore.WHITE}— {Fore.GREEN}товар поднят")
-                        # Учитываем стоимость поднятия (если цена статуса доступна).
-                        if getattr(current_priority_status, "price", None) is not None:
-                            self._record_raise_async(current_priority_status.price)
-
-                        # Обновляем время последнего поднятия
-                        set_last_raise_time(full_item.id)
-
-                        # Отправляем уведомление в Telegram если включено
-                        if (
-                            self.config["playerok"]["tg_logging"]["enabled"]
-                            and self.config["playerok"]["tg_logging"].get("events", {}).get("item_raised", False)
-                        ):
-                            asyncio.run_coroutine_threadsafe(
-                                get_telegram_bot().log_event(
-                                    text=log_text(
-                                        title=f'📈 Товар поднят',
-                                        text=f"<b>Название:</b> {full_item.name}\n<b>Цена:</b> {full_item.price}₽\n<b>Статус:</b> {current_priority_status.name}"
-                                    )
-                                ),
-                                get_telegram_bot_loop()
-                            )
-
-                        return True
-
-                    time.sleep((attempt+1) * publish_delay)
-
+                except plapi_exceptions.RequestOutcomeUnknownError as e:
+                    self.logger.error(
+                        f"{Fore.LIGHTRED_EX}Неизвестно, поднят ли товар «{full_item.name}»: Playerok не ответил "
+                        f"({e.reason}). Повторно не поднимаю, чтобы не списать деньги дважды"
+                    )
+                    set_last_raise_time(full_item.id)
+                    return False
                 except Exception as e:
+                    if isinstance(e, plapi_exceptions.RequestError) and e.error_code == "BAD_REQUEST":
+                        # Явный отказ: тот же запрос получит тот же ответ, повтор бесполезен
+                        price_range = getattr(current_priority_status, "price_range", None)
+                        range_text = (
+                            f"{getattr(price_range, 'min', '?')}–{getattr(price_range, 'max', '?')}₽"
+                            if price_range else "?"
+                        )
+                        self.logger.error(
+                            f"{Fore.LIGHTRED_EX}Playerok отклонил поднятие товара «{full_item.name}»: {e.error_message}. "
+                            f"{Fore.WHITE}Статус «{current_priority_status.name}» за {getattr(current_priority_status, 'price', '?')}₽ "
+                            f"(для товаров {range_text}), запрошен для цены {status_price}₽ (цена {full_item.price}₽, "
+                            f"без скидки {getattr(full_item, 'raw_price', '?')}₽)"
+                        )
+                        set_last_raise_time(full_item.id)
+                        return False
                     self.logger.error(
                         f"{Fore.LIGHTRED_EX}Неудачная попытка поднятия товара {attempt+1}/{publish_attempts} «{full_item.name}»: {Fore.WHITE}{e}",
                         exc_info=True
                     )
                     if attempt != publish_attempts-1:  # Если это не последняя попытка
                         time.sleep((attempt+1) * publish_delay)
+                    continue
+
+                self.logger.info(f"{Fore.LIGHTWHITE_EX}«{full_item.name}» {Fore.WHITE}— {Fore.GREEN}товар поднят")
+                # Учитываем стоимость поднятия (если цена статуса доступна).
+                if getattr(current_priority_status, "price", None) is not None:
+                    self._record_raise_async(current_priority_status.price)
+
+                # Обновляем время последнего поднятия
+                set_last_raise_time(full_item.id)
+
+                # Отправляем уведомление в Telegram если включено
+                try:
+                    if (
+                        self.config["playerok"]["tg_logging"]["enabled"]
+                        and self.config["playerok"]["tg_logging"].get("events", {}).get("item_raised", False)
+                    ):
+                        asyncio.run_coroutine_threadsafe(
+                            get_telegram_bot().log_event(
+                                text=log_text(
+                                    title=f'📈 Товар поднят',
+                                    text=f"<b>Название:</b> {full_item.name}\n<b>Цена:</b> {full_item.price}₽\n<b>Статус:</b> {current_priority_status.name}"
+                                )
+                            ),
+                            get_telegram_bot_loop()
+                        )
+                except Exception as e:
+                    self.logger.warning(f"Товар «{full_item.name}» поднят, но уведомление в Telegram не отправлено: {e}")
+
+                return True
 
             # Если все попытки неудачны - обновляем время чтобы не пытаться снова сразу
             self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось поднять товар «{full_item.name}» после {publish_attempts} попыток")
@@ -1385,98 +1421,102 @@ class PlayerokBot:
                     self.logger.error(f"Ошибка при постановке health-уведомления: {e}")
 
             while True:
-                acc_balance = getattr(getattr(self.account, "profile", None), "balance", None)
-                balance = getattr(acc_balance, "value", None)
-                if balance is None:
-                    balance = "?"
+                try:
+                    acc_balance = getattr(getattr(self.account, "profile", None), "balance", None)
+                    balance = getattr(acc_balance, "value", None)
+                    if balance is None:
+                        balance = "?"
 
-                username = self.account.username if self.account else "Не подключен"
-                set_title(f"Seal Playerok Bot v{VERSION} | {username}: {balance}₽")
+                    username = self.account.username if self.account else "Не подключен"
+                    set_title(f"Seal Playerok Bot v{VERSION} | {username}: {balance}₽")
 
-                new_config = sett.get("config")
-                if new_config != self.config:
-                    self.config = new_config
+                    new_config = sett.get("config")
+                    if new_config and new_config != self.config:
+                        self.config = new_config
 
-                    token_changed = self.config["playerok"]["api"]["token"] != last_token
-                    proxy_changed = self.config["playerok"]["api"]["proxy"] != last_proxy
-                    ua_changed = self.config["playerok"]["api"]["user_agent"] != last_ua
+                        token_changed = self.config["playerok"]["api"]["token"] != last_token
+                        proxy_changed = self.config["playerok"]["api"]["proxy"] != last_proxy
+                        ua_changed = self.config["playerok"]["api"]["user_agent"] != last_ua
 
-                    if token_changed or proxy_changed or ua_changed:
-                        self.logger.info(f"{Fore.CYAN}🔄 Обнаружены изменения настроек, переподключаемся...")
+                        if token_changed or proxy_changed or ua_changed:
+                            self.logger.info(f"{Fore.CYAN}🔄 Обнаружены изменения настроек, переподключаемся...")
 
-                        success, msg = self.reconnect()
+                            success, msg = self.reconnect()
 
-                        try:
-                            tg_bot = get_telegram_bot()
-                            if tg_bot:
-                                emoji = "✅" if success else "❌"
-                                asyncio.run_coroutine_threadsafe(
-                                    tg_bot.log_event(
-                                        text=log_text(
-                                            title=f"{emoji} Переподключение к Playerok",
-                                            text=msg
-                                        )
-                                    ),
-                                    get_telegram_bot_loop()
-                                )
-                        except Exception as e:
-                            self.logger.error(f"Ошибка отправки уведомления: {e}")
+                            try:
+                                tg_bot = get_telegram_bot()
+                                if tg_bot:
+                                    emoji = "✅" if success else "❌"
+                                    asyncio.run_coroutine_threadsafe(
+                                        tg_bot.log_event(
+                                            text=log_text(
+                                                title=f"{emoji} Переподключение к Playerok",
+                                                text=msg
+                                            )
+                                        ),
+                                        get_telegram_bot_loop()
+                                    )
+                            except Exception as e:
+                                self.logger.error(f"Ошибка отправки уведомления: {e}")
 
-                        last_token = self.config["playerok"]["api"]["token"]
-                        last_proxy = self.config["playerok"]["api"]["proxy"]
-                        last_ua = self.config["playerok"]["api"]["user_agent"]
+                            last_token = self.config["playerok"]["api"]["token"]
+                            last_proxy = self.config["playerok"]["api"]["proxy"]
+                            last_ua = self.config["playerok"]["api"]["user_agent"]
 
-                if sett.get("messages") != self.messages:
-                    self.messages = sett.get("messages")
-                if sett.get("custom_commands") != self.custom_commands:
-                    self.custom_commands = sett.get("custom_commands")
-                new_auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
-                if new_auto_deliveries != self.auto_deliveries:
-                    self.auto_deliveries = new_auto_deliveries
-                if sett.get("auto_restore_items") != self.auto_restore_items:
-                    self.auto_restore_items = sett.get("auto_restore_items")
-                if sett.get("auto_raise_items") != self.auto_raise_items:
-                    self.auto_raise_items = sett.get("auto_raise_items")
-                if sett.get("auto_complete_items") != self.auto_complete_items:
-                    self.auto_complete_items = sett.get("auto_complete_items")
+                    if sett.get("messages") != self.messages:
+                        self.messages = sett.get("messages")
+                    if sett.get("custom_commands") != self.custom_commands:
+                        self.custom_commands = sett.get("custom_commands")
+                    new_auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
+                    if new_auto_deliveries != self.auto_deliveries:
+                        self.auto_deliveries = new_auto_deliveries
+                    if sett.get("auto_restore_items") != self.auto_restore_items:
+                        self.auto_restore_items = sett.get("auto_restore_items")
+                    if sett.get("auto_raise_items") != self.auto_raise_items:
+                        self.auto_raise_items = sett.get("auto_raise_items")
+                    if sett.get("auto_complete_items") != self.auto_complete_items:
+                        self.auto_complete_items = sett.get("auto_complete_items")
 
-                health = _read_health_snapshot()
-                incident_active = bool(health.get("incident_active"))
-                if last_incident_active is None:
-                    last_incident_active = incident_active
-                elif not last_incident_active and incident_active:
-                    level = max(1, min(5, _safe_int(health.get("level"), 1)))
-                    circles = str(health.get("circles") or _health_circles(level))
-                    errors_10m = max(0, _safe_int(health.get("errors_10m"), 0))
-                    fatal_streak = max(0, _safe_int(health.get("fatal_streak"), 0))
-                    window_minutes = max(1, _safe_int(health.get("window_minutes"), 10))
+                    health = _read_health_snapshot()
+                    incident_active = bool(health.get("incident_active"))
+                    if last_incident_active is None:
+                        last_incident_active = incident_active
+                    elif not last_incident_active and incident_active:
+                        level = max(1, min(5, _safe_int(health.get("level"), 1)))
+                        circles = str(health.get("circles") or _health_circles(level))
+                        errors_10m = max(0, _safe_int(health.get("errors_10m"), 0))
+                        fatal_streak = max(0, _safe_int(health.get("fatal_streak"), 0))
+                        window_minutes = max(1, _safe_int(health.get("window_minutes"), 10))
 
-                    alert_text = (
-                        "⚠️ <b>Проблемы с подключением к Playerok</b>\n\n"
-                        "Бот фиксирует серию фатальных ошибок запросов.\n"
-                        "Возможны проблемы на стороне Playerok или с вашим токеном/прокси.\n\n"
-                        f"<b>Стабильность за {window_minutes} минут:</b> {escape(circles)} <b>{level}/5</b>\n"
-                        f"<b>Ошибки:</b> {errors_10m}\n"
-                        f"<b>Фатальный стрик:</b> {fatal_streak}"
-                    )
-                    _schedule_signed_users_notification(alert_text)
-                    last_incident_active = True
-                elif last_incident_active and not incident_active:
-                    level = max(1, min(5, _safe_int(health.get("level"), 5)))
-                    circles = str(health.get("circles") or _health_circles(level))
-                    errors_10m = max(0, _safe_int(health.get("errors_10m"), 0))
-                    fatal_streak = max(0, _safe_int(health.get("fatal_streak"), 0))
-                    window_minutes = max(1, _safe_int(health.get("window_minutes"), 10))
+                        alert_text = (
+                            "⚠️ <b>Проблемы с подключением к Playerok</b>\n\n"
+                            "Бот фиксирует серию фатальных ошибок запросов.\n"
+                            "Возможны проблемы на стороне Playerok или с вашим токеном/прокси.\n\n"
+                            f"<b>Стабильность за {window_minutes} минут:</b> {escape(circles)} <b>{level}/5</b>\n"
+                            f"<b>Ошибки:</b> {errors_10m}\n"
+                            f"<b>Фатальный стрик:</b> {fatal_streak}"
+                        )
+                        _schedule_signed_users_notification(alert_text)
+                        last_incident_active = True
+                    elif last_incident_active and not incident_active:
+                        level = max(1, min(5, _safe_int(health.get("level"), 5)))
+                        circles = str(health.get("circles") or _health_circles(level))
+                        errors_10m = max(0, _safe_int(health.get("errors_10m"), 0))
+                        fatal_streak = max(0, _safe_int(health.get("fatal_streak"), 0))
+                        window_minutes = max(1, _safe_int(health.get("window_minutes"), 10))
 
-                    alert_text = (
-                        "✅ <b>Подключение к Playerok восстановилось</b>\n\n"
-                        "Серия фатальных ошибок прервалась, запросы снова проходят.\n\n"
-                        f"<b>Стабильность за {window_minutes} минут:</b> {escape(circles)} <b>{level}/5</b>\n"
-                        f"<b>Ошибки:</b> {errors_10m}\n"
-                        f"<b>Фатальный стрик:</b> {fatal_streak}"
-                    )
-                    _schedule_signed_users_notification(alert_text)
-                    last_incident_active = False
+                        alert_text = (
+                            "✅ <b>Подключение к Playerok восстановилось</b>\n\n"
+                            "Серия фатальных ошибок прервалась, запросы снова проходят.\n\n"
+                            f"<b>Стабильность за {window_minutes} минут:</b> {escape(circles)} <b>{level}/5</b>\n"
+                            f"<b>Ошибки:</b> {errors_10m}\n"
+                            f"<b>Фатальный стрик:</b> {fatal_streak}"
+                        )
+                        _schedule_signed_users_notification(alert_text)
+                        last_incident_active = False
+                except Exception as e:
+                    # без этого одно исключение навсегда останавливает подхват настроек
+                    self.logger.error(f"Ошибка в цикле обновления настроек: {e}", exc_info=True)
 
                 time.sleep(5)
 

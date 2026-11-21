@@ -33,6 +33,27 @@ except Exception:
     _record_playerok_request_success = None
 
 
+# Ошибки curl, при которых запрос точно не ушёл на сервер: не нашли хост или не подключились.
+# «Connection timed out» — таймаут на этапе подключения (в том числе к прокси);
+# «Operation timed out ... bytes received» уже после отправки — тогда исход неизвестен.
+_PRE_SEND_CURL_CODES = {5, 6, 7, 97}
+
+
+def _failed_before_sending(error: Exception) -> bool:
+    if isinstance(error, curl_exceptions.SessionClosed):
+        return True
+    try:
+        code = int(getattr(error, "code", 0) or 0)
+    except (TypeError, ValueError):
+        code = 0
+    message = str(error)
+    if code in _PRE_SEND_CURL_CODES:
+        return True
+    if code == 28 and ("Connection timed out" in message or "Resolving timed out" in message):
+        return True
+    return "CONNECT tunnel failed" in message
+
+
 def get_account() -> Account | None:
     if hasattr(Account, "instance"):
         return getattr(Account, "instance")
@@ -1735,7 +1756,7 @@ class Account:
 
     def request(self, method: Literal["get", "post"], url: str, headers: dict[str, str],
                 payload: dict[str, str] | None = None, files: dict | None = None,
-                multipart: CurlMime | None = None) -> CurlResponse:
+                multipart: CurlMime | None = None, idempotent: bool = True) -> CurlResponse:
         """
         Отправляет запрос на сервер playerok.com.
 
@@ -1756,6 +1777,11 @@ class Account:
 
         :param multipart: Мультипарт для отправки фото.
         :type multipart: `CurlMime` or `None`
+
+        :param idempotent: Можно ли повторять запрос, если неизвестно, выполнил ли его сервер.
+            False — для платных действий: при таймауте после отправки, обрыве или 5xx
+            вместо повтора возбуждается `RequestOutcomeUnknownError`.
+        :type idempotent: `bool`
 
         :return: Ответ запроса.
         :rtype: `curl_cffi.requests.Response`
@@ -1996,6 +2022,23 @@ class Account:
                 if is_timeout:
                     last_timeout_exc = network_error
 
+                if not idempotent and not _failed_before_sending(network_error):
+                    _record_error(
+                        kind=kind,
+                        error_text=str(network_error),
+                        status_code=None,
+                        error_code=type(network_error).__name__,
+                        attempt=attempt,
+                        retryable=False,
+                        retry_exhausted=True,
+                        session_recreated=session_recreated,
+                    )
+                    self.__logger.error(
+                        f"❌ Playerok не ответил на запрос, который нельзя повторять ({url}): {network_error}. "
+                        f"Неизвестно, выполнен ли он; повтор не отправляю."
+                    )
+                    raise RequestOutcomeUnknownError(url, network_error) from network_error
+
                 retry_exhausted = attempt >= max_attempts
                 _record_error(
                     kind=kind,
@@ -2095,7 +2138,7 @@ class Account:
                     (graphql_status is not None and 500 <= graphql_status <= 599)
                     or is_internal_server_error
                 )
-                retriable_graphql = is_rate_limit or is_server_error
+                retriable_graphql = is_rate_limit or (is_server_error and idempotent)
                 retry_exhausted = attempt >= max_attempts or not retriable_graphql
 
                 if is_rate_limit:
@@ -2124,6 +2167,13 @@ class Account:
                     session_recreated=session_recreated,
                 )
 
+                if is_server_error and not idempotent:
+                    self.__logger.error(
+                        f"❌ Playerok вернул ошибку сервера на запрос, который нельзя повторять ({url}): "
+                        f"{graphql_message}. Неизвестно, выполнен ли он; повтор не отправляю."
+                    )
+                    raise RequestOutcomeUnknownError(url, graphql_message)
+
                 if retriable_graphql and attempt < max_attempts:
                     delay = _retry_delay(attempt, resp.headers.get("Retry-After") if is_rate_limit else None)
                     self.__logger.warning(
@@ -2139,7 +2189,7 @@ class Account:
 
             if resp.status_code != 200:
                 status_code = _to_int(resp.status_code) or 0
-                retriable_http = status_code == 429 or 500 <= status_code <= 599
+                retriable_http = status_code == 429 or (500 <= status_code <= 599 and idempotent)
                 retry_exhausted = attempt >= max_attempts or not retriable_http
                 last_failed_response = resp
 
@@ -2160,6 +2210,13 @@ class Account:
                     retry_exhausted=retry_exhausted,
                     session_recreated=session_recreated,
                 )
+
+                if 500 <= status_code <= 599 and not idempotent:
+                    self.__logger.error(
+                        f"❌ Playerok ответил {status_code} на запрос, который нельзя повторять ({url}). "
+                        f"Неизвестно, выполнен ли он; повтор не отправляю."
+                    )
+                    raise RequestOutcomeUnknownError(url, f"HTTP {status_code}")
 
                 if retriable_http and attempt < max_attempts:
                     delay = _retry_delay(attempt, resp.headers.get("Retry-After") if status_code == 429 else None)
@@ -3044,7 +3101,7 @@ class Account:
         return [item_priority_status(status) for status in r["data"]["itemPriorityStatuses"]]
 
     def increase_item_priority_status(self, item_id: str, priority_status_id: str, payment_method_id: TransactionPaymentMethodIds | None = None,
-                                      transaction_provider_id: TransactionProviderIds = TransactionProviderIds.LOCAL) -> types.Item:
+                                      transaction_provider_id: TransactionProviderIds = TransactionProviderIds.LOCAL) -> types.Item | None:
         """
         Повышает статус приоритета предмета.
 
@@ -3078,8 +3135,21 @@ class Account:
                 }
             }
         }
-        r = self.request("post", f"{self.base_url}/graphql", headers, payload).json()
-        return item(r["data"]["increaseItemPriorityStatus"])
+        # Платное действие: не повторяем, если неизвестно, выполнил ли его Playerok
+        url = f"{self.base_url}/graphql"
+        resp = self.request("post", url, headers, payload, idempotent=False)
+        try:
+            data = resp.json()["data"]["increaseItemPriorityStatus"]
+        except Exception as e:
+            raise RequestOutcomeUnknownError(url, e) from e
+        if data is None:
+            raise RequestOutcomeUnknownError(url, "пустой ответ increaseItemPriorityStatus")
+        try:
+            return item(data)
+        except Exception as e:
+            # Ответ без ошибки — товар поднят, не разобрался только объект
+            self.__logger.warning(f"Товар {item_id} поднят, но ответ Playerok не удалось разобрать: {e}")
+            return None
 
     def get_transaction_providers(self, direction: TransactionProviderDirections = TransactionProviderDirections.IN) -> list[types.TransactionProvider]:
         """

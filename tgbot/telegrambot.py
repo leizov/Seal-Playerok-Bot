@@ -4,6 +4,9 @@ import textwrap
 import logging
 import random
 import threading
+import sys
+import time
+import traceback
 from html import escape as html_escape
 from colorama import Fore
 from aiogram import Bot, Dispatcher, F
@@ -38,6 +41,12 @@ WATCHDOG_INTERVAL = 20           # как часто проверять сост
 WATCHDOG_FAILS_TO_SWITCH = 7     # сколько неудачных запросов подряд считать сбоем
 WATCHDOG_RETURN_INTERVAL = 600   # как часто пробовать вернуться на основной способ, сек
 
+# Сторож цикла Telegram (отдельный поток): замечает, что бот перестал отвечать
+LOOP_PROBE_INTERVAL = 5           # как часто проверять цикл, сек
+LOOP_STALL_SECONDS = 30           # цикл не отвечает дольше — пишем в лог, где он завис
+LOOP_STALL_REPEAT_SECONDS = 300   # повторный отчёт, пока зависание продолжается
+POLLING_SILENCE_SECONDS = 300     # ни ответов Telegram, ни ошибок — поллинг стоит
+
 
 def _build_tg_proxy_url(raw_proxy: str | None) -> tuple[str | None, str | None]:
     """
@@ -68,6 +77,11 @@ class TelegramFetchUpdatesHintHandler(logging.Handler):
             logger.warning(TG_PROXY_HELP_TEXT)
 
 
+def _hide_polling_backoff_notice(record: logging.LogRecord) -> bool:
+    # «Sleep for … and try again» дублирует каждую ошибку «Failed to fetch updates»
+    return not str(record.msg).startswith("Sleep for")
+
+
 def get_telegram_bot() -> TelegramBot | None:
     if hasattr(TelegramBot, "instance"):
         return getattr(TelegramBot, "instance")
@@ -88,7 +102,10 @@ class TelegramBot:
         logging.getLogger("aiogram").setLevel(logging.ERROR)
         logging.getLogger("aiogram.event").setLevel(logging.ERROR)
         dispatcher_logger = logging.getLogger("aiogram.dispatcher")
-        dispatcher_logger.setLevel(logging.ERROR)
+        # INFO: в логе видно «Connection established» после сбоя и остановку поллинга
+        dispatcher_logger.setLevel(logging.INFO)
+        if _hide_polling_backoff_notice not in dispatcher_logger.filters:
+            dispatcher_logger.addFilter(_hide_polling_backoff_notice)
         if not any(isinstance(handler, TelegramFetchUpdatesHintHandler) for handler in dispatcher_logger.handlers):
             dispatcher_logger.addHandler(TelegramFetchUpdatesHintHandler())
 
@@ -313,6 +330,78 @@ class TelegramBot:
                 raise
             except Exception as e:
                 logger.debug(f"Сторож подключения к Telegram: {e}")
+
+    def _start_loop_watchdog(self) -> None:
+        """Запускает сторож цикла Telegram в отдельном потоке (один раз на процесс)."""
+        self._loop_thread_id = threading.get_ident()
+        self._loop_heartbeat = time.monotonic()
+        thread = getattr(self, "_loop_watchdog_thread", None)
+        if thread is not None and thread.is_alive():
+            return
+        self._loop_watchdog_thread = threading.Thread(
+            target=self._loop_watchdog, name="tg-loop-watchdog", daemon=True
+        )
+        self._loop_watchdog_thread.start()
+
+    def _touch_loop_heartbeat(self) -> None:
+        self._loop_heartbeat = time.monotonic()
+
+    def _loop_thread_stack(self) -> str:
+        frame = sys._current_frames().get(getattr(self, "_loop_thread_id", None))
+        if frame is None:
+            return "стек недоступен"
+        return "".join(traceback.format_stack(frame))
+
+    def _loop_watchdog(self) -> None:
+        """
+        Цикл Telegram живёт в своём потоке. Если в нём выполняется синхронный вызов
+        (например, запрос к Playerok), бот целиком перестаёт отвечать, а в логе тишина.
+        Сторож снаружи замечает это и пишет, на какой строке поток занят.
+        """
+        stall_reported_at = None
+        stall_beat = 0.0
+        silence_reported = False
+        while True:
+            time.sleep(LOOP_PROBE_INTERVAL)
+            loop = getattr(self, "loop", None)
+            if loop is None:
+                continue
+            try:
+                loop.call_soon_threadsafe(self._touch_loop_heartbeat)
+            except RuntimeError:
+                logger.error(
+                    f"{Fore.LIGHTRED_EX}Цикл Telegram-бота остановлен — бот не будет отвечать до перезапуска."
+                )
+                return
+
+            now = time.monotonic()
+            stalled_for = now - self._loop_heartbeat
+            if stalled_for >= LOOP_STALL_SECONDS:
+                if stall_reported_at is None or now - stall_reported_at >= LOOP_STALL_REPEAT_SECONDS:
+                    if stall_reported_at is None:
+                        stall_beat = self._loop_heartbeat
+                    logger.warning(
+                        f"Telegram-бот не отвечает уже {int(stalled_for)} сек: его поток занят. "
+                        f"Сейчас он выполняет:\n{self._loop_thread_stack()}"
+                    )
+                    stall_reported_at = now
+                continue
+            if stall_reported_at is not None:
+                logger.warning(f"Telegram-бот снова отвечает (был занят ~{int(self._loop_heartbeat - stall_beat)} сек)")
+                stall_reported_at = None
+
+            # Цикл живой, но от Telegram ни ответов, ни ошибок — поллинг не идёт
+            tracker = self.connection_tracker
+            if tracker.consecutive_failures == 0 and tracker.last_ok:
+                silent_for = now - max(tracker.last_ok, tracker.last_fail)
+                if silent_for >= POLLING_SILENCE_SECONDS and not silence_reported:
+                    logger.warning(
+                        f"Telegram-бот {int(silent_for // 60)} мин. не получал ответов от Telegram и не видел ошибок — "
+                        f"похоже, поллинг остановился. Перезапустите бота, если он не отвечает."
+                    )
+                    silence_reported = True
+                elif silent_for < POLLING_SILENCE_SECONDS:
+                    silence_reported = False
 
     async def _select_startup_route(self) -> None:
         """При запуске находит рабочий способ: основной, затем запасные по порядку."""
@@ -742,6 +831,7 @@ class TelegramBot:
         migrate_old_proxy_to_new_system()
         
         self.loop = asyncio.get_running_loop()
+        self._start_loop_watchdog()
         max_retries = 5  # Максимальное количество попыток подключения
         base_delay = 5  # Базовая задержка в секундах
         

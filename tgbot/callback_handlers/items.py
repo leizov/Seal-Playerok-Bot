@@ -265,9 +265,10 @@ def _fmt_price(value) -> str:
 
 
 def _item_price_for_priority(item) -> int:
-    raw_price = getattr(item, "price", None)
+    # Статусы приоритета считаются от цены без скидки, как на сайте
+    raw_price = getattr(item, "raw_price", None)
     if raw_price is None:
-        raw_price = getattr(item, "raw_price", None)
+        raw_price = getattr(item, "price", None)
     try:
         return int(float(raw_price))
     except Exception:

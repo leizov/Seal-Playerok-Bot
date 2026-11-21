@@ -109,3 +109,27 @@ class CurlTimeoutError(Exception):
         if self.original_exception:
             msg += f"\nТехническая причина: {self.original_exception}"
         return msg
+
+
+class RequestOutcomeUnknownError(Exception):
+    """
+    Запрос мог дойти до Playerok, но ответа нет (таймаут после отправки, обрыв, 5xx).
+    Возбуждается только для запросов, которые нельзя повторять, — платных действий.
+
+    :param url: URL запроса.
+    :type url: `str`
+
+    :param reason: Техническая причина.
+    :type reason: `Exception` or `str` or `None`
+    """
+
+    def __init__(self, url: str, reason: Exception | str | None = None):
+        self.url = url
+        self.reason = reason
+
+    def __str__(self):
+        # Короткий текст: показывается в alert Telegram (до 200 символов)
+        return (
+            "Playerok не ответил — неизвестно, выполнен ли запрос. "
+            "Повтор не отправлен, чтобы не списать деньги дважды. Проверьте на сайте."
+        )

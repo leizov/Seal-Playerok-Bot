@@ -1,10 +1,19 @@
 import os
 import json
 import copy
+import shutil
+import stat
+import tempfile
+import threading
+import time
 from dataclasses import dataclass
+from datetime import datetime
+from logging import getLogger
 
 # Импорт путей из центрального модуля
 import paths
+
+logger = getLogger("settings")
 
 
 @dataclass
@@ -317,11 +326,62 @@ def restore_config(config: dict, default: dict):
     return config
 
 
+# Один процесс пишет и читает настройки из разных потоков (Telegram, рефрешер, слушатель).
+_io_lock = threading.RLock()
+_READ_ATTEMPTS = 5
+_READ_RETRY_DELAY = 0.2
+_REPLACE_ATTEMPTS = 10
+_REPLACE_RETRY_DELAY = 0.1
+
+
+def _write_json_atomic(path: str, data: list | dict):
+    """
+    Записывает json через временный файл и os.replace:
+    читатель видит либо старый файл целиком, либо новый, но никогда не пустой.
+    """
+    folder_path = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", suffix=".tmp", dir=folder_path)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        # На Windows replace не проходит, пока файл держит другой процесс (редактор, антивирус)
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_RETRY_DELAY)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+    except OSError:
+        pass
+
+
+def _backup_broken_file(path: str) -> str | None:
+    backup_path = f"{path}.{datetime.now():%Y%m%d-%H%M%S}.bak"
+    try:
+        shutil.copy2(path, backup_path)
+        return backup_path
+    except OSError:
+        return None
+
+
 def get_json(path: str, default: dict, need_restore: bool = True) -> dict:
     """
     Получает данные файла настроек.
     Создаёт файл настроек, если его нет.
     Добавляет новые данные, если такие есть.
+    Не перезаписывает файл шаблоном из-за временного сбоя чтения.
 
     :param path: Путь к json файлу.
     :type path: `str`
@@ -333,22 +393,57 @@ def get_json(path: str, default: dict, need_restore: bool = True) -> dict:
     :type need_restore: `bool`
     """
     folder_path = os.path.dirname(path)
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+    if folder_path and not os.path.exists(folder_path):
+        os.makedirs(folder_path, exist_ok=True)
+
+    with _io_lock:
+        if not os.path.exists(path):
+            config = copy.deepcopy(default)
+            try:
+                _write_json_atomic(path, config)
+            except Exception as e:
+                logger.error(f"[get_json] Не удалось создать {path}: {e}")
+            return config
+
+        config = None
+        last_error: Exception | None = None
+        for _ in range(_READ_ATTEMPTS):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                last_error = None
+                break
+            except (OSError, ValueError) as e:
+                last_error = e
+                time.sleep(_READ_RETRY_DELAY)
+
+        if last_error is not None:
+            if isinstance(last_error, ValueError):
+                # Файл действительно испорчен: сначала копия, потом шаблон
+                backup_path = _backup_broken_file(path)
+                logger.error(
+                    f"[get_json] Файл {path} повреждён ({last_error}). "
+                    f"Копия: {backup_path or 'не удалось сохранить'}. Восстанавливаю стандартные значения."
+                )
+                config = copy.deepcopy(default)
+                try:
+                    _write_json_atomic(path, config)
+                except Exception as e:
+                    logger.error(f"[get_json] Не удалось записать стандартные значения в {path}: {e}")
+                return config
+
+            # Файл есть, но не читается (права, блокировка) — не трогаем его
+            logger.error(f"[get_json] Не удалось прочитать {path}: {last_error}. Файл не изменён, использую стандартные значения.")
+            return copy.deepcopy(default)
+
         if need_restore:
             new_config = restore_config(config, default)
             if config != new_config:
                 config = new_config
-                with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(config, f, indent=4, ensure_ascii=False)
-    except:
-        config = default
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
-    finally:
+                try:
+                    _write_json_atomic(path, config)
+                except Exception as e:
+                    logger.error(f"[get_json] Не удалось дописать новые поля в {path}: {e}")
         return config
 
 
@@ -362,53 +457,17 @@ def set_json(path: str, new: dict):
     :param new: Новые данные.
     :type new: `dict`
     """
-    import stat
-    from logging import getLogger
-    logger = getLogger("settings")
-
     try:
         logger.debug(f"[set_json] Начало записи в {path}")
-
-        if os.path.exists(path):
-            if not os.access(path, os.W_OK):
-                logger.warning(f"[set_json] Файл {path} недоступен для записи, пытаюсь исправить права")
-                try:
-                    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-                    logger.info(f"[set_json] Права исправлены для {path}")
-                except Exception as e:
-                    logger.error(f"[set_json] Не удалось исправить права: {e}")
-                    dir_path = os.path.dirname(path)
-                    raise PermissionError(
-                        f"Нет прав на запись в {path}.\n"
-                        f"Выполните: sudo chown -R $USER:$USER {dir_path}"
-                    )
-
-        logger.debug(f"[set_json] Данные для записи: {json.dumps(new, ensure_ascii=False)[:200]}...")
-
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(new, f, indent=4, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        try:
-            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-        except:
-            pass
-        logger.debug(f"[set_json] Запись завершена, файл синхронизирован")
-
-        with open(path, 'r', encoding='utf-8') as f:
-            verify = json.load(f)
-
-        logger.debug(f"[set_json] Проверка: данные прочитаны обратно из файла")
-
-        if verify != new:
-            logger.error(f"[set_json] ОШИБКА! Данные в файле не совпадают с записанными!")
-            logger.error(f"[set_json] Ожидалось: {json.dumps(new, ensure_ascii=False)[:200]}...")
-            logger.error(f"[set_json] Получено: {json.dumps(verify, ensure_ascii=False)[:200]}...")
-        else:
-            logger.debug(f"[set_json] Проверка пройдена: данные совпадают")
-
+        with _io_lock:
+            _write_json_atomic(path, new)
+        logger.debug(f"[set_json] Запись завершена: {path}")
     except PermissionError as e:
-        logger.error(f"[set_json] ОШИБКА ПРАВ ДОСТУПА: {e}")
+        dir_path = os.path.dirname(path)
+        logger.error(
+            f"[set_json] ОШИБКА ПРАВ ДОСТУПА: {e}\n"
+            f"Выполните: sudo chown -R $USER:$USER {dir_path}"
+        )
         raise
     except IOError as e:
         logger.error(f"[set_json] ОШИБКА ВВОДА-ВЫВОДА: {e}")
