@@ -69,6 +69,7 @@ class AutoDeliveriesStates(StatesGroup):
     waiting_for_auto_delivery_message = State()
     waiting_for_auto_delivery_add_items = State()
     waiting_for_auto_delivery_replace_items = State()
+    waiting_for_transfer_import_file = State()  # 🔄 Выгрузка / загрузка → 📥 файл
 
 
 class AutoResponseStates(StatesGroup):

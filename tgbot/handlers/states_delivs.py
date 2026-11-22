@@ -112,12 +112,13 @@ async def handler_waiting_for_auto_deliveries_page(message: types.Message, state
         if not message.text.strip().isdigit():
             raise Exception("❌ Вы должны ввести числовое значение")
 
-        await state.update_data(last_page=int(message.text.strip()) - 1)
+        page = templ.settings_delivs_clamp_page(int(message.text.strip()) - 1)
+        await state.update_data(last_page=page)
         await throw_float_message(
             state=state,
             message=message,
-            text=templ.settings_delivs_float_text("📃 Введите номер страницы для перехода ↓"),
-            reply_markup=templ.settings_delivs_kb(int(message.text) - 1),
+            text=templ.settings_delivs_text(),
+            reply_markup=templ.settings_delivs_kb(page),
         )
     except Exception as e:
         data = await state.get_data()

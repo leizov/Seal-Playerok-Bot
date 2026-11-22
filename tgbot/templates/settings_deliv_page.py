@@ -23,6 +23,7 @@ _PREVIEW_VALUES = dict(
     deal_item_price=100,
 )
 _PREVIEW_LIMIT = 1500
+_EXPORT_HINT = "📤 <b>Выгрузить</b> — сохранить эту авто-выдачу в файл (.txt / .json) или получить её товары текстом."
 
 
 def _cut_preview(text: str) -> str:
@@ -103,7 +104,7 @@ def settings_deliv_page_text(index: int):
         ]
         if items:
             lines += ["", multi_format_preview(fmt, items[0])]
-        lines += ["", "Выберите параметр для изменения ↓"]
+        lines += ["", _EXPORT_HINT, "", "Выберите параметр для изменения ↓"]
         return "\n".join(lines)
 
     message_lines = delivery.get("message", [])
@@ -118,7 +119,7 @@ def settings_deliv_page_text(index: int):
     ]
     if message_lines:
         lines += ["", static_message_preview("\n".join(message_lines))]
-    lines += ["", "Выберите параметр для изменения ↓"]
+    lines += ["", _EXPORT_HINT, "", "Выберите параметр для изменения ↓"]
     return "\n".join(lines)
 
 
@@ -149,6 +150,7 @@ def settings_deliv_page_kb(index: int, page: int = 0):
         message = "\n".join(delivery.get("message", [])) or "❌ Не задано"
         rows.append([InlineKeyboardButton(text=f"💬 Сообщение: {message}", callback_data="enter_auto_delivery_message")])
 
+    rows.append([InlineKeyboardButton(text="📤 Выгрузить", callback_data="adt_one")])
     rows.append([InlineKeyboardButton(text="🗑️ Удалить авто-выдачу", callback_data="confirm_deleting_auto_delivery")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.AutoDeliveriesPagination(page=page).pack())])
 

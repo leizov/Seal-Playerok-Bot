@@ -140,3 +140,25 @@ class DeleteIncludedAutoCompleteItem(CallbackData, prefix="delinac"):
 
 class DeleteExcludedAutoCompleteItem(CallbackData, prefix="delexac"):
     index: int
+
+
+# ── Выгрузка / загрузка авто-выдач ──
+
+class AutoDeliveryTransferNav(CallbackData, prefix="adtnav"):
+    view: str  # "sel" — экран выбранных, "pick" — список для добавления
+    page: int
+
+
+class AutoDeliveryTransferPick(CallbackData, prefix="adtpk"):
+    index: int
+    view: str
+    page: int
+
+
+class AutoDeliveryTransferFormat(CallbackData, prefix="adtfmt"):
+    scope: str  # "main" — из меню выгрузки, "one" — из карточки авто-выдачи
+    fmt: str    # "txt" | "json" | "text"
+
+
+class AutoDeliveryTransferConflict(CallbackData, prefix="adtcf"):
+    action: str  # "replace" | "skip" | "replace_all" | "skip_all"

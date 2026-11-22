@@ -9,6 +9,9 @@ from settings import Settings as sett
 from .. import callback_datas as calls
 
 
+AUTO_DELIVERIES_PER_PAGE = 7
+
+
 def _cut(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
@@ -42,10 +45,11 @@ def settings_delivs_text():
         Всего <b>{len(auto_deliveries)}</b> правил авто-выдачи
 
         <b>Типы:</b>
-        ┣ 🧾 [ОБЫЧНАЯ] {static_count}
-        ┗ 📦 [МУЛЬТИ] {multi_count}
+        ┣ 🧾 ОБЫЧНАЯ {static_count}
+        ┗ 📦 МУЛЬТИ {multi_count}
 
         Нажмите на правило ниже, чтобы открыть его карточку.
+        🔄 <b>Выгрузка / загрузка товаров</b> — сохранить авто-выдачи в файл или загрузить их из файла.
         """
     )
     return txt
@@ -54,7 +58,7 @@ def settings_delivs_text():
 def settings_delivs_kb(page: int = 0):
     auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
     rows = []
-    items_per_page = 7
+    items_per_page = AUTO_DELIVERIES_PER_PAGE
     total_pages = math.ceil(len(auto_deliveries) / items_per_page)
     total_pages = total_pages if total_pages > 0 else 1
 
@@ -109,6 +113,7 @@ def settings_delivs_kb(page: int = 0):
         rows.append(buttons_row)
 
     rows.append([InlineKeyboardButton(text="➕ Добавить автовыдачу", callback_data="enter_new_auto_delivery")])
+    rows.append([InlineKeyboardButton(text="🔄 Выгрузка / загрузка товаров", callback_data="adt_menu")])
     rows.append([InlineKeyboardButton(text="📜 История выдач", callback_data=calls.DeliveryHistoryPagination(page=0).pack())])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.MenuPagination(page=0).pack())])
 
@@ -116,14 +121,25 @@ def settings_delivs_kb(page: int = 0):
     return kb
 
 
-def settings_deliv_float_text(placeholder: str):
+def settings_delivs_float_text(placeholder: str):
     txt = textwrap.dedent(
         f"""
-        ⚙️ <b>Настройки</b> → ⌨️ <b>Авто-выдача</b>
+        ⚙️ <b>Настройки</b> → 🚀 <b>Авто-выдача</b>
         \n{placeholder}
     """
     )
     return txt
+
+
+# Старое имя — на случай, если его используют плагины.
+settings_deliv_float_text = settings_delivs_float_text
+
+
+def settings_delivs_clamp_page(page: int) -> int:
+    """Номер страницы списка авто-выдач, ограниченный реальным количеством страниц."""
+    total = len(normalize_auto_deliveries(sett.get("auto_deliveries") or []))
+    total_pages = max(1, math.ceil(total / AUTO_DELIVERIES_PER_PAGE))
+    return max(0, min(page, total_pages - 1))
 
 
 def settings_new_deliv_float_text(placeholder: str):

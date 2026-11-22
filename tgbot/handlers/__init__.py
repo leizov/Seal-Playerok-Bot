@@ -9,6 +9,7 @@ from .states_raise import router as states_raise_router
 from .states_auto_complete import router as states_auto_complete_router
 from .states_comms import router as states_comms_router
 from .states_delivs import router as states_delivs_router
+from .states_deliv_transfer import router as states_deliv_transfer_router
 from .states_autoresponse import router as states_autoresponse_router
 from .states_auto_reminder import router as states_auto_reminder_router
 from .states_quick_replies import router as states_quick_replies_router
@@ -28,6 +29,7 @@ router.include_routers(
     states_auto_complete_router,
     states_comms_router,
     states_delivs_router,
+    states_deliv_transfer_router,
     states_autoresponse_router,
     states_auto_reminder_router,
     states_quick_replies_router,
