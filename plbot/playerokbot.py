@@ -16,6 +16,7 @@ from colorama import Fore
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from core.cute_utilities import get_random_cute_png_path
+from core.chat_images import existing_image_paths, missing_refs
 from playerokapi.account import Account
 from playerokapi import exceptions as plapi_exceptions
 from playerokapi.enums import *
@@ -814,10 +815,18 @@ class PlayerokBot:
             shutdown()
 
     def send_message(self, chat_id: str, text: str | None = None, photo_file_path: str | None = None,
-                     mark_chat_as_read: bool = None, exclude_watermark: bool = False, max_attempts: int = 3) -> types.ChatMessage:
+                     mark_chat_as_read: bool = None, exclude_watermark: bool = False, max_attempts: int = 3,
+                     images: list[str | bytes] | None = None) -> types.ChatMessage:
+        """
+        Отправляет сообщение в чат Playerok.
+
+        :param images: Картинки (пути к файлам или байты) — уйдут одним сообщением вместе с `text`.
+            Если картинки отправить не удалось, текст всё равно будет отправлен.
+        """
         if not self.is_connected or self.account is None:
             return None
-        if not text and not photo_file_path:
+        images = [image for image in (images or []) if image]
+        if not text and not photo_file_path and not images:
             return None
         text = text if text else ''
         # Определяем нужно ли помечать чат как прочитанный
@@ -840,11 +849,19 @@ class PlayerokBot:
         ):
             text = f"{self.config['playerok']['watermark']['value']}\n\n{text}"
 
+        if images:
+            return self._send_message_with_images(chat_id, text, images, max_attempts)
+
+        return self._send_with_retries(
+            lambda: self.account.send_message(chat_id, text, photo_file_path, mark_chat_as_read=False),
+            chat_id, text, max_attempts,
+        )
+
+    def _send_with_retries(self, send_func, chat_id: str, text: str | None, max_attempts: int = 3):
         for ix in range(max_attempts):
             try:
-                # Передаем mark_chat_as_read=False т.к. уже пометили выше
-                mess = self.account.send_message(chat_id, text, photo_file_path, mark_chat_as_read=False)
-                return mess
+                # mark_chat_as_read=False: чат уже помечен в send_message
+                return send_func()
             except plapi_exceptions.RequestFailedError as e:
                 self.logger.error(f'Ошибка при отправке соощения\n{e}\n{ix+1}/{max_attempts} попытка')
                 time.sleep(4)
@@ -855,6 +872,112 @@ class PlayerokBot:
                 return
         text = text.replace('\n', '').strip() if text else "БЕЗ ТЕКСТА"
         self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось отправить сообщение {Fore.LIGHTWHITE_EX}«{text}» {Fore.LIGHTRED_EX}в чат {Fore.LIGHTWHITE_EX}{chat_id}")
+
+    def _send_message_with_images(self, chat_id: str, text: str, images: list[str | bytes], max_attempts: int = 3):
+        """
+        Текст + картинки одним сообщением: картинки загружаются во временное хранилище чата,
+        затем уходит сообщение с их ID. Если Playerok этот способ не принял — картинки уходят
+        старым способом по одной, а текст отдельным сообщением. Текст отправляется в любом случае.
+        """
+        image_ids: list[str] = []
+        new_way_error: Exception | None = None
+        for image in images:
+            for ix in range(max_attempts):
+                try:
+                    image_ids.append(self.account.upload_image(chat_id, image).id)
+                    new_way_error = None
+                    break
+                except Exception as e:
+                    new_way_error = e
+                    if ix < max_attempts - 1:
+                        time.sleep(2)
+            if new_way_error is not None:
+                break
+
+        if new_way_error is None:
+            for ix in range(max_attempts):
+                try:
+                    return self.account.send_message(chat_id, text or None, image_ids=image_ids, mark_chat_as_read=False)
+                except plapi_exceptions.RequestFailedError as e:
+                    # Сервер ответил ошибкой — сообщение не создано, можно повторить
+                    new_way_error = e
+                    if ix < max_attempts - 1:
+                        time.sleep(4)
+                except Exception as e:
+                    new_way_error = e
+                    break
+
+        self.logger.warning(
+            f"{Fore.YELLOW}Не удалось отправить картинки ({len(images)} шт.) одним сообщением в чат {chat_id}: "
+            f"{new_way_error}. Отправляю их по одной старым способом"
+        )
+        last_image_message = None
+        failed_images = 0
+        for image in images:
+            sent_image = self._send_with_retries(
+                lambda image=image: self.account.send_message(chat_id, photo_file_path=image, mark_chat_as_read=False),
+                chat_id, "картинка", max_attempts,
+            )
+            if sent_image is None:
+                failed_images += 1
+            else:
+                last_image_message = sent_image
+        if failed_images:
+            self.logger.error(
+                f"{Fore.LIGHTRED_EX}Не удалось отправить {failed_images} из {len(images)} картинок в чат {chat_id}"
+                + (" — текст отправляю без них" if text else "")
+            )
+
+        if text:
+            return self._send_with_retries(
+                lambda: self.account.send_message(chat_id, text, mark_chat_as_read=False),
+                chat_id, text, max_attempts,
+            )
+        return last_image_message
+
+    def _auto_response_config(self, message_name: str, messages_config_name: str = "messages",
+                              messages_data: dict = DATA) -> dict | None:
+        """Настройки автоответа, если он включён (и включён общий переключатель автоответа)."""
+        if not self.config["playerok"].get("auto_response_enabled", True):
+            return None
+        messages = sett.get(messages_config_name, messages_data) or {}
+        mess = messages.get(message_name, {})
+        if not isinstance(mess, dict) or not mess.get("enabled"):
+            return None
+        return mess
+
+    def msg_images(self, message_name: str, messages_config_name: str = "messages",
+                   messages_data: dict = DATA) -> list[str]:
+        """
+        Пути к картинкам автоответа (только те, что есть на диске).
+        Пустой список, если автоответ выключен или картинок нет.
+        """
+        mess = self._auto_response_config(message_name, messages_config_name, messages_data)
+        if mess is None:
+            return []
+        refs = mess.get("images") or []
+        paths_ = existing_image_paths(refs)
+        lost = missing_refs(refs)
+        if lost:
+            self.logger.warning(f"Автоответ {message_name}: не найдены файлы картинок {', '.join(lost)} — отправлю без них")
+        return paths_
+
+    def send_auto_response(self, chat_id: str, message_name: str, **kwargs) -> types.ChatMessage | None:
+        """
+        Отправляет автоответ: текст и/или картинки одним сообщением.
+        Ничего не отправляет, если автоответ выключен или в нём нет ни текста, ни картинок.
+        """
+        mess = self._auto_response_config(message_name)
+        if mess is None:
+            return None
+        images = self.msg_images(message_name)
+        text = None
+        if [line for line in mess.get("text", []) if str(line).strip()]:
+            text = self.msg(message_name, **kwargs)
+        if not text and not images:
+            self.logger.warning(f"Автоответ {message_name} включён, но в нём нет ни текста, ни картинок")
+            return None
+        return self.send_message(chat_id, text, images=images)
 
     def _is_item_in_restore_scope(self, item_name: str | None) -> bool:
         item_name_lower = str(item_name or "").strip().lower()
@@ -1702,16 +1825,14 @@ class PlayerokBot:
                 get_telegram_bot_loop()
             )
 
-        self.send_message(
+        self.send_auto_response(
             event.chat.id,
-            self.msg(
-                "deal_has_problem",
-                username=event.deal.user.username,
-                chat_id=event.chat.id,
-                deal_id=event.deal.id,
-                deal_item_name=event.deal.item.name,
-                deal_item_price=event.deal.item.price
-            )
+            "deal_has_problem",
+            username=event.deal.user.username,
+            chat_id=event.chat.id,
+            deal_id=event.deal.id,
+            deal_item_name=event.deal.item.name,
+            deal_item_price=event.deal.item.price,
         )
 
     async def _on_deal_problem_resolved(self, event: DealProblemResolvedEvent):
@@ -1739,16 +1860,14 @@ class PlayerokBot:
                 get_telegram_bot_loop()
             )
 
-        self.send_message(
+        self.send_auto_response(
             event.chat.id,
-            self.msg(
-                "deal_problem_resolved",
-                username=event.deal.user.username,
-                chat_id=event.chat.id,
-                deal_id=event.deal.id,
-                deal_item_name=event.deal.item.name,
-                deal_item_price=event.deal.item.price
-            )
+            "deal_problem_resolved",
+            username=event.deal.user.username,
+            chat_id=event.chat.id,
+            deal_id=event.deal.id,
+            deal_item_name=event.deal.item.name,
+            deal_item_price=event.deal.item.price,
         )
 
     def _auto_delivery_log_enabled(self) -> bool:
@@ -1765,6 +1884,15 @@ class PlayerokBot:
             )
         except Exception as e:
             self.logger.error(f"Не удалось отправить лог авто-выдачи в Telegram: {e}")
+
+    def _auto_delivery_images(self, delivery: dict) -> list[str]:
+        """Картинки авто-выдачи, которые есть на диске (пропавшие файлы пропускаются с предупреждением)."""
+        refs = delivery.get("images") or []
+        lost = missing_refs(refs)
+        if lost:
+            keyphrases = ", ".join(delivery.get("keyphrases", [])) or "—"
+            self.logger.warning(f"Авто-выдача «{keyphrases}»: не найдены файлы картинок {', '.join(lost)} — отправлю без них")
+        return existing_image_paths(refs)
 
     def _run_auto_delivery(self, event: NewDealEvent):
         auto_deliveries = normalize_auto_deliveries(self.auto_deliveries)
@@ -1835,7 +1963,7 @@ class PlayerokBot:
             delivery_text = render_multi_delivery(
                 matched_delivery.get("format", ""), issued_item, **template_values
             )
-            sent = self.send_message(event.chat.id, delivery_text)
+            sent = self.send_message(event.chat.id, delivery_text, images=self._auto_delivery_images(matched_delivery))
             status = DELIVERY_STATUS_SENT if sent is not None else DELIVERY_STATUS_FAILED
             add_delivery_record(
                 status=status, kind=AUTO_DELIVERY_KIND_MULTI, good=issued_item,
@@ -1869,14 +1997,16 @@ class PlayerokBot:
             return
 
         static_message = render_static_delivery(matched_delivery.get("message", []), **template_values)
-        if not static_message:
+        static_images = self._auto_delivery_images(matched_delivery)
+        if not static_message and not static_images:
             self.logger.warning(f'Сообщение авто-выдачи пустое — сделка {event.deal.id} осталась без выдачи')
             return
 
-        sent = self.send_message(event.chat.id, static_message)
+        sent = self.send_message(event.chat.id, static_message, images=static_images)
         status = DELIVERY_STATUS_SENT if sent is not None else DELIVERY_STATUS_FAILED
         add_delivery_record(
-            status=status, kind=AUTO_DELIVERY_KIND_STATIC, message=static_message, **history_base,
+            status=status, kind=AUTO_DELIVERY_KIND_STATIC,
+            message=static_message or f"🖼 Только картинки ({len(static_images)} шт.)", **history_base,
         )
         if sent is None:
             self.logger.error(f'Не удалось отправить сообщение авто-выдачи для {event.deal.id}')
@@ -1935,7 +2065,8 @@ class PlayerokBot:
 
         # Проверяем, нужно ли отправить приветственное сообщение (по истории чата)
         if self._should_send_greeting_with_deal(event.chat.id, event):
-            greeting_msg = self.msg(
+            greeting_sent = self.send_auto_response(
+                event.chat.id,
                 "first_message",
                 username=event.deal.user.username,
                 chat_id=event.chat.id,
@@ -1943,8 +2074,7 @@ class PlayerokBot:
                 deal_item_name=event.deal.item.name,
                 deal_item_price=event.deal.item.price,
             )
-            if greeting_msg:  # Отправляем только если сообщение включено
-                self.send_message(event.chat.id, greeting_msg)
+            if greeting_sent:  # Отправляем только если сообщение включено
                 self.logger.info(f'Отправил приветственное сообщение для {event.deal.user.username}')
 
         if self.config["playerok"]["auto_deliveries"]["enabled"]:
@@ -1984,10 +2114,9 @@ class PlayerokBot:
 
         first_message_config = self.messages.get("deal_sent", {})
         if first_message_config.get("enabled", True):
-            self.send_message(event.chat.id,
-                          self.msg("deal_sent", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
-                                   deal_item_price=event.deal.item.price))
-            self.logger.info('Отправил сообщение после нашего подтверждения')
+            if self.send_auto_response(event.chat.id, "deal_sent", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                                       deal_item_price=event.deal.item.price):
+                self.logger.info('Отправил сообщение после нашего подтверждения')
         # возьми телефон детка я знаю ты хочешь позвонить
         # if (
         #     self.config["playerok"]["tg_logging"]["enabled"]
@@ -2041,9 +2170,8 @@ class PlayerokBot:
                 get_telegram_bot_loop()
             )
 
-        self.send_message(event.chat.id,
-                          self.msg("deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
-                                   deal_item_price=event.deal.item.price))
+        self.send_auto_response(event.chat.id, "deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                                deal_item_price=event.deal.item.price)
 
     async def _on_deal_rolled_back(self, event: DealConfirmedEvent):
         if not self.is_connected or self.account is None:
@@ -2072,9 +2200,8 @@ class PlayerokBot:
                 get_telegram_bot_loop()
             )
 
-        self.send_message(event.chat.id,
-                          self.msg("deal_refunded", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
-                                   deal_item_price=event.deal.item.price))
+        self.send_auto_response(event.chat.id, "deal_refunded", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                                deal_item_price=event.deal.item.price)
         self._record_refund_async(event.deal)
 
 
@@ -2105,9 +2232,8 @@ class PlayerokBot:
                 get_telegram_bot_loop()
             )
 
-        self.send_message(event.chat.id,
-                          self.msg("deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
-                                   deal_item_price=event.deal.item.price))
+        self.send_auto_response(event.chat.id, "deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name,
+                                deal_item_price=event.deal.item.price)
 
     async def _on_new_review(self, event: NewReviewEvent):
         if not self.is_connected or self.account is None:
@@ -2117,7 +2243,8 @@ class PlayerokBot:
 
         await self.send_new_review_notification(event.deal, event.chat.id)
 
-        response_text = self.msg(
+        self.send_auto_response(
+            event.chat.id,
             "new_review_response",
             username=event.deal.user.username,
             chat_id=event.chat.id,
@@ -2125,8 +2252,6 @@ class PlayerokBot:
             deal_item_name=event.deal.item.name,
             deal_item_price=event.deal.item.price,
         )
-        if response_text:
-            self.send_message(event.chat.id, response_text)
 
         self._record_review_async()
 
@@ -2170,9 +2295,9 @@ class PlayerokBot:
         # if event.deal.status is ItemDealStatuses.SENT:
         #     self.send_message(event.chat.id, self.msg("deal_sent", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
         if event.deal.status is ItemDealStatuses.CONFIRMED:
-            self.send_message(event.chat.id, self.msg("deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+            self.send_auto_response(event.chat.id, "deal_confirmed", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price)
         elif event.deal.status is ItemDealStatuses.ROLLED_BACK:
-            self.send_message(event.chat.id, self.msg("deal_refunded", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price))
+            self.send_auto_response(event.chat.id, "deal_refunded", username=event.deal.user.username, chat_id=event.chat.id, deal_id=event.deal.id, deal_item_name=event.deal.item.name, deal_item_price=event.deal.item.price)
 
 
 

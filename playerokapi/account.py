@@ -2726,11 +2726,77 @@ class Account:
         r = self.request("post", f"{self.base_url}/graphql", headers, payload).json()
         return chat(r["data"]["markChatAsRead"])
 
+    @staticmethod
+    def detect_image_type(data: bytes) -> tuple[str, str] | None:
+        """
+        Определяет формат картинки по первым байтам файла.
+
+        :return: Кортеж (расширение, MIME-тип) или None, если это не jpg/png/webp/gif.
+        """
+        head = bytes(data[:12])
+        if head.startswith(b"\xff\xd8\xff"):
+            return "jpg", "image/jpeg"
+        if head.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "png", "image/png"
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return "webp", "image/webp"
+        if head[:6] in (b"GIF87a", b"GIF89a"):
+            return "gif", "image/gif"
+        return None
+
+    def _image_part(self, image: str | bytes) -> tuple[str, bytes, str]:
+        """Имя файла, байты и MIME-тип картинки (передан путь к файлу или байты)."""
+        if isinstance(image, (bytes, bytearray)):
+            data = bytes(image)
+            name = None
+        else:
+            with open(image, "rb") as f:
+                data = f.read()
+            name = os.path.basename(image)
+        ext, content_type = self.detect_image_type(data) or ("jpg", "image/jpeg")
+        return name or f"image.{ext}", data, content_type
+
+    @staticmethod
+    def _gql_op_headers(operation_name: str) -> dict[str, str]:
+        # У multipart-запроса payload — не json, поэтому имя операции передаём заголовками явно.
+        return {
+            "accept": "*/*",
+            "x-gql-op": operation_name,
+            "x-apollo-operation-name": operation_name,
+        }
+
+    def _graphql_multipart(self, operations: dict, image: str | bytes, chat_id: str | None = None) -> dict:
+        """
+        Отправляет GraphQL-запрос с одним файлом по спецификации graphql-multipart-request:
+        части идут строго в порядке operations → map → файл.
+        """
+        filename, data, content_type = self._image_part(image)
+        mp = CurlMime()
+        mp.addpart(name="operations", data=json.dumps(operations).encode("utf-8"))
+        mp.addpart(name="map", data=json.dumps({"1": ["variables.file"]}).encode("utf-8"))
+        mp.addpart(name="1", filename=filename, content_type=content_type, data=data)
+        headers = self._gql_op_headers(operations.get("operationName", "viewer"))
+        if chat_id:
+            headers["referer"] = f"https://playerok.com/chats/{chat_id}"
+        try:
+            return self.request("post", f"{self.base_url}/graphql", headers, None, multipart=mp).json()
+        finally:
+            try:
+                mp.close()
+            except Exception:
+                pass
+
     def send_message(self, chat_id: str, text: str | None = None,
-                     photo_file_path: str | None = None, mark_chat_as_read: bool = False) -> types.ChatMessage:
+                     photo_file_path: str | None = None, mark_chat_as_read: bool = False,
+                     images: list[str | bytes] | None = None,
+                     image_ids: list[str] | None = None) -> types.ChatMessage:
         """
         Отправляет сообщение в чат.\n
-        Можно отправить текстовое сообщение `text` или фотографию `photo_file_path`.
+        Способы отправки:\n
+        - `text` — обычное текстовое сообщение;\n
+        - `images` / `image_ids` — одно сообщение с текстом `text` (можно без текста) и картинками
+          (картинки загружаются через `upload_image`, на сообщение — до 5 штук);\n
+        - `photo_file_path` — старый способ: одна картинка без текста (`text` при этом не отправляется).
 
         :param chat_id: ID чата, в который нужно отправить сообщение.
         :type chat_id: `str`
@@ -2738,83 +2804,100 @@ class Account:
         :param text: Текст сообщения, _опционально_.
         :type text: `str` or `None`
 
-        :param photo_file_path: Путь к файлу фотографии, _опционально_.
+        :param photo_file_path: Путь к файлу фотографии (старый способ), _опционально_.
         :type photo_file_path: `str` or `None`
 
         :param mark_chat_as_read: Пометить чат, как прочитанный перед отправкой, _опционально_.
         :type mark_chat_as_read: `bool`
+
+        :param images: Картинки — пути к файлам или байты, _опционально_.
+        :type images: `list[str | bytes]` or `None`
+
+        :param image_ids: ID уже загруженных через `upload_image` картинок, _опционально_.
+        :type image_ids: `list[str]` or `None`
 
         :return: Объект отправленного сообщения.
         :rtype: `playerokapi.types.ChatMessage`
         """
         if mark_chat_as_read:
             self.mark_chat_as_read(chat_id=chat_id)
-        headers = {
-            "accept": "*/*",
-        }
+
+        if images or image_ids:
+            ids = [str(image_id) for image_id in (image_ids or []) if image_id]
+            for image in images or []:
+                ids.append(self.upload_image(chat_id, image).id)
+            payload = {
+                "operationName": "createChatMessage",
+                "query": QUERIES.get("createChatMessage"),
+                "variables": {
+                    "input": {
+                        "chatId": chat_id,
+                        "text": text or "",
+                        "imagesIds": ids,
+                    }
+                }
+            }
+            r = self.request("post", f"{self.base_url}/graphql", {"accept": "*/*"}, payload).json()
+            return chat_message(r["data"]["createChatMessage"])
 
         if photo_file_path:
-            query = QUERIES.get("createChatMessageWithFile")
+            operations = {
+                "operationName": "createChatMessage",
+                "query": QUERIES.get("createChatMessageWithFile"),
+                "variables": {
+                    "input": {
+                        "chatId": chat_id
+                    },
+                    "file": None
+                }
+            }
+            r = self._graphql_multipart(operations, photo_file_path, chat_id)
+            return chat_message(r["data"]["createChatMessage"])
 
-        elif text: query = QUERIES.get("createChatMessage")
-        operations = {
+        payload = {
             "operationName": "createChatMessage",
-            "query": query,
+            "query": QUERIES.get("createChatMessage"),
             "variables": {
                 "input": {
-                    "chatId": chat_id
+                    "chatId": chat_id,
+                    "text": text
                 }
             }
         }
-        if photo_file_path:
-            operations["variables"]["file"] = None
-        elif text:
-            operations["variables"]["input"]["text"] = text
+        r = self.request("post", f"{self.base_url}/graphql", {"accept": "*/*"}, payload).json()
+        return chat_message(r["data"]["createChatMessage"])
 
-        files = None
-        mp = None
-        try:
-            if photo_file_path:
-                # files = {"1": open(photo_file_path, "rb")}
-                map = {"1": ["variables.file"]}
-                mp = CurlMime()
-                mp.addpart(name="operations", data=json.dumps(operations))
-                mp.addpart(name="map", data=json.dumps(map))
-                mp.addpart(
-                    name="1",
-                    filename=os.path.basename(photo_file_path),
-                    content_type="image/jpeg",
-                    local_path=photo_file_path
-
-                )
-
-                payload = {"operations": json.dumps(operations), "map": json.dumps(map)}
-            else:
-                payload = operations
-            r = self.request("post", f"{self.base_url}/graphql", headers, payload, multipart=mp).json()
-            return chat_message(r["data"]["createChatMessage"])
-        finally:
-            if files:
-                for file_obj in files.values():
-                    file_obj.close()
-
-    def upload_image(self, chat_id: str, bytes: str) -> types.UploadImage:
+    def upload_image(self, chat_id: str, image: str | bytes) -> types.UploadImage:
         """
-        Публикует изображение (чтобы потом его отправить используя полученный url)
+        Загружает картинку во временное хранилище чата.
+        Полученный `id` передаётся в `send_message(image_ids=[...])`.
+        Хранилище временное (см. `expires_at`) и привязано к чату: для каждого чата картинку загружают заново.
 
-        :param chat_id: id чата для публикации
+        :param chat_id: ID чата, в который будет отправлена картинка.
         :type chat_id: `str`
 
-        :param bytes: Абсолютный путь к изображению
-        :type bytes: `str`
+        :param image: Путь к файлу картинки или её байты.
+        :type image: `str` or `bytes`
+
+        :return: Объект загруженной картинки.
+        :rtype: `playerokapi.types.UploadImage`
         """
-        headers = {
-            "accept": "*/*",
-            "referer": f"https://playerok.com/chats/{chat_id}"
+        operations = {
+            "operationName": "uploadChatImageIntoTemporaryStore",
+            "query": QUERIES.get("uploadChatImageIntoTemporaryStore"),
+            "variables": {
+                "file": None,
+                "input": {
+                    "chatId": chat_id,
+                    "clientAttachmentId": str(uuid.uuid4())
+                }
+            }
         }
-        file = {'image': bytes}
-        r = self.request("post", f"{self.base_url}/graphql", headers, files=file).json()
-        return upload_image(r)
+        r = self._graphql_multipart(operations, image, chat_id)
+        uploaded = upload_image((r or {}).get("data") or {})
+        if uploaded is None or not uploaded.id:
+            raise ValueError(f"Playerok не вернул ID загруженной картинки: {str(r)[:300]}")
+        return uploaded
 
 
     def create_item(self, game_category_id: str, obtaining_type_id: str, name: str, price: int,

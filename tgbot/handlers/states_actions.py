@@ -1,23 +1,70 @@
-import time
+import asyncio
+import html
+import os
+import uuid
 
-from aiogram import types, Router, F
+from aiogram import types, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, InputMediaPhoto
+
+from core.chat_images import MAX_IMAGE_BYTES, MAX_IMAGES, detect_image_type, format_size
+from paths import CACHE_DIR
 from .. import templates as templ
 from .. import states
 from ..helpful import throw_float_message
-import os
-import uuid
-from paths import CACHE_DIR
-import io
 
 router = Router()
-MAX_PHOTO_WIGHT = 1024 * 8 * 500
+MAX_PHOTO_WIGHT = MAX_IMAGE_BYTES  # максимальный размер картинки в байтах
+ALBUM_WAIT_SECONDS = 1.5           # сколько ждём остальные фото альбома
+CAPTION_TEXT_LIMIT = 800           # подпись к фото в Telegram — до 1024 символов
+
+# media_group_id → сообщения альбома, пока он собирается
+_albums: dict[str, list[types.Message]] = {}
+
+
+def _image_of(message: types.Message):
+    """Картинка из сообщения: (объект файла Telegram, название типа) или (None, None)."""
+    if message.photo:
+        return message.photo[-1], "Фото"
+    if message.animation:
+        # Playerok не принимает GIF — отправляем первый кадр (превью)
+        thumbnail = message.animation.thumbnail
+        if not thumbnail:
+            raise TypeError("❌ Неподдерживаемый формат для сообщения")
+        return thumbnail, "GIF"
+    document = message.document
+    if document is not None and (document.mime_type or "").lower().startswith("image/"):
+        return document, "Картинка"
+    return None, None
+
+
+def _files_label(files: list[tuple]) -> str:
+    kinds: dict[str, int] = {}
+    for _file, kind in files:
+        kinds[kind] = kinds.get(kind, 0) + 1
+    return ", ".join(kind if count == 1 else f"{kind} ×{count}" for kind, count in kinds.items())
+
 
 @router.message(states.ActionsStates.waiting_for_message_text)
 async def handler_waiting_for_password(message: types.Message, state: FSMContext):
+    group_id = message.media_group_id
+    if group_id:
+        # Фото альбома приходят отдельными сообщениями — собираем их и отправляем одним сообщением
+        album = _albums.setdefault(group_id, [])
+        album.append(message)
+        if len(album) > 1:
+            return
+        await asyncio.sleep(ALBUM_WAIT_SECONDS)
+        messages = sorted(_albums.pop(group_id, [message]), key=lambda m: m.message_id)
+    else:
+        messages = [message]
+    await _send_to_playerok_chat(messages, state)
+
+
+async def _send_to_playerok_chat(messages: list[types.Message], state: FSMContext):
+    actual_msg = messages[0]
+    temp_paths: list[str] = []
     try:
-        actual_msg = message
         await state.set_state(None)
         from plbot.playerokbot import get_playerok_bot
 
@@ -26,149 +73,84 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
         username = data.get("username")
         chat = plbot.get_chat_by_username(username)
 
-        if message.media_group_id:
-            #todo добавить возможность прикреплять много фото
-            await throw_float_message(
-                state=state,
-                message=actual_msg,
-                text=templ.do_action_text(
-                    f"Отправка сообщения с множественными прикреплёнными изображениями не доступна("),
-                reply_markup=templ.destroy_kb(),
-                delete_user_message=False
-            )
-            return
+        text = next((m.text or m.caption for m in messages if (m.text or m.caption)), None) or ''
+        files = []
+        for msg in messages:
+            file_info, file_type = _image_of(msg)
+            if file_info:
+                files.append((file_info, file_type))
 
-        text = message.text
-
-        file_info = None
-        file_type = None
-        if message.photo:
-            file_info = message.photo[-1]
-            file_type = 'Фото'
-            text = message.caption
-
-        elif message.animation:
-            try:
-                file_info = message.animation.thumbnail
-                if not file_info:
-                    raise TypeError("❌ Неподдерживаемый формат для сообщения")
-            except:
-                raise TypeError("❌ Неподдерживаемый формат для сообщения")
-
-            file_type = 'GIF'
-            text = message.caption
-
-        text = text if text else ''
-
-        if not file_info and not text:
+        if not files and not text:
             raise TypeError("❌ Неподдерживаемый формат для сообщения")
+        if len(files) > MAX_IMAGES:
+            raise ValueError(f"❌ В одном сообщении можно отправить не больше {MAX_IMAGES} картинок, а в альбоме их {len(files)}")
+        for file_info, _file_type in files:
+            if file_info.file_size and file_info.file_size > MAX_PHOTO_WIGHT:
+                raise ValueError(f"❌ Файл слишком большой, максимальный размер: {format_size(MAX_PHOTO_WIGHT)}")
 
-        success = False
-
-        if file_info:
-            #todo коррекция пределов веса и сниженние качества
-            if file_info.file_size > MAX_PHOTO_WIGHT:
-                raise ValueError(f"❌ Файл слишком большой, максимальный размер: {MAX_PHOTO_WIGHT // 8 // 1024} Кб")
-
+        sent = None
+        if files:
+            label = _files_label(files)
             actual_msg = await throw_float_message(
                 state=state,
                 message=actual_msg,
-                text=templ.do_action_text(
-                    f"📲 Начинаю отправку: {file_type}{'+ текст' if message.text else ''}"),
+                text=templ.do_action_text(f"📲 Начинаю отправку: {label}{' + текст' if text else ''}"),
                 delete_user_message=False
-            )
+            ) or actual_msg
 
-            from ..telegrambot import get_telegram_bot
-            tg_bot = get_telegram_bot().bot
-            file_obj = await tg_bot.get_file(file_info.file_id)
-
-
-            file_path= file_obj.file_path
-            downloaded_file = await tg_bot.download_file(file_path)
-
-            if isinstance(downloaded_file, bytes):
-                file_bytes = downloaded_file
-            else:
-                # на случай, если вернётся BytesIO
-                file_bytes = downloaded_file.read()
-
+            tg_bot = messages[0].bot
             photo_cache_dir = os.path.join(CACHE_DIR, 'photo_cache')
             os.makedirs(photo_cache_dir, exist_ok=True)
-            temp_photo_path = os.path.join(photo_cache_dir, str(uuid.uuid4()) + '.jpg')
+            for file_info, _file_type in files:
+                downloaded = await tg_bot.download(file_info.file_id)
+                file_bytes = downloaded.read()
+                ext = detect_image_type(file_bytes) or "jpg"
+                temp_photo_path = os.path.join(photo_cache_dir, f"{uuid.uuid4()}.{ext}")
+                with open(temp_photo_path, 'wb') as f:
+                    f.write(file_bytes)
+                temp_paths.append(temp_photo_path)
 
-            with open(temp_photo_path, 'wb') as f:
-                f.write(file_bytes)
-
-            # if file_type == 'GIF':
-            #     try:
-            #         from PIL import Image
-            #     except:
-            #         raise ImportError(f"❌ Не удалось отправить GIF, не установлен Pillow")
-            #
-            #     io_obj = io.BytesIO(file_bytes)
-            #     io_obj.seek(0)
-            #     gif_image = Image.open(io_obj)
-            #     raise ValueError(gif_image.format)
-            #
-            #     # первый кадр берём
-            #     gif_image.seek(0)
-            #     if gif_image.mode != 'RGB':
-            #         gif_image = gif_image.convert('RGB')
-            #     gif_image.save(temp_photo_path, 'JPEG', quality=85)
-            #
-            # else:
-            #     with open(temp_photo_path, 'wb') as f:
-            #         f.write(file_bytes)
-
-            if text:
-                if (
-                    plbot.send_message(chat_id=chat.id, photo_file_path=temp_photo_path) and
-                    plbot.send_message(chat_id=chat.id, text=text)
-                ):
-                    success = True
+            # Текст и картинки уходят одним сообщением (сетевые запросы — вне цикла событий Telegram)
+            sent = await asyncio.to_thread(plbot.send_message, chat.id, text or None, images=temp_paths)
+            if sent:
+                quote = text if len(text) <= CAPTION_TEXT_LIMIT else text[:CAPTION_TEXT_LIMIT].rstrip() + "…"
+                caption = f"✅ Пользователю <b>{html.escape(str(username))}</b> было отправлено: {label}"
+                if text:
+                    caption += f"\n<blockquote>{html.escape(quote)}</blockquote>"
+                try:
                     await actual_msg.edit_media(
                         media=InputMediaPhoto(
-                            media=FSInputFile(temp_photo_path),
-                            caption=templ.do_action_text(
-                                f"✅ Пользователю <b>{username}</b> было отправлено сообщение: <blockquote>{text}</blockquote> + {file_type}"
-                            ),
+                            media=FSInputFile(temp_paths[0]),
+                            caption=templ.do_action_text(caption),
                             parse_mode='HTML'
                         ),
                         reply_markup=templ.destroy_kb(),
-
                     )
-            else:
-                if plbot.send_message(chat_id=chat.id, photo_file_path=temp_photo_path):
-                    success = True
-                    await actual_msg.edit_media(
-                        media=InputMediaPhoto(
-                            media=FSInputFile(temp_photo_path),
-                            caption=templ.do_action_text(
-                                f"✅ Пользователю <b>{username}</b> было отправлено {file_type}"
-                            ),
-                            parse_mode='HTML'
-                        ),
+                except Exception:
+                    await throw_float_message(
+                        state=state,
+                        message=actual_msg,
+                        text=templ.do_action_text(caption),
                         reply_markup=templ.destroy_kb(),
-
+                        delete_user_message=False
                     )
 
         elif text:
-            if plbot.send_message(chat_id=chat.id, text=text):
-                success = True
+            sent = await asyncio.to_thread(plbot.send_message, chat.id, text)
+            if sent:
                 await throw_float_message(
                     state=state,
                     message=actual_msg,
                     text=templ.do_action_text(
-                        f"✅ Пользователю <b>{username}</b> было отправлено сообщение: <blockquote>{text}</blockquote>"),
+                        f"✅ Пользователю <b>{html.escape(str(username))}</b> было отправлено сообщение: <blockquote>{html.escape(text)}</blockquote>"),
                     reply_markup=templ.destroy_kb(),
                     delete_user_message=False
                 )
 
-        if not success:
+        if not sent:
             raise TypeError(f"❌ Не удалось отправить сообщение, смотри логи")
 
     except Exception as e:
-        import html
         error_text = html.escape(str(e))
         await throw_float_message(
             state=state,
@@ -178,8 +160,9 @@ async def handler_waiting_for_password(message: types.Message, state: FSMContext
             delete_user_message=False
         )
     finally:
-        try:
-            if 'temp_photo_path' in locals():
-                if os.path.exists(temp_photo_path):
-                    os.remove(temp_photo_path)
-        except: pass
+        for path in temp_paths:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass

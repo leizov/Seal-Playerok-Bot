@@ -64,6 +64,13 @@ def normalize_auto_delivery(entry: Any) -> dict[str, Any]:
     else:
         normalized["message"] = _normalize_str_list(raw.get("message"))
 
+    # Картинки, которые уходят вместе с выдачей (ссылки на файлы в bot_settings/chat_images)
+    from core.chat_images import normalize_refs
+
+    images = normalize_refs(raw.get("images"))
+    if images:
+        normalized["images"] = images
+
     return normalized
 
 

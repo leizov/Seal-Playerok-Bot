@@ -17,6 +17,10 @@ BACKUP_VERSION = 1
 _BOT_SETTINGS_EXCLUDED_EXTENSIONS = {".py", ".pyc", ".pyo"}
 _PLUGIN_EXCLUDED_EXTENSIONS = {".log"}
 _CONFIG_REL_PATH = "config.json"
+# Картинки для чатов (автоответы, авто-выдача) — bot_settings/chat_images/
+_CHAT_IMAGES_PREFIX = "chat_images/"
+# Telegram не даёт боту скачать файл больше 20 МБ: такой backup не загрузить обратно через бота
+TELEGRAM_BOT_DOWNLOAD_LIMIT = 20 * 1000 * 1000
 _MACHINE_SPECIFIC_CONFIG_SECTIONS = ("telegram",)
 
 
@@ -172,11 +176,33 @@ def _preserve_machine_specific_sections(entry: dict[str, str]) -> dict[str, str]
     return {"encoding": "utf-8", "content": json.dumps(incoming, ensure_ascii=False, indent=4)}
 
 
-def create_backup_payload() -> dict[str, Any]:
+def _is_chat_image(rel_path: str) -> bool:
+    return rel_path.replace("\\", "/").startswith(_CHAT_IMAGES_PREFIX)
+
+
+def _to_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def create_backup_payload(include_images: bool = True) -> dict[str, Any]:
+    """
+    Собирает backup. include_images=False — без картинок для чатов
+    (ссылки на них в настройках остаются, в meta пишется, сколько картинок исключено).
+    """
     bot_settings: dict[str, dict[str, str]] = {}
     plugin_storage: dict[str, dict[str, dict[str, str]]] = {}
+    images_included = 0
+    images_excluded = 0
 
     for rel_path, abs_path in _iter_scope_files(paths.BOT_SETTINGS_DIR, _BOT_SETTINGS_EXCLUDED_EXTENSIONS):
+        if _is_chat_image(rel_path):
+            if not include_images:
+                images_excluded += 1
+                continue
+            images_included += 1
         bot_settings[rel_path] = _serialize_file(abs_path)
     if _CONFIG_REL_PATH in bot_settings:
         bot_settings[_CONFIG_REL_PATH] = _strip_machine_specific_sections(bot_settings[_CONFIG_REL_PATH])
@@ -216,9 +242,36 @@ def create_backup_payload() -> dict[str, Any]:
             "plugin_folders": len(plugin_storage),
             "plugin_files": plugin_file_count,
             "excluded_logs": excluded_logs,
+            "chat_images": images_included,
+            "chat_images_excluded": images_excluded,
         },
     }
     return payload
+
+
+def save_backup_within_limit(prefix: str = "seal_config_backup",
+                             limit: int = TELEGRAM_BOT_DOWNLOAD_LIMIT) -> tuple[str, dict[str, Any]]:
+    """
+    Сохраняет backup в файл. Если с картинками для чатов файл больше лимита
+    (20 МБ — больше Telegram не даст загрузить обратно), собирает его заново без картинок.
+    Возвращает путь к файлу и payload.
+    """
+    payload = create_backup_payload()
+    path = save_backup_payload_to_file(payload, prefix)
+    if os.path.getsize(path) > limit and _to_int(payload.get("meta", {}).get("chat_images")):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        payload = create_backup_payload(include_images=False)
+        path = save_backup_payload_to_file(payload, prefix)
+    return path, payload
+
+
+def backup_images_excluded(payload: dict[str, Any]) -> int:
+    """Сколько картинок для чатов не вошло в backup из-за размера."""
+    meta = payload.get("meta") if isinstance(payload, dict) else None
+    return _to_int(meta.get("chat_images_excluded")) if isinstance(meta, dict) else 0
 
 
 def load_backup_payload(raw_bytes: bytes) -> dict[str, Any]:
@@ -300,11 +353,22 @@ def backup_summary(payload: dict[str, Any]) -> dict[str, int]:
 
 def format_backup_summary(payload: dict[str, Any]) -> str:
     summary = backup_summary(payload)
-    return (
+    text = (
         f"⚙️ Файлов в <code>bot_settings</code>: <b>{summary['bot_settings_files']}</b>\n"
         f"🧩 Папок плагинов: <b>{summary['plugin_folders']}</b>\n"
         f"📄 Файлов плагинов: <b>{summary['plugin_files']}</b>"
     )
+    bot_settings = payload.get("bot_settings", {}) if isinstance(payload, dict) else {}
+    images = sum(1 for rel_path in bot_settings if _is_chat_image(rel_path)) if isinstance(bot_settings, dict) else 0
+    excluded = backup_images_excluded(payload)
+    if excluded:
+        text += (
+            f"\n🖼 Картинки для чатов <b>не включены</b> ({excluded} шт.): с ними файл был бы больше 20 МБ "
+            "и не загрузился бы обратно через бота. При восстановлении картинки, которые уже есть в боте, сохранятся."
+        )
+    elif images:
+        text += f"\n🖼 Картинок для чатов: <b>{images}</b>"
+    return text
 
 def save_backup_payload_to_file(payload: dict[str, Any], prefix: str = "seal_config_backup") -> str:
     ensure_valid_backup_payload(payload)
@@ -341,7 +405,11 @@ def apply_backup_payload(payload: dict[str, Any]) -> None:
     existing_bot_files = {rel for rel, _ in _iter_scope_files(bot_settings_root, _BOT_SETTINGS_EXCLUDED_EXTENSIONS)}
     target_bot_files = set(bot_settings_payload.keys())
 
+    # Backup без картинок (не влезли в 20 МБ) не должен стирать картинки, которые уже есть в боте
+    keep_images = backup_images_excluded(payload) > 0
     for rel_path in sorted(existing_bot_files - target_bot_files):
+        if keep_images and _is_chat_image(rel_path):
+            continue
         _safe_remove_file(_resolve_path_inside_root(bot_settings_root, rel_path))
 
     for rel_path, entry in bot_settings_payload.items():

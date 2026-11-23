@@ -81,6 +81,21 @@ def _stats_block(deliveries: list[dict]) -> list[str]:
     ]
 
 
+def _images_warning(exported: list[dict]) -> list[str]:
+    """Предупреждение: картинки авто-выдач в выгрузку не попадают (только если они есть)."""
+    with_images = [d for d in exported if d.get("images")]
+    if not with_images:
+        return []
+    total = sum(len(d["images"]) for d in with_images)
+    return [
+        f"🖼 У <b>{len(with_images)}</b> из выгружаемых авто-выдач есть картинки (<b>{total}</b> шт.) — "
+        "<b>в файл они не попадут</b>.",
+        "Если загрузить файл обратно в этот бот с «Заменить», картинки останутся; "
+        "в другом боте их нужно будет добавить заново через «🖼 Картинки».",
+        "",
+    ]
+
+
 def _short_line(delivery: dict) -> str:
     """Одна строка для списков: тип, фразы, остаток."""
     phrases = _cut(", ".join(delivery.get("keyphrases", [])) or "Без ключевых фраз", 60)
@@ -310,6 +325,8 @@ def adt_format_text(chosen: list[dict], mode_all: bool, include_multi: bool, del
     else:
         lines += ["ℹ️ Мультивыдач среди выбранных нет.", ""]
 
+    lines += _images_warning(exported)
+
     if not exported:
         lines += ["❗ <b>Нечего выгружать</b> — все выбранные авто-выдачи являются мультивыдачами. "
                   "Включите «📦 Мультивыдача: выгружать» или выберите другие.", ""]
@@ -363,6 +380,14 @@ def adt_one_text(delivery: dict, delete_items: bool) -> str:
         if delete_items and items:
             lines += ["", f"🗑 После выгрузки все товары (<b>{len(items)}</b> шт.) будут <b>удалены</b> из этой мультивыдачи. "
                           "Перед удалением бот попросит подтверждение."]
+    images = delivery.get("images") or []
+    if images:
+        lines += [
+            "",
+            f"🖼 У этой авто-выдачи есть картинки (<b>{len(images)}</b> шт.) — <b>в выгрузку они не попадут</b>: "
+            "ни в файл, ни в сообщение «Текстом».",
+            "Если загрузить файл обратно в этот бот с «Заменить», картинки останутся.",
+        ]
     lines += [
         "",
         "📄 <b>.txt</b> — читаемый файл с ключевыми фразами"
@@ -437,11 +462,13 @@ def adt_confirm_delete_kb(cancel_cb: str) -> InlineKeyboardMarkup:
 
 def adt_export_caption(file_name: str, exported: list[dict]) -> str:
     s = summarize(exported)
+    with_images = sum(1 for d in exported if d.get("images"))
     return (
         f"📤 <b>Выгрузка авто-выдач</b>\n"
         f"📄 <code>{escape(file_name)}</code>\n"
         f"Авто-выдач: <b>{s['total']}</b> (🧾 {s['static']} / 📦 {s['multi']}), товаров: <b>{s['items']}</b>\n\n"
-        f"⚠️ В файле товары — не пересылайте его посторонним."
+        + ("🖼 Картинки авто-выдач в файл не входят.\n" if with_images else "")
+        + "⚠️ В файле товары — не пересылайте его посторонним."
     )
 
 

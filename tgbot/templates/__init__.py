@@ -46,3 +46,4 @@ from .chats import *
 from .item_card import *
 from .reviews import *
 from .withdraw import *
+from .chat_images import *

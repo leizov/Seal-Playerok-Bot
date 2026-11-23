@@ -66,6 +66,19 @@ def save_deliveries(deliveries: list[dict]) -> None:
         logger.warning("Не удалось обновить авто-выдачи в памяти Playerok-бота: %s", e)
 
 
+def _delete_unused_images(before: list[dict], after: list[dict]) -> None:
+    """Удаляет файлы картинок авто-выдач, которые пропали из списка (например, при замене)."""
+    old_refs = {ref for d in before for ref in d.get("images", [])}
+    new_refs = {ref for d in after for ref in d.get("images", [])}
+    if old_refs - new_refs:
+        try:
+            from core.chat_images import delete_images
+
+            delete_images(old_refs - new_refs)
+        except Exception as e:
+            logger.warning("Не удалось удалить картинки заменённых авто-выдач: %s", e)
+
+
 def _has_access(user_id: int) -> bool:
     config = sett.get("config") or {}
     return user_id in config.get("telegram", {}).get("bot", {}).get("signed_users", [])
@@ -607,8 +620,10 @@ async def callback_adt_import_apply(callback: CallbackQuery, state: FSMContext):
         return
     try:
         decisions = {int(k): v for k, v in imp["decisions"].items()}
-        new_list, stats = apply_import(load_deliveries(), copy.deepcopy(imp["entries"]), decisions)
+        current = load_deliveries()
+        new_list, stats = apply_import(current, copy.deepcopy(imp["entries"]), decisions)
         save_deliveries(new_list)
+        _delete_unused_images(current, new_list)
     except AutoDeliveryImportError as e:
         await throw_float_message(
             state, callback.message,

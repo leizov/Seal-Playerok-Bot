@@ -18,7 +18,7 @@ from aiogram.types import FSInputFile
 
 from __init__ import SKIP_UPDATES
 import paths
-from core.config_backup import create_backup_payload, format_backup_summary, save_backup_payload_to_file
+from core.config_backup import TELEGRAM_BOT_DOWNLOAD_LIMIT, format_backup_summary, save_backup_within_limit
 from settings import Settings as sett
 from core.utils import restart as app_restart
 from updater import get_update_status, install_release_update
@@ -958,14 +958,18 @@ async def handler_update(message: types.Message, state: FSMContext):
     try:
         await update_status_text("📦 Формирую backup перед обновлением...")
 
-        backup_payload = await loop.run_in_executor(None, create_backup_payload)
-        backup_path = await loop.run_in_executor(
+        # Больше 20 МБ с картинками — backup собирается без картинок (иначе его не загрузить обратно)
+        backup_path, backup_payload = await loop.run_in_executor(
             None,
-            save_backup_payload_to_file,
-            backup_payload,
+            save_backup_within_limit,
             "seal_config_backup",
         )
         backup_summary = format_backup_summary(backup_payload)
+        if os.path.getsize(backup_path) > TELEGRAM_BOT_DOWNLOAD_LIMIT:
+            backup_summary += (
+                "\n⚠️ Файл больше 20 МБ даже без картинок — загрузить его обратно через бота "
+                "не получится (ограничение Telegram)."
+            )
 
         await message.answer(
             text=templ.config_backup_warning_block(),

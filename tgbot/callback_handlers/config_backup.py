@@ -8,11 +8,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile
 
 from core.config_backup import (
+    TELEGRAM_BOT_DOWNLOAD_LIMIT,
     apply_backup_payload,
-    create_backup_payload,
     format_backup_summary,
     load_backup_payload,
-    save_backup_payload_to_file,
+    save_backup_within_limit,
     validate_backup_payload,
 )
 from settings import Settings as sett
@@ -24,6 +24,21 @@ from ..helpful import throw_float_message
 
 router = Router()
 logger = logging.getLogger("seal.telegram.config_backup")
+
+
+def _backup_summary(payload: dict, backup_path: str) -> str:
+    """Сводка для подписи + предупреждение, если файл всё равно больше 20 МБ."""
+    summary = format_backup_summary(payload)
+    try:
+        too_big = os.path.getsize(backup_path) > TELEGRAM_BOT_DOWNLOAD_LIMIT
+    except OSError:
+        too_big = False
+    if too_big:
+        summary += (
+            "\n⚠️ Файл больше 20 МБ даже без картинок — загрузить его обратно через бота "
+            "не получится (ограничение Telegram)."
+        )
+    return summary
 
 
 async def _remove_pending_backup_from_state(state: FSMContext) -> None:
@@ -72,9 +87,9 @@ async def callback_config_backup_export(callback: CallbackQuery, state: FSMConte
         )
 
         loop = asyncio.get_running_loop()
-        payload = await loop.run_in_executor(None, create_backup_payload)
-        backup_path = await loop.run_in_executor(None, save_backup_payload_to_file, payload, "seal_config_backup")
-        summary = format_backup_summary(payload)
+        # Больше 20 МБ с картинками — backup собирается без картинок (иначе его не загрузить обратно)
+        backup_path, payload = await loop.run_in_executor(None, save_backup_within_limit, "seal_config_backup")
+        summary = _backup_summary(payload, backup_path)
 
         await callback.message.answer(
             text=templ.config_backup_warning_block(),
@@ -171,14 +186,12 @@ async def callback_config_backup_import_confirm(callback: CallbackQuery, state: 
             raise ValueError(validation_error)
 
         loop = asyncio.get_running_loop()
-        current_payload = await loop.run_in_executor(None, create_backup_payload)
-        current_backup_path = await loop.run_in_executor(
+        current_backup_path, current_payload = await loop.run_in_executor(
             None,
-            save_backup_payload_to_file,
-            current_payload,
+            save_backup_within_limit,
             "pre_restore_backup",
         )
-        current_summary = format_backup_summary(current_payload)
+        current_summary = _backup_summary(current_payload, current_backup_path)
 
         await callback.message.answer(
             text=templ.config_backup_before_restore_text(),

@@ -19,6 +19,7 @@ from .reviews import router as reviews_router
 from .withdraw import router as withdraw_router
 from .tg_connection import router as tg_connection_router
 from .auto_delivery_transfer import router as auto_delivery_transfer_router
+from .chat_images import router as chat_images_router
 
 router = Router()
 router.include_routers(
@@ -42,4 +43,5 @@ router.include_routers(
     withdraw_router,
     tg_connection_router,
     auto_delivery_transfer_router,
+    chat_images_router,
 )

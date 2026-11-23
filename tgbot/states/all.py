@@ -82,6 +82,10 @@ class AutoResponseStates(StatesGroup):
     waiting_for_review_text = State()
 
 
+class ChatImagesStates(StatesGroup):
+    waiting_for_image = State()  # 🖼 Картинки → ➕ Добавить (автоответ или авто-выдача)
+
+
 class AutoReminderStates(StatesGroup):
     waiting_for_interval_hours = State()
     waiting_for_max_reminders = State()

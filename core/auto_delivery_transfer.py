@@ -371,7 +371,8 @@ def apply_import(current: list[dict], imported: list[dict], decisions: dict[int,
     """
     Применяет загрузку к актуальному списку.
     • без пересечений — авто-выдача добавляется в конец;
-    • «заменить» — встаёт на место первой пересекающейся, все пересекающиеся удаляются;
+    • «заменить» — встаёт на место первой пересекающейся, все пересекающиеся удаляются
+      (картинки заменяемой авто-выдачи переходят к новой — в файле выгрузки их нет);
     • «пропустить» — ничего не меняется.
     Если появилось пересечение, по которому не было решения, — ошибка (список изменился).
     """
@@ -389,6 +390,12 @@ def apply_import(current: list[dict], imported: list[dict], decisions: dict[int,
             continue
         decision = decisions.get(i)
         if decision == DECISION_REPLACE:
+            if not entry.get("images"):
+                # Картинки в файл не выгружаются — при замене оставляем картинки заменяемой авто-выдачи
+                for j in sorted(targets):
+                    if current[j].get("images"):
+                        entry = {**entry, "images": list(current[j]["images"])}
+                        break
             insert_at.setdefault(min(targets), []).append(entry)
             removed.update(targets)
             stats["replaced"] += 1

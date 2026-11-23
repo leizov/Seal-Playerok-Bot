@@ -162,3 +162,17 @@ class AutoDeliveryTransferFormat(CallbackData, prefix="adtfmt"):
 
 class AutoDeliveryTransferConflict(CallbackData, prefix="adtcf"):
     action: str  # "replace" | "skip" | "replace_all" | "skip_all"
+
+
+# ── Картинки в сообщениях (автоответы, авто-выдача) ──
+
+class ChatImagesAction(CallbackData, prefix="cimg"):
+    owner: str   # "ar" — автоответ, "ad" — авто-выдача
+    key: str     # тип автоответа (greeting, review, …) или индекс авто-выдачи
+    action: str  # menu | add | show | del | preview | clear | clear_yes
+    index: int = -1
+
+
+class AutoResponseClearText(CallbackData, prefix="arclr"):
+    message_type: str
+    confirm: int = 0

@@ -597,8 +597,14 @@ async def callback_delete_auto_delivery(callback: CallbackQuery, state: FSMConte
         auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
         if auto_delivery_index < 0 or auto_delivery_index >= len(auto_deliveries):
             raise Exception("❌ Авто-выдача не была найдена")
+        removed_images = list(auto_deliveries[auto_delivery_index].get("images") or [])
         del auto_deliveries[auto_delivery_index]
-        sett.set("auto_deliveries", auto_deliveries)
+        # Сохраняем вместе с памятью Playerok-бота и удаляем файлы картинок этой авто-выдачи
+        from .auto_delivery_transfer import save_deliveries
+        from core.chat_images import delete_images
+        save_deliveries(auto_deliveries)
+        if removed_images:
+            delete_images(removed_images)
         last_page = data.get("last_page", 0)
         
         await throw_float_message(

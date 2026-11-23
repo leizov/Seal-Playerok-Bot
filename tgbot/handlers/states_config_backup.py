@@ -6,6 +6,7 @@ from aiogram import F, Router, types
 from aiogram.fsm.context import FSMContext
 
 from core.config_backup import (
+    TELEGRAM_BOT_DOWNLOAD_LIMIT,
     format_backup_summary,
     load_backup_payload,
     save_backup_payload_to_file,
@@ -40,6 +41,11 @@ async def handler_waiting_for_config_backup_file(message: types.Message, state: 
         file_name = message.document.file_name or ""
         if not file_name.lower().endswith(".json"):
             raise ValueError("Файл должен быть в формате .json")
+        if (message.document.file_size or 0) > TELEGRAM_BOT_DOWNLOAD_LIMIT:
+            raise ValueError(
+                "Файл больше 20 МБ — Telegram не даёт боту скачать такой файл. "
+                "Новые backup-файлы больше 20 МБ бот сохраняет без картинок для чатов."
+            )
 
         file_info = await message.bot.get_file(message.document.file_id)
         downloaded_file = await message.bot.download_file(file_info.file_path)

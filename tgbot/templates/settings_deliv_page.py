@@ -10,6 +10,7 @@ from core.auto_deliveries import (
     render_multi_delivery,
     render_static_delivery,
 )
+from core.chat_images import MAX_IMAGES, missing_refs, normalize_refs
 from plbot.placeholders import placeholders_help
 from settings import Settings as sett
 
@@ -24,6 +25,7 @@ _PREVIEW_VALUES = dict(
 )
 _PREVIEW_LIMIT = 1500
 _EXPORT_HINT = "📤 <b>Выгрузить</b> — сохранить эту авто-выдачу в файл (.txt / .json) или получить её товары текстом."
+_IMAGES_HINT = f"🖼 <b>Картинки</b> — прикрепить до {MAX_IMAGES} картинок, они уйдут покупателю вместе с выдачей."
 
 
 def _cut_preview(text: str) -> str:
@@ -73,6 +75,15 @@ def _format_keyphrases(keyphrases: list[str]) -> str:
     return "</code>, <code>".join(escape(phrase) for phrase in keyphrases)
 
 
+def _images_line(delivery: dict) -> str:
+    refs = normalize_refs(delivery.get("images"))
+    line = f"🖼 <b>Картинки:</b> <code>{len(refs)}</code> из {MAX_IMAGES}"
+    lost = len(missing_refs(refs))
+    if lost:
+        line += f" (⚠️ не найдено файлов: {lost})"
+    return line
+
+
 def settings_deliv_page_text(index: int):
     auto_deliveries = normalize_auto_deliveries(sett.get("auto_deliveries") or [])
     if index < 0 or index >= len(auto_deliveries):
@@ -101,10 +112,11 @@ def settings_deliv_page_text(index: int):
             f"📤 <b>Выдано всего:</b> <code>{issued_total}</code>",
             f"📊 <b>Выдано в текущей партии:</b> <code>{issued_current_batch}</code>",
             f"🔜 <b>Следующий товар:</b> <blockquote>{next_item}</blockquote>",
+            _images_line(delivery),
         ]
         if items:
             lines += ["", multi_format_preview(fmt, items[0])]
-        lines += ["", _EXPORT_HINT, "", "Выберите параметр для изменения ↓"]
+        lines += ["", _IMAGES_HINT, _EXPORT_HINT, "", "Выберите параметр для изменения ↓"]
         return "\n".join(lines)
 
     message_lines = delivery.get("message", [])
@@ -116,10 +128,11 @@ def settings_deliv_page_text(index: int):
         f"<b>Статус:</b> {enabled}",
         f"🔑 <b>Ключевые фразы:</b> <code>{keyphrases}</code>",
         f"💬 <b>Шаблон сообщения:</b> <blockquote>{message}</blockquote>",
+        _images_line(delivery),
     ]
     if message_lines:
         lines += ["", static_message_preview("\n".join(message_lines))]
-    lines += ["", _EXPORT_HINT, "", "Выберите параметр для изменения ↓"]
+    lines += ["", _IMAGES_HINT, _EXPORT_HINT, "", "Выберите параметр для изменения ↓"]
     return "\n".join(lines)
 
 
@@ -150,6 +163,11 @@ def settings_deliv_page_kb(index: int, page: int = 0):
         message = "\n".join(delivery.get("message", [])) or "❌ Не задано"
         rows.append([InlineKeyboardButton(text=f"💬 Сообщение: {message}", callback_data="enter_auto_delivery_message")])
 
+    images_count = len(normalize_refs(delivery.get("images")))
+    rows.append([InlineKeyboardButton(
+        text=f"🖼 Картинки ({images_count}/{MAX_IMAGES})",
+        callback_data=calls.ChatImagesAction(owner="ad", key=str(index), action="open").pack(),
+    )])
     rows.append([InlineKeyboardButton(text="📤 Выгрузить", callback_data="adt_one")])
     rows.append([InlineKeyboardButton(text="🗑️ Удалить авто-выдачу", callback_data="confirm_deleting_auto_delivery")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=calls.AutoDeliveriesPagination(page=page).pack())])
