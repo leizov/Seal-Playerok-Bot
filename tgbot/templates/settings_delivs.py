@@ -19,7 +19,7 @@ def _cut(text: str, max_len: int) -> str:
 
 
 def _kind_tag(kind: str) -> str:
-    return "📦 [МУЛЬТИ]" if kind == AUTO_DELIVERY_KIND_MULTI else "🧾 [ОБЫЧНАЯ]"
+    return "[МУЛЬТИ]" if kind == AUTO_DELIVERY_KIND_MULTI else "[ОБЫЧНАЯ]"
 
 
 def _delivery_preview(delivery: dict) -> str:
