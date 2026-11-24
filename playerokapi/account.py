@@ -2828,7 +2828,8 @@ class Account:
                 ids.append(self.upload_image(chat_id, image).id)
             payload = {
                 "operationName": "createChatMessage",
-                "query": QUERIES.get("createChatMessage"),
+                # Та же мутация, но в ответе есть images — по нему видно, прикрепил ли Playerok картинки
+                "query": QUERIES.get("createChatMessageWithFile"),
                 "variables": {
                     "input": {
                         "chatId": chat_id,

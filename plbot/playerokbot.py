@@ -897,7 +897,8 @@ class PlayerokBot:
         if new_way_error is None:
             for ix in range(max_attempts):
                 try:
-                    return self.account.send_message(chat_id, text or None, image_ids=image_ids, mark_chat_as_read=False)
+                    sent = self.account.send_message(chat_id, text or None, image_ids=image_ids, mark_chat_as_read=False)
+                    return self._check_attached_images(chat_id, text, images, sent, max_attempts)
                 except plapi_exceptions.RequestFailedError as e:
                     # Сервер ответил ошибкой — сообщение не создано, можно повторить
                     new_way_error = e
@@ -935,6 +936,52 @@ class PlayerokBot:
             )
         return last_image_message
 
+    @staticmethod
+    def _attached_images_count(message) -> int | None:
+        """Сколько картинок Playerok прикрепил к сообщению (None — ответ не позволяет понять)."""
+        if message is None:
+            return None
+        image_list = getattr(getattr(message, "images", None), "image_list", None)
+        count = len(image_list) if isinstance(image_list, list) else 0
+        if getattr(message, "file", None) is not None:
+            count += 1
+        return count
+
+    def _check_attached_images(self, chat_id: str, text: str, images: list, sent, max_attempts: int = 3):
+        """
+        Проверяет по ответу Playerok, что картинки прикрепились к сообщению.
+        Если сообщение с текстом ушло без картинок — отправляет их отдельным сообщением.
+        """
+        attached = self._attached_images_count(sent)
+        if attached is None or attached >= len(images):
+            self.logger.info(f"🖼 Отправил сообщение с картинками в чат {chat_id}: прикреплено {attached if attached is not None else '?'} из {len(images)}")
+            return sent
+        if not text:
+            self.logger.warning(
+                f"{Fore.YELLOW}Playerok вернул сообщение с {attached} из {len(images)} картинок (чат {chat_id}) — "
+                "повторно не отправляю, проверьте чат"
+            )
+            return sent
+        self.logger.warning(
+            f"{Fore.YELLOW}Playerok принял сообщение с текстом, но прикрепил {attached} из {len(images)} картинок "
+            f"(чат {chat_id}) — отправляю картинки отдельным сообщением"
+        )
+        try:
+            ids = [self.account.upload_image(chat_id, image).id for image in images]
+            images_message = self.account.send_message(chat_id, None, image_ids=ids, mark_chat_as_read=False)
+            self.logger.info(
+                f"🖼 Отправил картинки отдельным сообщением в чат {chat_id}: прикреплено "
+                f"{self._attached_images_count(images_message)} из {len(images)}"
+            )
+        except Exception as e:
+            self.logger.warning(f"{Fore.YELLOW}Не удалось отправить картинки отдельным сообщением: {e}. Пробую старый способ")
+            for image in images:
+                self._send_with_retries(
+                    lambda image=image: self.account.send_message(chat_id, photo_file_path=image, mark_chat_as_read=False),
+                    chat_id, "картинка", max_attempts,
+                )
+        return sent
+
     def _auto_response_config(self, message_name: str, messages_config_name: str = "messages",
                               messages_data: dict = DATA) -> dict | None:
         """Настройки автоответа, если он включён (и включён общий переключатель автоответа)."""
@@ -962,10 +1009,13 @@ class PlayerokBot:
             self.logger.warning(f"Автоответ {message_name}: не найдены файлы картинок {', '.join(lost)} — отправлю без них")
         return paths_
 
-    def send_auto_response(self, chat_id: str, message_name: str, **kwargs) -> types.ChatMessage | None:
+    def send_auto_response(self, chat_id: str, message_name: str, /, **kwargs) -> types.ChatMessage | None:
         """
         Отправляет автоответ: текст и/или картинки одним сообщением.
         Ничего не отправляет, если автоответ выключен или в нём нет ни текста, ни картинок.
+
+        chat_id и message_name — только позиционные: в kwargs (подстановках для текста)
+        тоже бывает chat_id, и он не должен конфликтовать с чатом получателя.
         """
         mess = self._auto_response_config(message_name)
         if mess is None:
@@ -1355,6 +1405,10 @@ class PlayerokBot:
         text = ""
         if message.text is not None: text = message.text
         elif message.file is not None: text = f"{Fore.LIGHTMAGENTA_EX}Изображение {Fore.WHITE}({message.file.url})"
+        image_list = getattr(getattr(message, "images", None), "image_list", None) or []
+        if image_list:
+            images_line = f"{Fore.LIGHTMAGENTA_EX}🖼 Картинки ({len(image_list)}): {Fore.WHITE}" + " ".join(str(img.url) for img in image_list)
+            text = f"{text}\n{images_line}" if text else images_line
         for raw_line in text.split("\n"):
             if not raw_line.strip():
                 self.logger.info(f"{ACCENT_COLOR}│")
