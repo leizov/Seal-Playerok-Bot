@@ -857,16 +857,43 @@ class PlayerokBot:
             chat_id, text, max_attempts,
         )
 
+    # Сразу после первой покупки у продавца Playerok может ответить NOT_FOUND на сообщение
+    # в новый чат: сделка уже пришла, а чат появляется в базе Playerok через несколько секунд.
+    # Ошибка значит, что сообщение не создано, поэтому повтор не приведёт к дублю.
+    CHAT_NOT_FOUND_RETRY_DELAYS = (2, 3, 5, 8)
+
+    def _wait_if_chat_not_found(self, error: Exception, chat_id: str, retry_no: int) -> bool:
+        """True — Playerok ответил NOT_FOUND: подождали, запрос можно повторить."""
+        if not isinstance(error, plapi_exceptions.RequestError):
+            return False
+        if str(getattr(error, "error_code", "")).upper() != "NOT_FOUND":
+            return False
+        if retry_no >= len(self.CHAT_NOT_FOUND_RETRY_DELAYS):
+            return False
+        delay = self.CHAT_NOT_FOUND_RETRY_DELAYS[retry_no]
+        self.logger.warning(
+            f"{Fore.YELLOW}Playerok пока не нашёл чат {chat_id} (NOT_FOUND, так бывает сразу после новой сделки) — "
+            f"повторю через {delay} сек ({retry_no + 1}/{len(self.CHAT_NOT_FOUND_RETRY_DELAYS)})"
+        )
+        time.sleep(delay)
+        return True
+
     def _send_with_retries(self, send_func, chat_id: str, text: str | None, max_attempts: int = 3):
-        for ix in range(max_attempts):
+        ix = 0
+        not_found_retries = 0
+        while ix < max_attempts:
             try:
                 # mark_chat_as_read=False: чат уже помечен в send_message
                 return send_func()
             except plapi_exceptions.RequestFailedError as e:
                 self.logger.error(f'Ошибка при отправке соощения\n{e}\n{ix+1}/{max_attempts} попытка')
+                ix += 1
                 time.sleep(4)
                 continue
             except Exception as e:
+                if self._wait_if_chat_not_found(e, chat_id, not_found_retries):
+                    not_found_retries += 1
+                    continue
                 text = text.replace('\n', '').strip() if text else 'БЕЗ ТЕКСТА'
                 self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при отправке сообщения {Fore.LIGHTWHITE_EX}«{text}» {Fore.LIGHTRED_EX}в чат {Fore.LIGHTWHITE_EX}{chat_id} {Fore.LIGHTRED_EX}: {Fore.WHITE}{e}")
                 return
@@ -881,31 +908,42 @@ class PlayerokBot:
         """
         image_ids: list[str] = []
         new_way_error: Exception | None = None
+        not_found_retries = 0
         for image in images:
-            for ix in range(max_attempts):
+            ix = 0
+            while ix < max_attempts:
                 try:
                     image_ids.append(self.account.upload_image(chat_id, image).id)
                     new_way_error = None
                     break
                 except Exception as e:
                     new_way_error = e
-                    if ix < max_attempts - 1:
+                    if self._wait_if_chat_not_found(e, chat_id, not_found_retries):
+                        not_found_retries += 1
+                        continue
+                    ix += 1
+                    if ix < max_attempts:
                         time.sleep(2)
             if new_way_error is not None:
                 break
 
         if new_way_error is None:
-            for ix in range(max_attempts):
+            ix = 0
+            while ix < max_attempts:
                 try:
                     sent = self.account.send_message(chat_id, text or None, image_ids=image_ids, mark_chat_as_read=False)
                     return self._check_attached_images(chat_id, text, images, sent, max_attempts)
                 except plapi_exceptions.RequestFailedError as e:
                     # Сервер ответил ошибкой — сообщение не создано, можно повторить
                     new_way_error = e
-                    if ix < max_attempts - 1:
+                    ix += 1
+                    if ix < max_attempts:
                         time.sleep(4)
                 except Exception as e:
                     new_way_error = e
+                    if self._wait_if_chat_not_found(e, chat_id, not_found_retries):
+                        not_found_retries += 1
+                        continue
                     break
 
         self.logger.warning(
@@ -1136,6 +1174,28 @@ class PlayerokBot:
         except Exception as e:
             self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при восстановлении истёкших предметов: {Fore.WHITE}{e}")
 
+    def _kept_in_sale_lot(self, item_name: str | None):
+        """
+        Активный лот аккаунта с тем же названием и включённым «Оставлять в продаже».
+        Такой лот после покупки не уходит в проданные — восстанавливать нечего.
+        """
+        name = (item_name or "").strip()
+        if not name:
+            return None
+        same_name = [
+            lot for lot in self.get_my_items(statuses=[ItemStatuses.APPROVED])
+            if (getattr(lot, "name", None) or "").strip() == name
+        ]
+        for lot in same_name:
+            try:
+                full_lot = self.account.get_item(lot.id)
+            except Exception as e:
+                self.logger.debug(f"Не удалось получить лот {lot.id} для проверки «Оставлять в продаже»: {e}")
+                continue
+            if getattr(full_lot, "keep_in_sale", None):
+                return full_lot
+        return None
+
     def restore_last_sold_item(self, item: Item):
         """
         Восстанавливает последний проданный предмет.
@@ -1144,6 +1204,19 @@ class PlayerokBot:
         :type item: `playerokapi.types.Item`
         """
         if not self.is_connected or self.account is None:
+            return
+        try:
+            kept_lot = self._kept_in_sale_lot(item.name)
+        except Exception as e:
+            kept_lot = None
+            self.logger.warning(
+                f"Не удалось проверить «Оставлять в продаже» у товара {item.name}: {e} — восстанавливаю как обычно"
+            )
+        if kept_lot is not None:
+            self.logger.info(
+                f"{Fore.LIGHTWHITE_EX}«{item.name}» {Fore.WHITE}— включено «Оставлять в продаже», "
+                f"лот остался в продаже, восстанавливать не нужно"
+            )
             return
         try:
             profile = None
@@ -1164,9 +1237,10 @@ class PlayerokBot:
                 _item = [profile_item for profile_item in items if profile_item.name == item.name]
                 if _item:
                     break
-                self.logger.warning(
-                    f'Не нашёл товар {item.name} для востановления на нашём аккаунте\n'
-                    f'Попытка {i + 1}/{attempts}'
+                # Проданный товар появляется в списке не сразу — промежуточные попытки не шумят в консоли
+                self.logger.debug(
+                    f'Не нашёл товар {item.name} для востановления на нашём аккаунте, '
+                    f'попытка {i + 1}/{attempts}'
                 )
                 time.sleep((i+1) * attempts_delay)
 
