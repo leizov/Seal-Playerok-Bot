@@ -115,3 +115,12 @@ class ConfigBackupStates(StatesGroup):
 
 class PluginStates(StatesGroup):
     waiting_for_plugin_file = State()
+
+
+class RaisePacksStates(StatesGroup):
+    waiting_for_new_pack_name = State()
+    waiting_for_pack_name = State()
+    waiting_for_pack_interval = State()
+    waiting_for_pack_timings = State()
+    waiting_for_pack_phrases = State()
+    waiting_for_pack_phrases_file = State()

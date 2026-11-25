@@ -17,6 +17,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from core.cute_utilities import get_random_cute_png_path
 from core.chat_images import existing_image_paths, missing_refs
+from core import raise_packs
 from playerokapi.account import Account
 from playerokapi import exceptions as plapi_exceptions
 from playerokapi.enums import *
@@ -52,8 +53,10 @@ from .raise_times import (
     cleanup_completed_timings,
     get_msk_now,
     get_raise_times,
+    is_pack_timing_completed,
     is_timing_completed,
     load_raise_times,
+    mark_pack_timing_completed,
     mark_timing_completed,
     set_last_raise_time,
     set_raise_times,
@@ -523,6 +526,12 @@ class PlayerokBot:
 
                     # Проверяем включено ли автоподнятие
                     if not auto_raise_config["enabled"]:
+                        await asyncio.sleep(60)
+                        continue
+
+                    # Тип настройки «Паки»: у каждого пака свои лоты и своё расписание
+                    if raise_packs.normalize_source(auto_raise_config.get("source")) == raise_packs.SOURCE_PACKS:
+                        await self._auto_raise_packs_tick()
                         await asyncio.sleep(60)
                         continue
 
@@ -1297,6 +1306,51 @@ class PlayerokBot:
                 self.logger.error(f"{Fore.LIGHTRED_EX}Не удалось восстановить предмет «{new_item.name}». Его статус: {Fore.WHITE}{new_item.status.name}")
         except Exception as e:
             self.logger.error(f"{Fore.LIGHTRED_EX}При восстановлении предмета «{item.name}» произошла ошибка: {Fore.WHITE}{e}")
+
+    async def _auto_raise_packs_tick(self):
+        """Один круг автоподнятия в режиме «Паки»: каждый пак поднимает свои лоты по своему расписанию."""
+        packs = [pack for pack in raise_packs.load_packs() if raise_packs.is_working(pack)]
+        if not packs:
+            return
+
+        now_msk = get_msk_now()
+        msk_date = now_msk.strftime("%Y-%m-%d")
+        now_minutes = now_msk.hour * 60 + now_msk.minute
+        cleanup_completed_timings(msk_date)
+
+        # Паки, которым сейчас пора: интервальные — всегда (интервал проверяется по каждому лоту),
+        # по таймингу — если до ближайшего тайминга не больше 5 минут и сегодня он ещё не выполнялся
+        due_ids: set[str] = set()
+        due_timings: dict[str, str] = {}
+        for pack in packs:
+            if pack["mode"] == raise_packs.MODE_TIMING:
+                timing = raise_packs.due_timing(pack["timings"], now_minutes)
+                if timing is None or is_pack_timing_completed(msk_date, pack["id"], timing):
+                    continue
+                due_timings[pack["id"]] = timing
+            due_ids.add(pack["id"])
+        if not due_ids:
+            return
+
+        excluded = (self.auto_raise_items or {}).get("excluded", [])
+        for item in self.get_my_items(statuses=[ItemStatuses.APPROVED]):
+            try:
+                if not raise_packs.is_premium(item) or raise_packs.is_excluded(item.name, excluded):
+                    continue
+                # Лот принадлежит первому включённому паку по списку, под фразы которого подходит
+                pack = raise_packs.find_pack_for_item(item.name, packs)
+                if pack is None or pack["id"] not in due_ids:
+                    continue
+                if pack["mode"] == raise_packs.MODE_INTERVAL and not should_raise_item(item.id, pack["interval_hours"]):
+                    continue
+                self.logger.info(f"{Fore.CYAN}🔄 Поднимаю товар «{item.name}» (пак «{pack['name']}»)...")
+                self.raise_item(item)
+                await asyncio.sleep(2)
+            except Exception as e:
+                self.logger.error(f"{Fore.LIGHTRED_EX}Ошибка при обработке товара «{item.name}»: {Fore.WHITE}{e}", exc_info=True)
+
+        for pack_id, timing in due_timings.items():
+            mark_pack_timing_completed(msk_date, pack_id, timing)
 
     def raise_item(self, item: types.ItemProfile) -> bool:
         """

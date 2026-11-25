@@ -4,6 +4,7 @@
 Содержит:
 1) times: время последнего поднятия по item_id (для интервального режима)
 2) completed_timings_by_date: выполненные тайминги по датам МСК (для режима по таймингу)
+3) completed_pack_timings_by_date: выполненные тайминги паков по датам МСК ({дата: {id пака: [тайминги]}})
 """
 
 from __future__ import annotations
@@ -48,17 +49,23 @@ def _normalize_msk_date(value: str) -> str | None:
     return date_obj.strftime("%Y-%m-%d")
 
 
+def _sort_timings(values) -> list[str]:
+    return sorted(values, key=lambda item: (int(item[:2]), int(item[3:])))
+
+
 class RaiseTimes:
     """Хранилище данных автоподнятия."""
 
     def __init__(self):
         self.times: Dict[str, float] = {}  # {item_id: timestamp}
         self.completed_timings_by_date: Dict[str, list[str]] = {}  # {"YYYY-MM-DD": ["HH:MM", ...]}
+        self.completed_pack_timings_by_date: Dict[str, Dict[str, list[str]]] = {}  # {"YYYY-MM-DD": {pack_id: ["HH:MM"]}}
 
     def to_dict(self) -> dict:
         return {
             "times": self.times,
             "completed_timings_by_date": self.completed_timings_by_date,
+            "completed_pack_timings_by_date": self.completed_pack_timings_by_date,
         }
 
     @classmethod
@@ -97,6 +104,25 @@ class RaiseTimes:
                     )
 
             obj.completed_timings_by_date = sanitized_completed
+
+        raw_pack_completed = data.get("completed_pack_timings_by_date", {})
+        if isinstance(raw_pack_completed, dict):
+            sanitized_packs: dict[str, dict[str, list[str]]] = {}
+            for raw_date, raw_packs in raw_pack_completed.items():
+                normalized_date = _normalize_msk_date(str(raw_date))
+                if not normalized_date or not isinstance(raw_packs, dict):
+                    continue
+                packs_for_date: dict[str, list[str]] = {}
+                for pack_id, raw_timings in raw_packs.items():
+                    values = {
+                        t for t in (_normalize_timing(str(v)) for v in (raw_timings if isinstance(raw_timings, list) else []))
+                        if t
+                    }
+                    if values:
+                        packs_for_date[str(pack_id)] = _sort_timings(values)
+                if packs_for_date:
+                    sanitized_packs[normalized_date] = packs_for_date
+            obj.completed_pack_timings_by_date = sanitized_packs
 
         return obj
 
@@ -208,13 +234,42 @@ def cleanup_completed_timings(current_msk_date: str):
         return
 
     raise_times = get_raise_times()
-    if not raise_times.completed_timings_by_date:
-        return
+    changed = False
 
-    if list(raise_times.completed_timings_by_date.keys()) == [normalized_date]:
-        return
+    if raise_times.completed_timings_by_date and list(raise_times.completed_timings_by_date.keys()) != [normalized_date]:
+        raise_times.completed_timings_by_date = {
+            normalized_date: list(raise_times.completed_timings_by_date.get(normalized_date, []))
+        } if normalized_date in raise_times.completed_timings_by_date else {}
+        changed = True
 
-    raise_times.completed_timings_by_date = {
-        normalized_date: list(raise_times.completed_timings_by_date.get(normalized_date, []))
-    } if normalized_date in raise_times.completed_timings_by_date else {}
+    pack_completed = raise_times.completed_pack_timings_by_date
+    if pack_completed and list(pack_completed.keys()) != [normalized_date]:
+        raise_times.completed_pack_timings_by_date = {
+            normalized_date: pack_completed[normalized_date]
+        } if normalized_date in pack_completed else {}
+        changed = True
+
+    if changed:
+        save_raise_times()
+
+
+def is_pack_timing_completed(msk_date: str, pack_id: str, timing: str) -> bool:
+    normalized_date = _normalize_msk_date(msk_date)
+    normalized_timing = _normalize_timing(timing)
+    if not normalized_date or not normalized_timing:
+        return False
+    packs_for_date = get_raise_times().completed_pack_timings_by_date.get(normalized_date, {})
+    return normalized_timing in set(packs_for_date.get(str(pack_id), []))
+
+
+def mark_pack_timing_completed(msk_date: str, pack_id: str, timing: str):
+    normalized_date = _normalize_msk_date(msk_date)
+    normalized_timing = _normalize_timing(timing)
+    if not normalized_date or not normalized_timing:
+        return
+    raise_times = get_raise_times()
+    packs_for_date = raise_times.completed_pack_timings_by_date.setdefault(normalized_date, {})
+    values = set(packs_for_date.get(str(pack_id), []))
+    values.add(normalized_timing)
+    packs_for_date[str(pack_id)] = _sort_timings(values)
     save_raise_times()

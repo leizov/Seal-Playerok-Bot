@@ -176,3 +176,16 @@ class ChatImagesAction(CallbackData, prefix="cimg"):
 class AutoResponseClearText(CallbackData, prefix="arclr"):
     message_type: str
     confirm: int = 0
+
+
+# ── Паки автоподнятия ──
+
+class RaisePacksPagination(CallbackData, prefix="rpkpag"):
+    page: int
+
+
+class RaisePackAction(CallbackData, prefix="rpk"):
+    pid: str      # id пака
+    action: str   # open | toggle | mode | interval | timings | rename | up | down | delete | delete_yes
+                  # phrases | phrase_add | phrase_file | phrase_del | lots | raise | raise_yes
+    index: int = 0  # страница фраз (phrases) или номер фразы (phrase_del)

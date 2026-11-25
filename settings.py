@@ -66,7 +66,8 @@ CONFIG = SettingsFile(
                 "mode": "interval",
                 "interval_hours": 24.0,
                 "timings": [],
-                "all": True
+                "all": True,
+                "source": "lots"
             },
             "auto_complete_deals": {
                 "enabled": False,
@@ -230,6 +231,12 @@ AUTO_RAISE_ITEMS = SettingsFile(
         "excluded": []
     }
 )
+AUTO_RAISE_PACKS = SettingsFile(
+    name="auto_raise_packs",
+    path=paths.AUTO_RAISE_PACKS_FILE,
+    need_restore=False,
+    default=[]
+)
 AUTO_COMPLETE_ITEMS = SettingsFile(
     name="auto_complete_items",
     path=paths.AUTO_COMPLETE_ITEMS_FILE,
@@ -261,6 +268,7 @@ DATA = [
     AUTO_DELIVERIES,
     AUTO_RESTORE_ITEMS,
     AUTO_RAISE_ITEMS,
+    AUTO_RAISE_PACKS,
     AUTO_COMPLETE_ITEMS,
     QUICK_REPLIES,
     PROXY_LIST,

@@ -29,6 +29,7 @@ from .settings_restore_excluded import *
 from .settings_raise import *
 from .settings_raise_included import *
 from .settings_raise_excluded import *
+from .settings_raise_packs import *
 from .settings_auto_complete import *
 from .settings_auto_complete_included import *
 from .settings_auto_complete_excluded import *
