@@ -61,6 +61,166 @@ async def show_phrases(callback, state: FSMContext, pack: dict, page: int = 0, n
     )
 
 
+async def show_schedule(callback, state: FSMContext, pack: dict, notice: str | None = None,
+                        answered: bool = False, message=None):
+    await throw_float_message(
+        state=state,
+        message=message if message is not None else callback.message,
+        text=templ.raise_pack_schedule_text(pack, notice=notice),
+        reply_markup=templ.raise_pack_schedule_kb(pack),
+        callback=None if answered or callback is None else callback,
+    )
+
+
+async def show_segment(callback, state: FSMContext, pack: dict, segment: dict, notice: str | None = None,
+                       answered: bool = False, message=None):
+    await throw_float_message(
+        state=state,
+        message=message if message is not None else callback.message,
+        text=templ.raise_pack_segment_text(pack, segment, notice=notice),
+        reply_markup=templ.raise_pack_segment_kb(pack, segment),
+        callback=None if answered or callback is None else callback,
+    )
+
+
+# ── Участки расписания «По позиции»: пошаговый ввод ──
+# В FSM хранится raise_seg = {"pid": id пака, "sid": id участка или None (новый участок),
+#                              "start": мин, "end": мин, "position": место или None}
+
+def segment_context(data: dict, pack_id: str) -> dict | None:
+    ctx = data.get("raise_seg")
+    if not isinstance(ctx, dict) or ctx.get("pid") != pack_id:
+        return None
+    return ctx
+
+
+def _context_range(pack: dict, ctx: dict) -> str:
+    if ctx.get("sid"):
+        segment = raise_packs.find_segment(pack["position_schedule"], ctx["sid"])
+        if segment is not None:
+            return raise_packs.segment_range(segment)
+    if ctx.get("start") is None:
+        return ""
+    return raise_packs.format_range(ctx["start"], ctx["end"])
+
+
+def _changes_notice(changes) -> str:
+    lines = raise_packs.describe_changes(changes)
+    if not lines:
+        return ""
+    return "\n\n⚠️ <b>Участок пересёкся с другими, они урезаны:</b>\n" + "\n".join(lines)
+
+
+async def _finish_segment_input(state: FSMContext):
+    await state.set_state(None)
+    await state.update_data(raise_seg=None)
+
+
+async def prompt_segment_step(state: FSMContext, pack: dict, ctx: dict, step: str, callback=None,
+                              message=None, error: str | None = None):
+    """Запрос шага ввода участка: time | position | cooldown."""
+    sid = ctx.get("sid")
+    is_new = not sid
+    segment = raise_packs.find_segment(pack["position_schedule"], sid) if sid else None
+    time_range = _context_range(pack, ctx)
+    if step == "time":
+        await state.set_state(states.RaisePacksStates.waiting_for_segment_time)
+        text = templ.raise_pack_segment_time_text(pack, segment, error=error)
+        kb = templ.raise_pack_segment_back_kb(pack, sid)
+    elif step == "position":
+        await state.set_state(states.RaisePacksStates.waiting_for_segment_position)
+        text = templ.raise_pack_segment_position_text(pack, time_range, is_new, error=error)
+        kb = templ.raise_pack_segment_position_kb(pack, sid)
+    else:
+        await state.set_state(states.RaisePacksStates.waiting_for_segment_cooldown)
+        text = templ.raise_pack_segment_cooldown_text(pack, time_range, is_new, error=error)
+        kb = templ.raise_pack_segment_cooldown_kb(pack, sid)
+    await state.update_data(raise_seg=ctx, raise_pack_id=pack["id"])
+    await throw_float_message(
+        state=state,
+        message=message if message is not None else callback.message,
+        text=text,
+        reply_markup=kb,
+        callback=callback,
+    )
+
+
+async def show_cooldown_confirm(state: FSMContext, pack: dict, ctx: dict, minutes: int, message=None):
+    """Кулдаун меньше 10 минут — только с подтверждением. Пока ждём, можно ввести другое число."""
+    await state.set_state(states.RaisePacksStates.waiting_for_segment_cooldown)
+    await state.update_data(raise_seg=ctx, raise_pack_id=pack["id"])
+    await throw_float_message(
+        state=state,
+        message=message,
+        text=templ.raise_pack_cooldown_confirm_text(pack, _context_range(pack, ctx), minutes),
+        reply_markup=templ.raise_pack_cooldown_confirm_kb(pack, minutes),
+    )
+
+
+async def apply_segment_value(state: FSMContext, pack: dict, packs: list[dict], ctx: dict, field: str, value,
+                              callback=None, message=None):
+    """
+    Принимает значение шага. Существующий участок — сразу сохраняет изменение.
+    Новый участок — переходит к следующему шагу, а после последнего добавляет участок в расписание.
+    """
+    schedule = pack["position_schedule"]
+    sid = ctx.get("sid")
+
+    if sid:
+        segment = raise_packs.find_segment(schedule, sid)
+        if segment is None:
+            await _finish_segment_input(state)
+            return await show_schedule(
+                callback, state, pack, message=message,
+                notice="❌ Участок не найден — расписание уже изменилось",
+            )
+        changes = []
+        if field == "time":
+            schedule, changes = raise_packs.set_segment_time(schedule, sid, *value)
+            notice = f"✅ Время участка: {raise_packs.format_range(*value)}"
+        elif field == "position":
+            segment["position"] = value
+            notice = (
+                "✅ В это время пак ничего не поднимает" if value is None
+                else f"✅ Место участка: ≤ {value}"
+            )
+        else:
+            segment["cooldown_minutes"] = value
+            notice = f"✅ Кулдаун участка: {raise_packs.format_cooldown(value)}"
+        pack["position_schedule"] = schedule
+        raise_packs.save_packs(packs)
+        await _finish_segment_input(state)
+        segment = raise_packs.find_segment(pack["position_schedule"], sid)
+        return await show_segment(
+            callback, state, pack, segment, message=message, notice=notice + _changes_notice(changes),
+        )
+
+    if field == "time":
+        ctx.update(start=value[0], end=value[1])
+        return await prompt_segment_step(state, pack, ctx, "position", callback=callback, message=message)
+    if ctx.get("start") is None:
+        await _finish_segment_input(state)
+        return await show_schedule(callback, state, pack, message=message, notice="❌ Ввод устарел — начните заново")
+    if field == "position":
+        ctx["position"] = value
+        if value is not None:
+            return await prompt_segment_step(state, pack, ctx, "cooldown", callback=callback, message=message)
+        cooldown = raise_packs.DEFAULT_COOLDOWN_MINUTES
+    else:
+        cooldown = value
+
+    segment = raise_packs.make_segment(schedule, ctx["start"], ctx["end"], ctx.get("position"), cooldown)
+    schedule, changes = raise_packs.add_segment(schedule, segment)
+    pack["position_schedule"] = schedule
+    raise_packs.save_packs(packs)
+    await _finish_segment_input(state)
+    notice = (
+        f"✅ Участок {raise_packs.segment_range(segment)} добавлен: {raise_packs.segment_summary(segment)}"
+        + _changes_notice(changes)
+    )
+    return await show_schedule(callback, state, pack, message=message, notice=notice)
+
+
 async def _load_lots(pack_id: str) -> dict:
     """Активные лоты аккаунта, разобранные относительно пака. Без подключения — исключение."""
     plbot = get_playerok_bot()
@@ -126,12 +286,90 @@ async def callback_raise_pack_action(callback: CallbackQuery, callback_data: cal
         raise_packs.save_packs(packs)
         return await show_pack(callback, state, pack, packs)
 
-    if action == "mode":
-        pack["mode"] = (
-            raise_packs.MODE_INTERVAL if pack["mode"] == raise_packs.MODE_TIMING else raise_packs.MODE_TIMING
+    if action in ("mode", "mode_pick"):
+        # Выбор режима ничего не сохраняет — только показывает описание; сохраняет «✅ Сохранить»
+        index = callback_data.index
+        selected = (
+            raise_packs.MODES[index] if action == "mode_pick" and 0 <= index < len(raise_packs.MODES)
+            else pack["mode"]
         )
+        return await throw_float_message(
+            state=state,
+            message=callback.message,
+            text=templ.raise_pack_mode_text(pack, selected),
+            reply_markup=templ.raise_pack_mode_kb(pack, selected),
+            callback=callback,
+        )
+
+    if action == "mode_save":
+        index = callback_data.index
+        if not 0 <= index < len(raise_packs.MODES):
+            return await show_pack(callback, state, pack, packs)
+        mode = raise_packs.MODES[index]
+        if mode == pack["mode"]:
+            return await show_pack(callback, state, pack, packs)
+        if mode == raise_packs.MODE_POSITION and not pack["position_schedule"]:
+            # Первое включение «По позиции»: спрашиваем место — оно станет участком «весь день»
+            await state.set_state(states.RaisePacksStates.waiting_for_pack_first_position)
+            await state.update_data(raise_pack_id=pack["id"])
+            return await throw_float_message(
+                state=state,
+                message=callback.message,
+                text=templ.raise_pack_first_position_text(pack),
+                reply_markup=templ.raise_pack_back_kb(pack, "mode_pick", index),
+                callback=callback,
+            )
+        pack["mode"] = mode
         raise_packs.save_packs(packs)
-        return await show_pack(callback, state, pack, packs)
+        return await show_pack(callback, state, pack, packs, notice=f"✅ Режим сохранён: {templ.MODE_NAMES[mode]}")
+
+    if action == "schedule":
+        return await show_schedule(callback, state, pack)
+
+    if action == "seg_add":
+        if len(pack["position_schedule"]) >= raise_packs.MAX_SEGMENTS:
+            await callback.answer(
+                f"В расписании уже {raise_packs.MAX_SEGMENTS} участков — удалите лишние", show_alert=True,
+            )
+            return await show_schedule(callback, state, pack, answered=True)
+        ctx = {"pid": pack["id"], "sid": None, "start": None, "end": None, "position": None}
+        return await prompt_segment_step(state, pack, ctx, "time", callback=callback)
+
+    if action in ("seg", "seg_time", "seg_pos", "seg_cd", "seg_del"):
+        segment = raise_packs.find_segment(pack["position_schedule"], callback_data.index)
+        if segment is None:
+            await callback.answer("Участок не найден — расписание уже изменилось", show_alert=True)
+            return await show_schedule(callback, state, pack, answered=True)
+        if action == "seg":
+            return await show_segment(callback, state, pack, segment)
+        if action == "seg_del":
+            pack["position_schedule"], _ = raise_packs.delete_segment(pack["position_schedule"], segment["id"])
+            raise_packs.save_packs(packs)
+            return await show_schedule(
+                callback, state, pack,
+                notice=f"🗑 Участок {raise_packs.segment_range(segment)} удалён — "
+                       "это время теперь пустое, в него ничего не поднимается",
+            )
+        ctx = {"pid": pack["id"], "sid": segment["id"]}
+        step = {"seg_time": "time", "seg_pos": "position", "seg_cd": "cooldown"}[action]
+        return await prompt_segment_step(state, pack, ctx, step, callback=callback)
+
+    if action in ("seg_skip", "seg_cd_set", "seg_cd_again"):
+        ctx = segment_context(await state.get_data(), pack["id"])
+        if ctx is None or (action == "seg_skip" and (ctx.get("sid") or 0) != callback_data.index):
+            await callback.answer("Действие устарело — откройте расписание заново", show_alert=True)
+            return await show_schedule(callback, state, pack, answered=True)
+        if action == "seg_cd_again":
+            return await prompt_segment_step(state, pack, ctx, "cooldown", callback=callback)
+        if action == "seg_skip":
+            return await apply_segment_value(state, pack, packs, ctx, "position", None, callback=callback)
+        minutes = callback_data.index
+        if minutes < raise_packs.MIN_COOLDOWN_MINUTES:
+            await callback.answer(
+                f"Кулдаун не может быть меньше {raise_packs.MIN_COOLDOWN_MINUTES} минут", show_alert=True,
+            )
+            return await prompt_segment_step(state, pack, ctx, "cooldown", callback=None, message=callback.message)
+        return await apply_segment_value(state, pack, packs, ctx, "cooldown", minutes, callback=callback)
 
     if action in ("up", "down"):
         target = position - 1 if action == "up" else position + 1
@@ -267,10 +505,12 @@ async def callback_raise_pack_action(callback: CallbackQuery, callback_data: cal
                 ),
                 reply_markup=templ.raise_pack_lots_kb(pack),
             )
+        plbot = get_playerok_bot()
+        positions = plbot.get_lot_positions() if hasattr(plbot, "get_lot_positions") else {}
         return await throw_float_message(
             state=state,
             message=callback.message,
-            text=templ.raise_pack_lots_text(pack, lots),
+            text=templ.raise_pack_lots_text(pack, lots, positions=positions),
             reply_markup=templ.raise_pack_lots_kb(pack),
         )
 

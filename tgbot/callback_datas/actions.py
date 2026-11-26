@@ -186,6 +186,8 @@ class RaisePacksPagination(CallbackData, prefix="rpkpag"):
 
 class RaisePackAction(CallbackData, prefix="rpk"):
     pid: str      # id пака
-    action: str   # open | toggle | mode | interval | timings | rename | up | down | delete | delete_yes
+    action: str   # open | toggle | mode | mode_pick | mode_save | interval | timings | rename | up | down | delete | delete_yes
                   # phrases | phrase_add | phrase_file | phrase_del | lots | raise | raise_yes
-    index: int = 0  # страница фраз (phrases) или номер фразы (phrase_del)
+                  # schedule | seg | seg_add | seg_time | seg_pos | seg_cd | seg_del | seg_skip | seg_cd_set | seg_cd_again
+    index: int = 0  # страница фраз (phrases), номер фразы (phrase_del), режим (mode_pick, mode_save),
+                    # id участка (seg*), минуты кулдауна (seg_cd_set)

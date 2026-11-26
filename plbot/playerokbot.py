@@ -51,6 +51,7 @@ from .stats import (
 )
 from .raise_times import (
     cleanup_completed_timings,
+    get_last_raise_time,
     get_msk_now,
     get_raise_times,
     is_pack_timing_completed,
@@ -531,8 +532,10 @@ class PlayerokBot:
 
                     # Тип настройки «Паки»: у каждого пака свои лоты и своё расписание
                     if raise_packs.normalize_source(auto_raise_config.get("source")) == raise_packs.SOURCE_PACKS:
+                        started = time.monotonic()
                         await self._auto_raise_packs_tick()
-                        await asyncio.sleep(60)
+                        # Раз в минуту от начала круга: в режиме «По позиции» места лотов проверяются ежеминутно
+                        await asyncio.sleep(max(1.0, 60 - (time.monotonic() - started)))
                         continue
 
                     # Получаем настройки
@@ -1317,18 +1320,31 @@ class PlayerokBot:
         msk_date = now_msk.strftime("%Y-%m-%d")
         now_minutes = now_msk.hour * 60 + now_msk.minute
         cleanup_completed_timings(msk_date)
+        # Номер круга: «две проверки подряд» в режиме «По позиции» — это два соседних круга
+        tick = getattr(self, "_raise_position_tick", 0) + 1
+        self._raise_position_tick = tick
 
         # Паки, которым сейчас пора: интервальные — всегда (интервал проверяется по каждому лоту),
-        # по таймингу — если до ближайшего тайминга не больше 5 минут и сегодня он ещё не выполнялся
+        # по таймингу — если до ближайшего тайминга не больше 5 минут и сегодня он ещё не выполнялся,
+        # по позиции — если сейчас действует участок расписания с местом и нет паузы после изменений
         due_ids: set[str] = set()
         due_timings: dict[str, str] = {}
+        position_segments: dict[str, dict] = {}
         for pack in packs:
             if pack["mode"] == raise_packs.MODE_TIMING:
                 timing = raise_packs.due_timing(pack["timings"], now_minutes)
                 if timing is None or is_pack_timing_completed(msk_date, pack["id"], timing):
                     continue
                 due_timings[pack["id"]] = timing
+            elif pack["mode"] == raise_packs.MODE_POSITION:
+                if raise_packs.pause_left_seconds(pack) > 0:
+                    continue
+                segment = raise_packs.active_segment(pack["position_schedule"], now_minutes)
+                if segment is None or segment["position"] is None:
+                    continue
+                position_segments[pack["id"]] = segment
             due_ids.add(pack["id"])
+        self._cleanup_position_checks()
         if not due_ids:
             return
 
@@ -1341,6 +1357,9 @@ class PlayerokBot:
                 pack = raise_packs.find_pack_for_item(item.name, packs)
                 if pack is None or pack["id"] not in due_ids:
                     continue
+                if pack["mode"] == raise_packs.MODE_POSITION:
+                    await self._raise_by_position(item, pack, position_segments[pack["id"]], tick)
+                    continue
                 if pack["mode"] == raise_packs.MODE_INTERVAL and not should_raise_item(item.id, pack["interval_hours"]):
                     continue
                 self.logger.info(f"{Fore.CYAN}🔄 Поднимаю товар «{item.name}» (пак «{pack['name']}»)...")
@@ -1351,6 +1370,73 @@ class PlayerokBot:
 
         for pack_id, timing in due_timings.items():
             mark_pack_timing_completed(msk_date, pack_id, timing)
+
+    def _position_checks(self) -> dict:
+        """Последние проверки мест лотов в режиме «По позиции»: {id лота: {...}}. Хранится в памяти."""
+        checks = getattr(self, "_raise_position_checks", None)
+        if checks is None:
+            checks = self._raise_position_checks = {}
+        return checks
+
+    def get_lot_positions(self) -> dict:
+        """Копия последних проверенных мест лотов (для Telegram)."""
+        return {item_id: dict(entry) for item_id, entry in dict(self._position_checks()).items()}
+
+    def _cleanup_position_checks(self, max_age: float = 24 * 3600):
+        checks = self._position_checks()
+        border = time.time() - max_age
+        for item_id, entry in list(checks.items()):
+            if entry.get("checked_at", 0) < border:
+                checks.pop(item_id, None)
+
+    async def _raise_by_position(self, item, pack: dict, segment: dict, tick: int):
+        """
+        Режим «По позиции»: узнаёт место лота в категории и поднимает его, если лот ниже места участка
+        две проверки подряд и с его последнего поднятия прошёл кулдаун участка.
+        """
+        checks = self._position_checks()
+        await asyncio.sleep(1)  # пауза между запросами к Playerok
+        try:
+            place = getattr(self.account.get_item(item.id), "sequence", None)
+        except Exception as e:
+            self.logger.warning(f"{Fore.YELLOW}Не удалось узнать место товара «{item.name}»: {Fore.WHITE}{e}")
+            return
+        target = segment["position"]
+        previous = checks.get(item.id) or {}
+        in_row = (
+            previous.get("tick") == tick - 1
+            and previous.get("pack_id") == pack["id"]
+            and previous.get("marker") == pack["changed_at"]
+        )
+        if place is None or place <= target:
+            streak = 0
+        else:
+            streak = (previous.get("streak", 0) if in_row else 0) + 1
+        entry = {
+            "pack_id": pack["id"],
+            "marker": pack["changed_at"],
+            "tick": tick,
+            "name": item.name,
+            "position": place,
+            "target": target,
+            "streak": streak,
+            "checked_at": time.time(),
+            "raised_at": previous.get("raised_at"),
+        }
+        checks[item.id] = entry
+        if streak < raise_packs.POSITION_STREAK_REQUIRED:
+            return
+        # Кулдаун участка; паузы после изменения настроек пака в него не засчитываются
+        last_raise = get_last_raise_time(item.id)
+        if raise_packs.cooldown_left_seconds(pack, last_raise, segment["cooldown_minutes"]) > 0:
+            return
+        self.logger.info(
+            f"{Fore.CYAN}🔄 Поднимаю товар «{item.name}» (пак «{pack['name']}», место {place}, нужно ≤ {target})..."
+        )
+        if self.raise_item(item):
+            entry["streak"] = 0
+            entry["raised_at"] = time.time()
+        await asyncio.sleep(2)
 
     def raise_item(self, item: types.ItemProfile) -> bool:
         """

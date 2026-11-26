@@ -124,3 +124,7 @@ class RaisePacksStates(StatesGroup):
     waiting_for_pack_timings = State()
     waiting_for_pack_phrases = State()
     waiting_for_pack_phrases_file = State()
+    waiting_for_pack_first_position = State()
+    waiting_for_segment_time = State()
+    waiting_for_segment_position = State()
+    waiting_for_segment_cooldown = State()

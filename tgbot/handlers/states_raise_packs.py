@@ -1,5 +1,6 @@
 """
-Ввод данных для паков автоподнятия: название, интервал, тайминги, ключевые фразы.
+Ввод данных для паков автоподнятия: название, интервал, тайминги, ключевые фразы,
+место для режима «По позиции» и участки его расписания.
 При ошибке ввода состояние остаётся — можно сразу отправить исправленное значение.
 """
 import html
@@ -12,7 +13,15 @@ from core import raise_packs
 from .. import callback_datas as calls
 from .. import states
 from .. import templates as templ
-from ..callback_handlers.raise_packs import show_pack, show_phrases
+from ..callback_handlers.raise_packs import (
+    apply_segment_value,
+    prompt_segment_step,
+    segment_context,
+    show_cooldown_confirm,
+    show_pack,
+    show_phrases,
+    show_schedule,
+)
 from ..helpful import throw_float_message
 from .states_raise import _parse_timings_text
 
@@ -198,3 +207,72 @@ async def handler_raise_pack_phrases_file(message: types.Message, state: FSMCont
             "🔑 Ключевые фразы", "phrases", page,
         )
     await _add_phrases(message, state, text, "Файл")
+
+
+@router.message(states.RaisePacksStates.waiting_for_pack_first_position, F.text)
+async def handler_raise_pack_first_position(message: types.Message, state: FSMContext):
+    packs, pack = await _current_pack(message, state)
+    if pack is None:
+        return
+    try:
+        position = raise_packs.parse_position(message.text)
+    except ValueError as e:
+        return await throw_float_message(
+            state=state,
+            message=message,
+            text=templ.raise_pack_first_position_text(pack, error=str(e)),
+            reply_markup=templ.raise_pack_back_kb(
+                pack, "mode_pick", raise_packs.MODES.index(raise_packs.MODE_POSITION),
+            ),
+        )
+    await state.set_state(None)
+    pack["position_schedule"] = raise_packs.base_schedule(position)
+    pack["mode"] = raise_packs.MODE_POSITION
+    raise_packs.save_packs(packs)
+    await show_pack(
+        None, state, pack, packs, message=message,
+        notice=(
+            f"✅ Режим «По позиции»: весь день место ≤ {position}, кулдаун "
+            f"{raise_packs.format_cooldown(raise_packs.DEFAULT_COOLDOWN_MINUTES)}.\n"
+            "Участки времени со своим местом и кулдауном — в «📅 Расписание»."
+        ),
+    )
+
+
+_SEGMENT_PARSERS = {
+    "time": raise_packs.parse_time_range,
+    "position": raise_packs.parse_position,
+    "cooldown": raise_packs.parse_cooldown,
+}
+
+
+async def _segment_input(message: types.Message, state: FSMContext, field: str):
+    packs, pack = await _current_pack(message, state)
+    if pack is None:
+        return
+    ctx = segment_context(await state.get_data(), pack["id"])
+    if ctx is None:
+        await state.set_state(None)
+        return await show_schedule(None, state, pack, message=message, notice="❌ Ввод устарел — начните заново")
+    try:
+        value = _SEGMENT_PARSERS[field](message.text)
+    except ValueError as e:
+        return await prompt_segment_step(state, pack, ctx, field, message=message, error=str(e))
+    if field == "cooldown" and raise_packs.cooldown_needs_confirm(value):
+        return await show_cooldown_confirm(state, pack, ctx, value, message=message)
+    await apply_segment_value(state, pack, packs, ctx, field, value, message=message)
+
+
+@router.message(states.RaisePacksStates.waiting_for_segment_time, F.text)
+async def handler_raise_pack_segment_time(message: types.Message, state: FSMContext):
+    await _segment_input(message, state, "time")
+
+
+@router.message(states.RaisePacksStates.waiting_for_segment_position, F.text)
+async def handler_raise_pack_segment_position(message: types.Message, state: FSMContext):
+    await _segment_input(message, state, "position")
+
+
+@router.message(states.RaisePacksStates.waiting_for_segment_cooldown, F.text)
+async def handler_raise_pack_segment_cooldown(message: types.Message, state: FSMContext):
+    await _segment_input(message, state, "cooldown")
